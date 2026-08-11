@@ -1,20 +1,28 @@
-import { Link, Stack } from 'expo-router';
-import { StyleSheet } from 'react-native';
+/**
+ * Not Found Screen
+ */
+import React from 'react';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Colors, Spacing, Typography } from '../constants/Colors';
 
-import { Text, View } from '@/components/Themed';
+import { Ionicons } from '@expo/vector-icons';
 
 export default function NotFoundScreen() {
-  return (
-    <>
-      <Stack.Screen options={{ title: 'Oops!' }} />
-      <View style={styles.container}>
-        <Text style={styles.title}>This screen doesn't exist.</Text>
+  const router = useRouter();
+  const colors = Colors.dark;
 
-        <Link href="/" style={styles.link}>
-          <Text style={styles.linkText}>Go to home screen!</Text>
-        </Link>
-      </View>
-    </>
+  return (
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <Ionicons name="alert-circle-outline" size={48} color={colors.textMuted} />
+      <Text style={[styles.title, { color: colors.text }]}>Page Not Found</Text>
+      <Pressable
+        onPress={() => router.replace('/(tabs)' as any)}
+        style={[styles.button, { backgroundColor: colors.accent }]}
+      >
+        <Text style={styles.buttonText}>Go Home</Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -23,18 +31,20 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 20,
+    gap: Spacing.lg,
   },
   title: {
-    fontSize: 20,
-    fontWeight: 'bold',
+    fontSize: Typography.sizes.title2,
+    fontWeight: Typography.weights.bold,
   },
-  link: {
-    marginTop: 15,
-    paddingVertical: 15,
+  button: {
+    paddingHorizontal: Spacing['2xl'],
+    paddingVertical: Spacing.md,
+    borderRadius: 12,
   },
-  linkText: {
-    fontSize: 14,
-    color: '#2e78b7',
+  buttonText: {
+    color: '#FFF',
+    fontWeight: '600',
+    fontSize: Typography.sizes.body,
   },
 });

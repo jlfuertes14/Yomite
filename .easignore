@@ -1,0 +1,22 @@
+# EAS Build Ignore List
+# Strictly ignore all local environment & secret files from EAS Build upload
+.env
+.env.*
+.env.local
+.env.production
+.env.development
+*.env
+
+# Build & dependency caches
+node_modules/
+.expo/
+dist/
+web-build/
+
+# Credentials & keys
+*.jks
+*.p12
+*.pem
+*.key
+*.keystore
+*.mobileprovision
