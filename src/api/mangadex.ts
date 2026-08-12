@@ -19,6 +19,7 @@
  */
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { CacheManager } from '../utils/cacheManager';
 import type {
   Manga,
   Chapter,
@@ -34,6 +35,7 @@ const API_BASE = 'https://api.mangadex.org';
 const AUTH_BASE = 'https://auth.mangadex.org/realms/mangadex/protocol/openid-connect/token';
 const COVERS_BASE = 'https://uploads.mangadex.org/covers';
 const APP_USER_AGENT = 'MangaReaderApp/1.0.0';
+const POPULAR_NEW_TITLES_WINDOW_DAYS = 30;
 
 // Auth token storage keys
 const TOKEN_KEYS = {
@@ -111,11 +113,9 @@ export async function login(
   clientSecret: string
 ): Promise<boolean> {
   try {
-    // Save client credentials for refresh flow
     await AsyncStorage.setItem(TOKEN_KEYS.clientId, clientId);
     await AsyncStorage.setItem(TOKEN_KEYS.clientSecret, clientSecret);
 
-    // OAuth2 password grant — MUST be form-urlencoded, NOT JSON
     const formData = new URLSearchParams({
       grant_type: 'password',
       username,
@@ -132,7 +132,7 @@ export async function login(
     });
 
     const { access_token, refresh_token, expires_in } = res.data;
-    const expiry = Date.now() + (expires_in ?? 900) * 1000; // default 15 min
+    const expiry = Date.now() + (expires_in ?? 900) * 1000;
 
     await AsyncStorage.setItem(TOKEN_KEYS.access, access_token);
     if (refresh_token) await AsyncStorage.setItem(TOKEN_KEYS.refresh, refresh_token);
@@ -188,7 +188,6 @@ export async function getAccessToken(): Promise<string | null> {
   const expiry = await AsyncStorage.getItem(TOKEN_KEYS.expiry);
   if (!token) return null;
 
-  // Token expired? Refresh it
   if (expiry && Date.now() > parseInt(expiry, 10)) {
     return refreshAccessToken();
   }
@@ -205,8 +204,6 @@ export async function isAuthenticated(): Promise<boolean> {
 }
 
 // ─── Cover Art Helpers ────────────────────────────────────────────
-// Format: https://uploads.mangadex.org/covers/:mangaId/:filename.{256,512}.jpg
-// The full original filename is kept — thumbnail suffix is appended after the extension.
 
 export function getCoverUrl(
   mangaId: string,
@@ -254,16 +251,12 @@ export function getMangaDescription(manga: Manga): string {
 }
 
 // ─── Search & Discovery ──────────────────────────────────────────
-// Pornographic titles hidden by default.
-// Default order: latestUploadedChapter desc.
-// Tag filtering: includedTags mode = AND, excludedTags mode = OR.
 
 export async function searchManga(
   filters: SearchFilters,
   limit = 20,
   offset = 0
 ): Promise<{ data: Manga[]; total: number }> {
-  // API rule: offset + limit must not exceed 10,000
   if (offset + limit > 10000) {
     offset = Math.max(0, 10000 - limit);
   }
@@ -293,47 +286,119 @@ export async function searchManga(
   return { data: res.data.data, total: res.data.total ?? 0 };
 }
 
-export async function getPopularManga(limit = 10): Promise<Manga[]> {
+export async function getPopularManga(limit = 10, bypassCache = false): Promise<Manga[]> {
+  const createdAtSinceDate = new Date();
+  createdAtSinceDate.setUTCHours(0, 0, 0, 0);
+  createdAtSinceDate.setUTCDate(createdAtSinceDate.getUTCDate() - POPULAR_NEW_TITLES_WINDOW_DAYS);
+
+  // MangaDex's "Popular New Titles" is not a separate endpoint. It is a
+  // recent-title search sorted by follow count: new enough to be a fresh title,
+  // then popular within that window.
+  const createdAtSince = createdAtSinceDate.toISOString().slice(0, 19);
+  const cacheKey = `popular_new_titles_${limit}_${createdAtSince.slice(0, 10)}`;
+  if (!bypassCache) {
+    const cached = await CacheManager.get<Manga[]>(cacheKey);
+    if (cached) return cached;
+  }
+
   const res = await api.get<MangaDexResponse<Manga[]>>('/manga', {
     params: {
       limit,
       includes: ['cover_art', 'author', 'artist'],
       'contentRating[]': ['safe', 'suggestive'],
+      createdAtSince,
       'order[followedCount]': 'desc',
       hasAvailableChapters: true,
     },
   });
-  return res.data.data;
+
+  const data = res.data.data;
+  await CacheManager.set(cacheKey, data, 10 * 60 * 1000); // 10 min TTL
+  return data;
 }
 
-export async function getLatestUpdates(limit = 20): Promise<Manga[]> {
-  const res = await api.get<MangaDexResponse<Manga[]>>('/manga', {
+export async function getLatestUpdates(
+  limit = 24,
+  offset = 0,
+  bypassCache = false
+): Promise<{ data: Manga[]; total: number }> {
+  const cacheKey = `latest_updates_${limit}_${offset}`;
+  if (!bypassCache) {
+    const cached = await CacheManager.get<{ data: Manga[]; total: number }>(cacheKey);
+    if (cached) return cached;
+  }
+
+  // The manga sort field is only an index of each title's latest chapter and
+  // does not expose that chapter's timestamp. Use the chapter list instead so
+  // "Latest Updates" is ordered by the actual date users can read the chapter.
+  //
+  // Avoid publishAt for this feed: some chapters have far-future publishAt
+  // values while their readableAt/uploaded date is years old, which makes old
+  // uploads appear as the latest results.
+  const chapterRes = await api.get<MangaDexResponse<Chapter[]>>('/chapter', {
     params: {
-      limit,
-      includes: ['cover_art', 'author', 'artist'],
-      'contentRating[]': ['safe', 'suggestive'],
-      'order[latestUploadedChapter]': 'desc',
-      hasAvailableChapters: true,
+      // Fetch extra rows because several chapters can belong to one manga.
+      limit: Math.min(100, Math.max(limit * 4, 50)),
+      offset,
+      includes: ['manga', 'scanlation_group', 'user'],
+      'contentRating[]': ['safe', 'suggestive', 'erotica'],
+      'translatedLanguage[]': ['en'],
+      'order[readableAt]': 'desc',
     },
   });
-  return res.data.data;
+
+  const mangaIds: string[] = [];
+  const seen = new Set<string>();
+  for (const chapter of chapterRes.data.data) {
+    const mangaId = chapter.relationships?.find((rel) => rel.type === 'manga')?.id;
+    if (mangaId && !seen.has(mangaId)) {
+      seen.add(mangaId);
+      mangaIds.push(mangaId);
+      if (mangaIds.length >= limit) break;
+    }
+  }
+
+  const data = (await Promise.all(mangaIds.map(async (mangaId) => {
+    try {
+      return await getMangaDetails(mangaId);
+    } catch {
+      return null;
+    }
+  }))).filter((manga): manga is Manga => manga !== null);
+
+  const result = { data, total: chapterRes.data.total ?? data.length };
+  await CacheManager.set(cacheKey, result, 5 * 60 * 1000); // 5 min TTL
+  return result;
 }
 
-export async function getRecentlyAdded(limit = 20): Promise<Manga[]> {
+export async function getRecentlyAdded(
+  limit = 24,
+  offset = 0,
+  bypassCache = false
+): Promise<{ data: Manga[]; total: number }> {
+  const cacheKey = `recently_added_${limit}_${offset}`;
+  if (!bypassCache) {
+    const cached = await CacheManager.get<{ data: Manga[]; total: number }>(cacheKey);
+    if (cached) return cached;
+  }
+
   const res = await api.get<MangaDexResponse<Manga[]>>('/manga', {
     params: {
       limit,
+      offset,
       includes: ['cover_art', 'author', 'artist'],
-      'contentRating[]': ['safe', 'suggestive'],
+      'contentRating[]': ['safe', 'suggestive', 'erotica'],
       'order[createdAt]': 'desc',
       hasAvailableChapters: true,
     },
   });
-  return res.data.data;
+
+  const result = { data: res.data.data, total: res.data.total ?? 0 };
+  await CacheManager.set(cacheKey, result, 5 * 60 * 1000); // 5 min TTL
+  return result;
 }
 
 export async function getRandomManga(): Promise<Manga> {
-  // Rate limit: 60 req/min for /manga/random
   const res = await api.get<MangaDexResponse<Manga>>('/manga/random', {
     params: {
       includes: ['cover_art', 'author', 'artist'],
@@ -346,17 +411,31 @@ export async function getRandomManga(): Promise<Manga> {
 // ─── Manga Details ───────────────────────────────────────────────
 
 export async function getMangaDetails(mangaId: string): Promise<Manga> {
+  const cacheKey = `manga_detail_${mangaId}`;
+  const cached = await CacheManager.get<Manga>(cacheKey);
+  if (cached) return cached;
+
   const res = await api.get<MangaDexResponse<Manga>>(`/manga/${mangaId}`, {
     params: { includes: ['cover_art', 'author', 'artist'] },
   });
-  return res.data.data;
+
+  const data = res.data.data;
+  await CacheManager.set(cacheKey, data, 30 * 60 * 1000); // 30 min TTL
+  return data;
 }
 
 export async function getChapterDetails(chapterId: string): Promise<Chapter> {
+  const cacheKey = `chapter_detail_${chapterId}`;
+  const cached = await CacheManager.get<Chapter>(cacheKey);
+  if (cached) return cached;
+
   const res = await api.get<MangaDexResponse<Chapter>>(`/chapter/${chapterId}`, {
     params: { includes: ['manga', 'scanlation_group'] },
   });
-  return res.data.data;
+
+  const data = res.data.data;
+  await CacheManager.set(cacheKey, data, 30 * 60 * 1000); // 30 min TTL
+  return data;
 }
 
 // ─── Manga Statistics ────────────────────────────────────────────
@@ -377,9 +456,17 @@ export interface MangaStatistics {
 export async function getMangaStatistics(
   mangaId: string
 ): Promise<MangaStatistics | null> {
+  const cacheKey = `stats_${mangaId}`;
+  const cached = await CacheManager.get<MangaStatistics>(cacheKey);
+  if (cached) return cached;
+
   try {
     const res = await api.get(`/statistics/manga/${mangaId}`);
-    return res.data.statistics?.[mangaId] ?? null;
+    const stats = res.data.statistics?.[mangaId] ?? null;
+    if (stats) {
+      await CacheManager.set(cacheKey, stats, 15 * 60 * 1000); // 15 min TTL
+    }
+    return stats;
   } catch {
     return null;
   }
@@ -389,20 +476,39 @@ export async function getBatchMangaStatistics(
   mangaIds: string[]
 ): Promise<Record<string, MangaStatistics>> {
   if (!mangaIds || mangaIds.length === 0) return {};
+
+  const missingIds: string[] = [];
+  const resultStats: Record<string, MangaStatistics> = {};
+
+  for (const id of mangaIds) {
+    const cached = await CacheManager.get<MangaStatistics>(`stats_${id}`);
+    if (cached) {
+      resultStats[id] = cached;
+    } else {
+      missingIds.push(id);
+    }
+  }
+
+  if (missingIds.length === 0) return resultStats;
+
   try {
     const params = new URLSearchParams();
-    mangaIds.forEach((id) => params.append('manga[]', id));
+    missingIds.forEach((id) => params.append('manga[]', id));
     const res = await api.get(`/statistics/manga?${params.toString()}`);
-    return res.data.statistics ?? {};
+    const fetchedStats = res.data.statistics ?? {};
+
+    for (const [id, stat] of Object.entries(fetchedStats)) {
+      resultStats[id] = stat as MangaStatistics;
+      await CacheManager.set(`stats_${id}`, stat, 15 * 60 * 1000);
+    }
+
+    return resultStats;
   } catch {
-    return {};
+    return resultStats;
   }
 }
 
 // ─── Chapters ────────────────────────────────────────────────────
-// Uses /manga/{id}/feed (recommended by docs) instead of /chapter?manga=
-// Supports: translatedLanguage, order, includeEmptyPages,
-// includeFuturePublishAt, includeExternalUrl filters.
 
 export async function getMangaChapters(
   mangaId: string,
@@ -411,35 +517,44 @@ export async function getMangaChapters(
   offset = 0,
   order: 'asc' | 'desc' = 'asc'
 ): Promise<{ data: Chapter[]; total: number }> {
-  // Clamp to API max: offset + limit <= 10,000
   if (offset + limit > 10000) {
     offset = Math.max(0, 10000 - limit);
   }
 
+  const cacheKey = `manga_chapters_${mangaId}_${language}_${limit}_${offset}_${order}`;
+  const cached = await CacheManager.get<{ data: Chapter[]; total: number }>(cacheKey);
+  if (cached) return cached;
+
+  const languages = language === 'en' ? ['en', 'en-us', 'en-gb'] : [language];
+
   const res = await api.get<MangaDexResponse<Chapter[]>>(`/manga/${mangaId}/feed`, {
     params: {
-      'translatedLanguage[]': [language],
-      limit: Math.min(limit, 500), // feed endpoints allow up to 500
+      'translatedLanguage[]': languages,
+      limit: Math.min(limit, 500),
       offset,
       includes: ['scanlation_group', 'user'],
       'order[chapter]': order,
-      'contentRating[]': ['safe', 'suggestive'],
-      includeExternalUrl: 0, // exclude external-only chapters
+      'contentRating[]': ['safe', 'suggestive', 'erotica'],
     },
   });
-  return { data: res.data.data, total: res.data.total ?? 0 };
+
+  const result = { data: res.data.data, total: res.data.total ?? 0 };
+  await CacheManager.set(cacheKey, result, 10 * 60 * 1000); // 10 min TTL
+  return result;
 }
 
-// ─── Chapter Pages (MangaDex@Home) ──────────────────────────────
+// ─── Chapter Pages (MangaDex@Home Caching) ──────────────────────
 // Rate limit: 40 req/min for /at-home/server/{id}
-// baseUrl validity: ~15 minutes (re-fetch if 403 on image load)
-// DO NOT send auth headers when fetching images from baseUrl.
-// URL format: baseUrl/quality/chapterHash/filename
+// baseUrl validity: ~15 minutes. We cache pages for 15 mins.
 
 export async function getChapterPages(
   chapterId: string,
   dataSaver = false
 ): Promise<{ pages: string[]; hash: string; baseUrl: string }> {
+  const cacheKey = `chapter_pages_${chapterId}_${dataSaver ? 'saver' : 'full'}`;
+  const cached = await CacheManager.get<{ pages: string[]; hash: string; baseUrl: string }>(cacheKey);
+  if (cached) return cached;
+
   const res = await api.get<{ baseUrl: string; chapter: ChapterPages['chapter'] }>(
     `/at-home/server/${chapterId}`
   );
@@ -447,12 +562,14 @@ export async function getChapterPages(
   const quality = dataSaver ? 'data-saver' : 'data';
   const files = dataSaver ? chapter.dataSaver : chapter.data;
   const pages = files.map((f) => `${baseUrl}/${quality}/${chapter.hash}/${f}`);
-  return { pages, hash: chapter.hash, baseUrl };
+
+  const result = { pages, hash: chapter.hash, baseUrl };
+  await CacheManager.set(cacheKey, result, 14 * 60 * 1000); // 14 min TTL (safe margin under 15 min expiration)
+  return result;
 }
 
 // ─── Authenticated Endpoints ─────────────────────────────────────
 
-// Set reading status (requires auth)
 export async function setMangaReadingStatus(
   mangaId: string,
   status: 'reading' | 'on_hold' | 'plan_to_read' | 'dropped' | 're_reading' | 'completed' | null
@@ -465,7 +582,6 @@ export async function setMangaReadingStatus(
   }
 }
 
-// Follow manga (requires auth)
 export async function followManga(mangaId: string): Promise<boolean> {
   try {
     await api.post(`/manga/${mangaId}/follow`);
@@ -475,7 +591,6 @@ export async function followManga(mangaId: string): Promise<boolean> {
   }
 }
 
-// Unfollow manga (requires auth)
 export async function unfollowManga(mangaId: string): Promise<boolean> {
   try {
     await api.delete(`/manga/${mangaId}/follow`);
@@ -485,7 +600,6 @@ export async function unfollowManga(mangaId: string): Promise<boolean> {
   }
 }
 
-// Get followed manga feed (requires auth)
 export async function getFollowedMangaFeed(
   limit = 100,
   offset = 0
@@ -502,7 +616,6 @@ export async function getFollowedMangaFeed(
   return { data: res.data.data, total: res.data.total ?? 0 };
 }
 
-// Mark chapter as read (requires auth)
 export async function markChapterRead(chapterId: string): Promise<boolean> {
   try {
     await api.post(`/chapter/${chapterId}/read`);
@@ -515,8 +628,14 @@ export async function markChapterRead(chapterId: string): Promise<boolean> {
 // ─── Tags ────────────────────────────────────────────────────────
 
 export async function getTags(): Promise<MangaTag[]> {
+  const cacheKey = 'mangadex_tags';
+  const cached = await CacheManager.get<MangaTag[]>(cacheKey);
+  if (cached) return cached;
+
   const res = await api.get<MangaDexResponse<MangaTag[]>>('/manga/tag');
-  return res.data.data;
+  const data = res.data.data;
+  await CacheManager.set(cacheKey, data, 24 * 60 * 60 * 1000); // 24 hours TTL
+  return data;
 }
 
 // ─── URL Parsing ─────────────────────────────────────────────────

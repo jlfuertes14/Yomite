@@ -2,21 +2,29 @@
   "expo": {
     "name": "Yomite",
     "slug": "yomite",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "mangaapp",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#09090B",
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "package": "com.yomite.mangaapp",
+      "backgroundColor": "#09090B",
       "adaptiveIcon": {
         "backgroundColor": "#09090B",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png"
-      }
+      },
+      "permissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -38,7 +46,17 @@
           }
         }
       ],
-      "expo-asset"
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow Yomite to save downloaded manga chapters to your device storage.",
+          "savePhotosPermission": "Allow Yomite to save downloaded manga chapters to your device storage.",
+          "isAudioPermissionRequired": false,
+          "isVideoPermissionRequired": false
+        }
+      ],
+      "expo-asset",
+      "expo-system-ui"
     ],
     "experiments": {
       "typedRoutes": true

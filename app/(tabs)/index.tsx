@@ -3,46 +3,51 @@
  * Features: Embedded Left Navigation Column (Non-Modal), MangaDex Filter Modal,
  * Popular New Titles Hero Banner, Latest Updates, Recently Added, Random Manga.
  */
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TextInput,
-  Pressable,
-  ActivityIndicator,
-  RefreshControl,
-  Alert,
-  useWindowDimensions,
-  Animated,
-  Easing,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  getPopularManga,
-  getLatestUpdates,
-  getRecentlyAdded,
-  getRandomManga,
-  searchManga,
-  getMangaTitle,
-  getMangaDescription,
-  extractCoverFileName,
-  getCoverUrl,
-  extractAuthorName,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Easing,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Colors, Radius, Spacing, Typography } from '../../constants/Colors';
+import { useThemeColors } from '../../src/hooks/useThemeColor';
+import {
   extractArtistName,
+  extractAuthorName,
+  extractCoverFileName,
   getBatchMangaStatistics,
+  getCoverUrl,
+  getLatestUpdates,
+  getMangaDescription,
+  getMangaTitle,
+  getPopularManga,
+  getRandomManga,
+  getRecentlyAdded,
   MangaStatistics,
+  searchManga,
 } from '../../src/api/mangadex';
-import { MangaCard, CARD_GAP } from '../../src/components/MangaCard';
-import { Skeleton } from '../../src/components/Skeleton';
 import { AdvancedSearchModal } from '../../src/components/AdvancedSearchModal';
+import { CARD_GAP, MangaCard } from '../../src/components/MangaCard';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
+import { Skeleton } from '../../src/components/Skeleton';
+import { ConfirmationModal } from '../../src/components/ConfirmationModal';
+import { OfflineState } from '../../src/components/OfflineState';
+import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
+import { formatChapterDate } from '../../src/utils/date';
 import type { Manga, SearchFilters } from '../../src/types';
 
 type VectorIcon = React.ComponentProps<typeof Ionicons>['name'];
@@ -55,26 +60,58 @@ interface SidebarNavItem {
   badge?: string;
 }
 
+const PAGE_SIZE = 24;
+const POPULAR_TOP_LIMIT = 10;
+
 export default function DiscoverScreen() {
   const router = useRouter();
-  const colors = Colors.dark;
+  const colors = useThemeColors();
+  const { isOffline } = useNetworkStatus();
   const { width: windowWidth } = useWindowDimensions();
-
-  // Desktop vs Mobile mode breakpoint (768px)
   const isDesktop = windowWidth >= 768;
 
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeFeedTitle, setActiveFeedTitle] = useState<'Latest Updates' | 'Recently Added' | 'Search Results'>('Latest Updates');
-  const [activeNavId, setActiveNavId] = useState<string>('latest');
+  // Responsive Layout Constants
+  const sidebarWidth = isDesktop ? 260 : 0;
 
+  // Data states
   const [popular, setPopular] = useState<Manga[]>([]);
   const [feedManga, setFeedManga] = useState<Manga[]>([]);
-  const [searchResults, setSearchResults] = useState<Manga[]>([]);
   const [mangaStatsMap, setMangaStatsMap] = useState<Record<string, MangaStatistics>>({});
+  const [totalMangaCount, setTotalMangaCount] = useState<number>(0);
+  const [currentPage, setCurrentPage] = useState<number>(1);
   const [isLoadingPopular, setIsLoadingPopular] = useState(true);
   const [isLoadingFeed, setIsLoadingFeed] = useState(true);
-  const [isSearching, setIsSearching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Search & Navigation Feed States
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Manga[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [activeFeedTitle, setActiveFeedTitle] = useState('Recently Added');
+  const [activeNavId, setActiveNavId] = useState('recently_added');
+
+  // Retractable Sidebar states
+  const [sidebarVisible, setSidebarVisible] = useState(false); // Inline desktop sidebar
+  const [mobileDrawerVisible, setMobileDrawerVisible] = useState(false); // Mobile slide modal drawer
+  const [advancedSearchVisible, setAdvancedSearchVisible] = useState(false);
+  const [activeFilters, setActiveFilters] = useState<SearchFilters | null>(null);
+
+  // Custom Confirmation Dialog State
+  const [confirmModalConfig, setConfirmModalConfig] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    iconName?: keyof typeof Ionicons.glyphMap;
+    confirmText?: string;
+    cancelText?: string;
+    confirmVariant?: 'destructive' | 'primary' | 'success';
+    onConfirm: () => void;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
 
   const fetchStatsForList = async (list: Manga[]) => {
     if (!list || list.length === 0) return;
@@ -82,12 +119,6 @@ export default function DiscoverScreen() {
     const stats = await getBatchMangaStatistics(ids);
     setMangaStatsMap((prev) => ({ ...prev, ...stats }));
   };
-
-  // Retractable Sidebar states
-  const [sidebarVisible, setSidebarVisible] = useState(false); // Inline desktop sidebar
-  const [mobileDrawerVisible, setMobileDrawerVisible] = useState(false); // Mobile slide modal drawer
-  const [advancedSearchVisible, setAdvancedSearchVisible] = useState(false);
-  const [activeFilters, setActiveFilters] = useState<SearchFilters | null>(null);
 
   // Toggle menu handler (Mobile = Modal Slide Drawer, Desktop = Embedded Inline Sidebar)
   const handleToggleMenu = () => {
@@ -127,15 +158,17 @@ export default function DiscoverScreen() {
     try {
       setIsLoadingPopular(true);
       setIsLoadingFeed(true);
-      const [pop, lat] = await Promise.all([
-        getPopularManga(10),
-        getLatestUpdates(30),
+      setCurrentPage(1);
+      const [pop, feedResult] = await Promise.all([
+        getPopularManga(POPULAR_TOP_LIMIT),
+        getRecentlyAdded(24, 0),
       ]);
       setPopular(pop);
-      setFeedManga(lat);
-      setActiveFeedTitle('Latest Updates');
-      setActiveNavId('latest');
-      fetchStatsForList([...pop, ...lat]);
+      setFeedManga(feedResult.data);
+      setTotalMangaCount(feedResult.total);
+      setActiveFeedTitle('Recently Added');
+      setActiveNavId('recently_added');
+      fetchStatsForList([...pop, ...feedResult.data]);
     } catch (err) {
       console.error('Failed to fetch discover data:', err);
     } finally {
@@ -157,11 +190,30 @@ export default function DiscoverScreen() {
     return () => clearInterval(interval);
   }, [popular.length]);
 
+  const isShowingSearch = searchQuery.trim().length > 0 || activeFilters !== null;
+
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchData();
+    setCurrentPage(1);
+    const feedRequest =
+      activeNavId === 'latest'
+        ? getLatestUpdates(PAGE_SIZE, 0, true)
+        : getRecentlyAdded(PAGE_SIZE, 0, true);
+    const [pop, feedResult] = await Promise.all([
+      getPopularManga(POPULAR_TOP_LIMIT, true),
+      feedRequest,
+    ]);
+    setPopular(pop);
+    if (!isShowingSearch && activeNavId === 'popular') {
+      setTotalMangaCount(pop.length);
+      fetchStatsForList(pop);
+    } else {
+      setFeedManga(feedResult.data);
+      setTotalMangaCount(feedResult.total);
+      fetchStatsForList([...pop, ...feedResult.data]);
+    }
     setRefreshing(false);
-  }, [fetchData]);
+  }, [activeNavId, isShowingSearch]);
 
   const handleSearch = useCallback(async () => {
     if (!searchQuery.trim()) {
@@ -172,9 +224,11 @@ export default function DiscoverScreen() {
     }
     try {
       setIsSearching(true);
+      setCurrentPage(1);
       setActiveFeedTitle('Search Results');
-      const result = await searchManga({ title: searchQuery.trim() }, 36);
+      const result = await searchManga({ title: searchQuery.trim() }, PAGE_SIZE, 0);
       setSearchResults(result.data);
+      setTotalMangaCount(result.total);
       fetchStatsForList(result.data);
     } catch (err) {
       console.error('Search failed:', err);
@@ -191,39 +245,68 @@ export default function DiscoverScreen() {
   const handleApplyAdvancedSearch = async (filters: SearchFilters) => {
     try {
       setIsSearching(true);
+      setCurrentPage(1);
       setActiveFilters(filters);
       setActiveFeedTitle('Search Results');
       setActiveNavId('advanced_search');
       setSidebarVisible(false);
-      const result = await searchManga(filters, 36);
+      const result = await searchManga(filters, PAGE_SIZE, 0);
       setSearchResults(result.data);
+      setTotalMangaCount(result.total);
       fetchStatsForList(result.data);
     } catch (err) {
-      Alert.alert('Search Error', 'Failed to execute advanced search. Please try again.');
+      setConfirmModalConfig({
+        visible: true,
+        title: 'Search Failed',
+        message: 'Failed to execute search. Please check your internet connection and try again.',
+        iconName: 'search-outline',
+        confirmText: 'OK',
+        cancelText: '',
+        confirmVariant: 'primary',
+        onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
+      });
     } finally {
       setIsSearching(false);
     }
   };
 
-  const handleClearAdvancedSearch = () => {
+  const clearSearchState = () => {
     setActiveFilters(null);
     setSearchQuery('');
     setSearchResults([]);
-    setActiveFeedTitle('Latest Updates');
-    setActiveNavId('latest');
+  };
+
+  const handleClearAdvancedSearch = () => {
+    clearSearchState();
+    setActiveFeedTitle('Recently Added');
+    setActiveNavId('recently_added');
   };
 
   // Sidebar Actions
+  const handleSelectPopular = () => {
+    clearSearchState();
+    setCurrentPage(1);
+    setActiveFeedTitle('Popular New Titles');
+    setActiveNavId('popular');
+    setSidebarVisible(false);
+    setMobileDrawerVisible(false);
+    setTotalMangaCount(popular.length);
+    fetchStatsForList(popular);
+  };
+
   const handleSelectLatest = async () => {
     try {
       setIsLoadingFeed(true);
+      setCurrentPage(1);
+      clearSearchState();
       setActiveFeedTitle('Latest Updates');
       setActiveNavId('latest');
       setSidebarVisible(false);
-      handleClearAdvancedSearch();
-      const data = await getLatestUpdates(30);
-      setFeedManga(data);
-      fetchStatsForList(data);
+      setMobileDrawerVisible(false);
+      const result = await getLatestUpdates(PAGE_SIZE, 0);
+      setFeedManga(result.data);
+      setTotalMangaCount(result.total);
+      fetchStatsForList(result.data);
     } catch (err) {
       console.error('Failed to load latest updates:', err);
     } finally {
@@ -234,17 +317,52 @@ export default function DiscoverScreen() {
   const handleSelectRecentlyAdded = async () => {
     try {
       setIsLoadingFeed(true);
+      setCurrentPage(1);
+      clearSearchState();
       setActiveFeedTitle('Recently Added');
       setActiveNavId('recently_added');
       setSidebarVisible(false);
-      handleClearAdvancedSearch();
-      const data = await getRecentlyAdded(30);
-      setFeedManga(data);
-      fetchStatsForList(data);
+      setMobileDrawerVisible(false);
+      const result = await getRecentlyAdded(PAGE_SIZE, 0);
+      setFeedManga(result.data);
+      setTotalMangaCount(result.total);
+      fetchStatsForList(result.data);
     } catch (err) {
       console.error('Failed to load recently added:', err);
     } finally {
       setIsLoadingFeed(false);
+    }
+  };
+
+  // Page Change Handlers
+  const handlePageChange = async (newPage: number) => {
+    try {
+      const offset = (newPage - 1) * PAGE_SIZE;
+      setCurrentPage(newPage);
+
+      if (searchResults.length > 0 || activeFilters || searchQuery.trim()) {
+        setIsSearching(true);
+        const filters: SearchFilters = activeFilters ?? (searchQuery.trim() ? { title: searchQuery.trim() } : {});
+        const result = await searchManga(filters, PAGE_SIZE, offset);
+        setSearchResults(result.data);
+        setTotalMangaCount(result.total);
+        fetchStatsForList(result.data);
+        setIsSearching(false);
+      } else {
+        setIsLoadingFeed(true);
+        let result: { data: Manga[]; total: number };
+        if (activeNavId === 'latest') {
+          result = await getLatestUpdates(PAGE_SIZE, offset);
+        } else {
+          result = await getRecentlyAdded(PAGE_SIZE, offset);
+        }
+        setFeedManga(result.data);
+        setTotalMangaCount(result.total);
+        fetchStatsForList(result.data);
+        setIsLoadingFeed(false);
+      }
+    } catch (err) {
+      console.error('Page change failed:', err);
     }
   };
 
@@ -257,7 +375,16 @@ export default function DiscoverScreen() {
         router.push(`/manga/${randomManga.id}` as any);
       }
     } catch (err) {
-      Alert.alert('Error', 'Failed to fetch a random manga. Please try again.');
+      setConfirmModalConfig({
+        visible: true,
+        title: 'Random Selection Failed',
+        message: 'Failed to fetch a random title from MangaDex. Please try again.',
+        iconName: 'dice-outline',
+        confirmText: 'OK',
+        cancelText: '',
+        confirmVariant: 'primary',
+        onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
+      });
     }
   };
 
@@ -283,7 +410,6 @@ export default function DiscoverScreen() {
     setHeroIndex((prev) => (prev - 1 + popular.length) % popular.length);
   }, [popular.length]);
 
-  const isShowingSearch = searchQuery.trim().length > 0 || activeFilters !== null;
   const currentHeroManga = popular[heroIndex] ?? null;
 
   const navItems: SidebarNavItem[] = [
@@ -301,10 +427,7 @@ export default function DiscoverScreen() {
       id: 'popular',
       label: 'Popular New Titles',
       icon: 'sparkles-outline',
-      action: () => {
-        setActiveNavId('popular');
-        setSidebarVisible(false);
-      },
+      action: handleSelectPopular,
     },
     {
       id: 'latest',
@@ -427,9 +550,10 @@ export default function DiscoverScreen() {
             <View style={styles.headerLeft}>
               <Pressable
                 onPress={handleToggleMenu}
-                style={[styles.menuButton, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+                style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1 }]}
+                hitSlop={8}
               >
-                <Ionicons name="menu" size={20} color={colors.text} />
+                <Ionicons name="menu" size={26} color={colors.text} />
               </Pressable>
               <Text style={[styles.appTitle, { color: colors.text }]}>Discover</Text>
             </View>
@@ -437,9 +561,10 @@ export default function DiscoverScreen() {
             <View style={styles.headerRight}>
               <Pressable
                 onPress={() => setAdvancedSearchVisible(true)}
-                style={[styles.filterButton, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+                style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1 }]}
+                hitSlop={8}
               >
-                <Ionicons name="options-outline" size={16} color={colors.accent} />
+                <Ionicons name="options-outline" size={24} color={colors.accent} />
               </Pressable>
             </View>
           </View>
@@ -483,16 +608,22 @@ export default function DiscoverScreen() {
             </View>
           )}
 
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={handleRefresh}
-                tintColor={colors.accent}
-              />
-            }
-          >
+          {/* Compact Offline Notification Banner when device is offline */}
+          {isOffline && <OfflineState compact />}
+
+          {isOffline && feedManga.length === 0 ? (
+            <OfflineState onRetry={handleRefresh} />
+          ) : (
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={handleRefresh}
+                  tintColor={colors.accent}
+                />
+              }
+            >
             {isShowingSearch ? (
               /* ─── Search Results ─── */
               <View style={styles.section}>
@@ -509,21 +640,170 @@ export default function DiscoverScreen() {
                     </Text>
                   </View>
                 ) : (
-                  <View style={styles.mangaGrid}>
-                    {searchResults.map((manga) => {
+                  <>
+                    <View style={styles.mangaGrid}>
+                      {searchResults.map((manga, idx) => {
+                        const stat = mangaStatsMap[manga.id];
+                        const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
+                        return (
+                          <MangaCard
+                            key={manga.id}
+                            id={manga.id}
+                            index={idx}
+                            title={getMangaTitle(manga)}
+                            coverUrl={getMangaCover(manga)}
+                            author={extractAuthorName(manga)}
+                            rating={ratingVal}
+                            follows={stat?.follows ?? null}
+                            onPress={navigateToManga}
+                          />
+                        );
+                      })}
+                    </View>
+
+                    {/* Search Results Pagination */}
+                    {searchResults.length > 0 && totalMangaCount > PAGE_SIZE && (
+                      <View style={styles.paginationRow}>
+                        <Pressable
+                          disabled={currentPage <= 1 || isSearching}
+                          onPress={() => handlePageChange(currentPage - 1)}
+                          style={({ pressed }) => [
+                            styles.pageBtn,
+                            { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+                            (currentPage <= 1 || isSearching) && { opacity: 0.3 },
+                            pressed && { opacity: 0.7 },
+                          ]}
+                        >
+                          <Ionicons name="chevron-back" size={16} color={colors.text} />
+                          <Text style={[styles.pageBtnText, { color: colors.text }]}>Prev</Text>
+                        </Pressable>
+
+                        <View style={styles.pageIndicatorPill}>
+                          <Text style={[styles.pageIndicatorText, { color: colors.text }]}>
+                            Page {currentPage} of {Math.ceil(totalMangaCount / PAGE_SIZE)}
+                          </Text>
+                          <Text style={[styles.pageTotalCountText, { color: colors.textMuted }]}>
+                            ({totalMangaCount.toLocaleString()} titles)
+                          </Text>
+                        </View>
+
+                        <Pressable
+                          disabled={currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isSearching}
+                          onPress={() => handlePageChange(currentPage + 1)}
+                          style={({ pressed }) => [
+                            styles.pageBtn,
+                            { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+                            (currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isSearching) && { opacity: 0.3 },
+                            pressed && { opacity: 0.7 },
+                          ]}
+                        >
+                          <Text style={[styles.pageBtnText, { color: colors.text }]}>Next</Text>
+                          <Ionicons name="chevron-forward" size={16} color={colors.text} />
+                        </Pressable>
+                      </View>
+                    )}
+                  </>
+                )}
+              </View>
+            ) : activeNavId === 'popular' ? (
+              <View style={styles.section}>
+                <View style={styles.popularListHeader}>
+                  <View style={styles.popularHeaderCopy}>
+                    <View style={[styles.popularEyebrowPill, { backgroundColor: colors.accentSubtle, borderColor: colors.accent }]}>
+                      <Ionicons name="sparkles-outline" size={12} color={colors.accent} />
+                      <Text style={[styles.popularEyebrowText, { color: colors.accent }]}>Top 10</Text>
+                    </View>
+                    <Text style={[styles.popularScreenTitle, { color: colors.text }]}>
+                      Popular New Titles
+                    </Text>
+                    <Text style={[styles.popularScreenSubtext, { color: colors.textMuted }]}>
+                      Recently-created MangaDex titles ranked by follow count.
+                    </Text>
+                  </View>
+                </View>
+
+                {isLoadingPopular ? (
+                  <View style={styles.popularRankList}>
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <Skeleton key={i} width="100%" height={132} borderRadius={Radius.lg} />
+                    ))}
+                  </View>
+                ) : (
+                  <View style={styles.popularRankList}>
+                    {popular.slice(0, POPULAR_TOP_LIMIT).map((manga, idx) => {
                       const stat = mangaStatsMap[manga.id];
                       const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
+                      const tags = manga.attributes.tags.slice(0, 3);
                       return (
-                        <MangaCard
+                        <Pressable
                           key={manga.id}
-                          id={manga.id}
-                          title={getMangaTitle(manga)}
-                          coverUrl={getMangaCover(manga)}
-                          author={extractAuthorName(manga)}
-                          rating={ratingVal}
-                          follows={stat?.follows ?? null}
-                          onPress={navigateToManga}
-                        />
+                          onPress={() => navigateToManga(manga.id)}
+                          style={({ pressed }) => [
+                            styles.popularRankCard,
+                            {
+                              backgroundColor: colors.surface,
+                              borderColor: colors.border,
+                              opacity: pressed ? 0.82 : 1,
+                            },
+                          ]}
+                        >
+                          <View style={styles.popularRankBadge}>
+                            <Text style={styles.popularRankNumber}>{String(idx + 1).padStart(2, '0')}</Text>
+                          </View>
+
+                          <Image
+                            source={{ uri: getMangaCover(manga) ?? undefined }}
+                            style={styles.popularRankCover}
+                            contentFit="cover"
+                            transition={180}
+                          />
+
+                          <View style={styles.popularRankBody}>
+                            <View style={styles.popularRankTitleRow}>
+                              <Text style={[styles.popularRankTitle, { color: colors.text }]} numberOfLines={2}>
+                                {getMangaTitle(manga)}
+                              </Text>
+                              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                            </View>
+
+                            <Text style={[styles.popularRankAuthor, { color: colors.textMuted }]} numberOfLines={1}>
+                              {extractAuthorName(manga)}
+                            </Text>
+
+                            <View style={styles.popularRankMetaRow}>
+                              <View style={[styles.popularMetaPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                                <Ionicons name="people-outline" size={12} color={colors.accent} />
+                                <Text style={[styles.popularMetaText, { color: colors.textSecondary }]}>
+                                  {stat?.follows != null ? `${stat.follows.toLocaleString()} follows` : 'Follows loading'}
+                                </Text>
+                              </View>
+                              {ratingVal != null && (
+                                <View style={[styles.popularMetaPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                                  <Ionicons name="star" size={12} color="#F59E0B" />
+                                  <Text style={[styles.popularMetaText, { color: colors.textSecondary }]}>
+                                    {ratingVal.toFixed(1)}
+                                  </Text>
+                                </View>
+                              )}
+                              <View style={[styles.popularMetaPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                                <Ionicons name="calendar-outline" size={12} color={colors.textMuted} />
+                                <Text style={[styles.popularMetaText, { color: colors.textSecondary }]}>
+                                  Added {formatChapterDate(manga.attributes.createdAt)}
+                                </Text>
+                              </View>
+                            </View>
+
+                            <View style={styles.popularTagRow}>
+                              {tags.map((tag) => (
+                                <View key={tag.id} style={[styles.popularTagPill, { backgroundColor: colors.accentSubtle }]}>
+                                  <Text style={[styles.popularTagText, { color: colors.accent }]} numberOfLines={1}>
+                                    {tag.attributes.name.en ?? Object.values(tag.attributes.name)[0]}
+                                  </Text>
+                                </View>
+                              ))}
+                            </View>
+                          </View>
+                        </Pressable>
                       );
                     })}
                   </View>
@@ -645,13 +925,14 @@ export default function DiscoverScreen() {
                     </View>
                   ) : (
                     <View style={styles.mangaGrid}>
-                      {feedManga.map((manga) => {
+                      {feedManga.map((manga, idx) => {
                         const stat = mangaStatsMap[manga.id];
                         const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
                         return (
                           <MangaCard
                             key={manga.id}
                             id={manga.id}
+                            index={idx}
                             title={getMangaTitle(manga)}
                             coverUrl={getMangaCover(manga)}
                             author={extractAuthorName(manga)}
@@ -663,13 +944,56 @@ export default function DiscoverScreen() {
                       })}
                     </View>
                   )}
+
+                  {/* Feed Grid Pagination */}
+                  {feedManga.length > 0 && totalMangaCount > PAGE_SIZE && (
+                    <View style={styles.paginationRow}>
+                      <Pressable
+                        disabled={currentPage <= 1 || isLoadingFeed}
+                        onPress={() => handlePageChange(currentPage - 1)}
+                        style={({ pressed }) => [
+                          styles.pageBtn,
+                          { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+                          (currentPage <= 1 || isLoadingFeed) && { opacity: 0.3 },
+                          pressed && { opacity: 0.7 },
+                        ]}
+                      >
+                        <Ionicons name="chevron-back" size={16} color={colors.text} />
+                        <Text style={[styles.pageBtnText, { color: colors.text }]}>Prev</Text>
+                      </Pressable>
+
+                      <View style={styles.pageIndicatorPill}>
+                        <Text style={[styles.pageIndicatorText, { color: colors.text }]}>
+                          Page {currentPage} of {Math.ceil(totalMangaCount / PAGE_SIZE)}
+                        </Text>
+                        <Text style={[styles.pageTotalCountText, { color: colors.textMuted }]}>
+                          ({totalMangaCount.toLocaleString()} titles)
+                        </Text>
+                      </View>
+
+                      <Pressable
+                        disabled={currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isLoadingFeed}
+                        onPress={() => handlePageChange(currentPage + 1)}
+                        style={({ pressed }) => [
+                          styles.pageBtn,
+                          { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+                          (currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isLoadingFeed) && { opacity: 0.3 },
+                          pressed && { opacity: 0.7 },
+                        ]}
+                      >
+                        <Text style={[styles.pageBtnText, { color: colors.text }]}>Next</Text>
+                        <Ionicons name="chevron-forward" size={16} color={colors.text} />
+                      </Pressable>
+                    </View>
+                  )}
                 </View>
               </>
             )}
 
-            <View style={{ height: 40 }} />
-          </ScrollView>
-        </View>
+             <View style={{ height: 60 }} />
+           </ScrollView>
+           )}
+         </View>
       </View>
 
       {/* Mobile Left Overlay Slide Drawer Modal */}
@@ -680,7 +1004,7 @@ export default function DiscoverScreen() {
         onSelectLatest={handleSelectLatest}
         onSelectRecentlyAdded={handleSelectRecentlyAdded}
         onSelectRandom={handleSelectRandom}
-        onSelectPopular={() => setActiveNavId('popular')}
+        onSelectPopular={handleSelectPopular}
       />
 
       {/* Advanced Search Filter Modal */}
@@ -689,6 +1013,19 @@ export default function DiscoverScreen() {
         onClose={() => setAdvancedSearchVisible(false)}
         onApplyFilters={handleApplyAdvancedSearch}
         onRandomManga={handleSelectRandom}
+      />
+
+      {/* Sleek Custom Confirmation Dialog */}
+      <ConfirmationModal
+        visible={confirmModalConfig.visible}
+        title={confirmModalConfig.title}
+        message={confirmModalConfig.message}
+        iconName={confirmModalConfig.iconName || 'information-circle-outline'}
+        confirmVariant={confirmModalConfig.confirmVariant || 'primary'}
+        confirmText={confirmModalConfig.confirmText || 'OK'}
+        cancelText={confirmModalConfig.cancelText}
+        onConfirm={confirmModalConfig.onConfirm}
+        onCancel={() => setConfirmModalConfig((prev) => ({ ...prev, visible: false }))}
       />
     </SafeAreaView>
   );
@@ -809,19 +1146,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.xs,
   },
-  menuButton: {
-    width: 36,
-    height: 36,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  filterButton: {
-    width: 36,
-    height: 36,
-    borderRadius: Radius.md,
-    borderWidth: 1,
+  plainIconButton: {
+    padding: 4,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -994,6 +1320,121 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.headline,
     fontWeight: Typography.weights.bold,
   },
+  popularListHeader: {
+    paddingHorizontal: Spacing.lg,
+    marginBottom: Spacing.lg,
+  },
+  popularHeaderCopy: {
+    gap: Spacing.sm,
+  },
+  popularEyebrowPill: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+  },
+  popularEyebrowText: {
+    fontSize: 10,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  popularScreenTitle: {
+    fontSize: Typography.sizes.title1,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: -0.4,
+  },
+  popularScreenSubtext: {
+    fontSize: Typography.sizes.body,
+    lineHeight: 20,
+  },
+  popularRankList: {
+    paddingHorizontal: Spacing.lg,
+    gap: Spacing.md,
+  },
+  popularRankCard: {
+    minHeight: 132,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    padding: Spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  popularRankBadge: {
+    width: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  popularRankNumber: {
+    color: '#F43F5E',
+    fontSize: Typography.sizes.title3,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: -0.5,
+  },
+  popularRankCover: {
+    width: 74,
+    height: 104,
+    borderRadius: Radius.sm,
+    backgroundColor: '#1F1F23',
+  },
+  popularRankBody: {
+    flex: 1,
+    minWidth: 0,
+    gap: 7,
+  },
+  popularRankTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+  },
+  popularRankTitle: {
+    flex: 1,
+    fontSize: Typography.sizes.callout,
+    fontWeight: Typography.weights.bold,
+    lineHeight: 20,
+  },
+  popularRankAuthor: {
+    fontSize: Typography.sizes.footnote,
+    fontWeight: Typography.weights.medium,
+  },
+  popularRankMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  popularMetaPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  popularMetaText: {
+    fontSize: 10,
+    fontWeight: Typography.weights.semibold,
+  },
+  popularTagRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  popularTagPill: {
+    maxWidth: 120,
+    borderRadius: Radius.full,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  popularTagText: {
+    fontSize: 10,
+    fontWeight: Typography.weights.bold,
+  },
   mangaGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1008,5 +1449,41 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: Typography.sizes.body,
+  },
+
+  /* Pagination Bar */
+  paginationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: Spacing.lg,
+    marginBottom: Spacing.md,
+    marginHorizontal: Spacing.md,
+    gap: Spacing.sm,
+  },
+  pageBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    gap: 4,
+  },
+  pageBtnText: {
+    fontSize: Typography.sizes.footnote,
+    fontWeight: Typography.weights.semibold,
+  },
+  pageIndicatorPill: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.md,
+  },
+  pageIndicatorText: {
+    fontSize: Typography.sizes.footnote,
+    fontWeight: Typography.weights.bold,
+  },
+  pageTotalCountText: {
+    fontSize: 10,
   },
 });

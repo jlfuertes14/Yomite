@@ -1,11 +1,15 @@
 /**
- * Root Layout — App-wide providers and navigation stack
+ * Root Layout — App-wide providers and navigation stack with Dark Theme & dark transition backgrounds
  */
 import React, { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
+import * as SystemUI from 'expo-system-ui';
+import { ThemeProvider, DarkTheme } from 'expo-router/react-navigation';
+import { Colors } from '../constants/Colors';
+import { requestStoragePermissionOnLaunch } from '../src/services/storagePermission';
 
 SplashScreen.preventAutoHideAsync();
 SplashScreen.setOptions({
@@ -13,10 +17,27 @@ SplashScreen.setOptions({
   fade: true,
 });
 
+const YomiteDarkTheme = {
+  ...DarkTheme,
+  colors: {
+    ...DarkTheme.colors,
+    background: '#09090B',
+    card: '#09090B',
+    border: Colors.dark.border,
+    text: Colors.dark.text,
+  },
+};
+
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
   });
+
+  useEffect(() => {
+    // Set native Android window background to dark & request storage permissions on initial launch
+    SystemUI.setBackgroundColorAsync('#09090B').catch(() => {});
+    requestStoragePermissionOnLaunch();
+  }, []);
 
   useEffect(() => {
     if (fontsLoaded) {
@@ -27,12 +48,12 @@ export default function RootLayout() {
   if (!fontsLoaded) return null;
 
   return (
-    <>
+    <ThemeProvider value={YomiteDarkTheme}>
       <StatusBar style="light" />
       <Stack
         screenOptions={{
           headerShown: false,
-          contentStyle: { backgroundColor: '#0A0A0F' },
+          contentStyle: { backgroundColor: '#09090B' },
           animation: 'slide_from_right',
         }}
       >
@@ -42,6 +63,7 @@ export default function RootLayout() {
           options={{
             headerShown: false,
             animation: 'slide_from_right',
+            contentStyle: { backgroundColor: '#09090B' },
           }}
         />
         <Stack.Screen
@@ -50,6 +72,7 @@ export default function RootLayout() {
             headerShown: false,
             animation: 'fade',
             gestureEnabled: false,
+            contentStyle: { backgroundColor: '#000000' },
           }}
         />
         <Stack.Screen
@@ -57,6 +80,6 @@ export default function RootLayout() {
           options={{ title: 'Not Found', headerShown: true }}
         />
       </Stack>
-    </>
+    </ThemeProvider>
   );
 }

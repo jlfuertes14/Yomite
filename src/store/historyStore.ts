@@ -13,6 +13,7 @@ interface HistoryState {
   entries: HistoryEntry[];
   addEntry: (entry: Omit<HistoryEntry, 'timestamp'>) => void;
   removeEntry: (chapterId: string) => void;
+  removeEntries: (chapterIds: string[]) => void;
   clearHistory: () => void;
   getLatest: (count?: number) => HistoryEntry[];
   getMangaProgress: (mangaId: string) => HistoryEntry | undefined;
@@ -38,6 +39,14 @@ export const useHistoryStore = create<HistoryState>()(
         set((state) => ({
           entries: state.entries.filter((e) => e.chapterId !== chapterId),
         })),
+
+      removeEntries: (chapterIds) =>
+        set((state) => {
+          const setIds = new Set(chapterIds);
+          return {
+            entries: state.entries.filter((e) => !setIds.has(e.chapterId)),
+          };
+        }),
 
       clearHistory: () => set({ entries: [] }),
 

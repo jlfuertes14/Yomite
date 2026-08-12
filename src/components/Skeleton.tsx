@@ -4,6 +4,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, Animated, ViewStyle } from 'react-native';
 import { Colors, Radius } from '../../constants/Colors';
+import { useThemeColors } from '../hooks/useThemeColor';
 
 interface SkeletonProps {
   width: number | string;
@@ -13,7 +14,7 @@ interface SkeletonProps {
 }
 
 export function Skeleton({ width, height, borderRadius = Radius.md, style }: SkeletonProps) {
-  const colors = Colors.dark;
+  const colors = useThemeColors();
   const opacity = useRef(new Animated.Value(0.3)).current;
 
   useEffect(() => {

@@ -17,6 +17,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
+import { useThemeColors } from '../hooks/useThemeColor';
 import { getTags } from '../api/mangadex';
 import type { MangaTag, SearchFilters } from '../types';
 
@@ -85,7 +86,7 @@ export function AdvancedSearchModal({
   onApplyFilters,
   onRandomManga,
 }: AdvancedSearchModalProps) {
-  const colors = Colors.dark;
+  const colors = useThemeColors();
 
   const [title, setTitle] = useState('');
   const [tags, setTags] = useState<MangaTag[]>([]);

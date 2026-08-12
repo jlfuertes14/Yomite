@@ -1,15 +1,17 @@
 /**
  * Tab Layout - Yomite floating navigation.
  */
-import React from 'react';
-import { Tabs } from 'expo-router';
-import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
+import { Tabs } from 'expo-router';
+import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/Colors';
+import { useThemeColors } from '../../src/hooks/useThemeColor';
 
 type TabIcon = React.ComponentProps<typeof Ionicons>['name'];
+type FloatingTabBarProps = Parameters<NonNullable<React.ComponentProps<typeof Tabs>['tabBar']>>[0];
 
 interface TabConfig {
   name: string;
@@ -21,20 +23,31 @@ interface TabConfig {
 const TABS: TabConfig[] = [
   { name: 'index', title: 'Discover', icon: 'compass-outline', iconFocused: 'compass' },
   { name: 'library', title: 'Library', icon: 'library-outline', iconFocused: 'library' },
-  { name: 'extensions', title: 'Sources', icon: 'extension-puzzle-outline', iconFocused: 'extension-puzzle' },
+  { name: 'downloads', title: 'Downloads', icon: 'download-outline', iconFocused: 'download' },
+  { name: 'community', title: 'Community', icon: 'chatbubbles-outline', iconFocused: 'chatbubbles' },
   { name: 'history', title: 'History', icon: 'time-outline', iconFocused: 'time' },
   { name: 'settings', title: 'Settings', icon: 'settings-outline', iconFocused: 'settings' },
 ];
 
-function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+function FloatingTabBar({ state, descriptors, navigation }: FloatingTabBarProps) {
   const insets = useSafeAreaInsets();
+  const colors = useThemeColors();
 
   return (
     <View
       pointerEvents="box-none"
       style={[styles.tabBarFrame, { bottom: Math.max(insets.bottom, 16) + 12 }]}
     >
-      <View style={styles.tabBarPill}>
+      <View style={[styles.tabBarPill, { borderColor: colors.border }]}>
+        <BlurView
+          intensity={95}
+          tint={colors.background === Colors.dark.background ? 'dark' : 'light'}
+          style={StyleSheet.absoluteFill}
+        />
+        <View
+          pointerEvents="none"
+          style={[styles.glassTint, { backgroundColor: `${colors.surface}99` }]}
+        />
         {state.routes.map((route, index) => {
           const tab = TABS.find((item) => item.name === route.name);
           if (!tab) return null;
@@ -72,14 +85,14 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             >
               <View style={styles.iconSlot}>
                 {isFocused ? (
-                  <View style={styles.activeIconCircle}>
+                  <View style={[styles.activeIconCircle, { backgroundColor: colors.accent }]}>
                     <Ionicons name={tab.iconFocused} size={19} color="#FFFFFF" />
                   </View>
                 ) : (
-                  <Ionicons name={tab.icon} size={19} color={Colors.dark.tabIconDefault} />
+                  <Ionicons name={tab.icon} size={19} color={colors.tabIconDefault} />
                 )}
               </View>
-              <Text style={[styles.tabLabel, isFocused && styles.tabLabelActive]} numberOfLines={1}>
+              <Text style={[styles.tabLabel, { color: isFocused ? colors.text : colors.tabIconDefault }]} numberOfLines={1}>
                 {tab.title}
               </Text>
             </Pressable>
@@ -91,12 +104,14 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
 }
 
 export default function TabLayout() {
+  const colors = useThemeColors();
+
   return (
     <Tabs
       tabBar={(props) => <FloatingTabBar {...props} />}
       screenOptions={{
         headerShown: false,
-        sceneStyle: { backgroundColor: Colors.dark.background },
+        sceneStyle: { backgroundColor: colors.background },
       }}
     >
       {TABS.map((tab) => (
@@ -118,7 +133,7 @@ const styles = StyleSheet.create({
   },
   tabBarPill: {
     alignItems: 'center',
-    backgroundColor: 'rgba(20, 20, 27, 0.9)',
+    backgroundColor: 'transparent',
     borderColor: 'rgba(255, 255, 255, 0.12)',
     borderRadius: 32,
     borderTopWidth: 1,
@@ -132,6 +147,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 14,
     width: '92%',
+  },
+  glassTint: {
+    ...StyleSheet.absoluteFill,
   },
   tabItem: {
     alignItems: 'center',

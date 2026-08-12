@@ -1,17 +1,18 @@
 /**
- * MangaCard — Edge-to-edge full width responsive grid card
+ * MangaCard — Edge-to-edge full width responsive grid card with Micro-Interaction Spring Scale
  */
 import React, { memo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  Pressable,
   useWindowDimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Radius, Spacing, Typography } from '../../constants/Colors';
+import { useThemeColors } from '../hooks/useThemeColor';
+import { AnimatedCard } from './AnimatedCard';
 
 export const CARD_GAP = 10;
 
@@ -23,6 +24,7 @@ interface MangaCardProps {
   rating?: number | null;
   follows?: number | null;
   unreadCount?: number;
+  index?: number;
   onPress: (id: string) => void;
 }
 
@@ -41,9 +43,10 @@ function MangaCardComponent({
   rating,
   follows,
   unreadCount,
+  index = 0,
   onPress,
 }: MangaCardProps) {
-  const colors = Colors.dark;
+  const colors = useThemeColors();
   const { width: windowWidth } = useWindowDimensions();
 
   const isMobile = windowWidth < 600;
@@ -56,12 +59,10 @@ function MangaCardComponent({
   const formattedFollows = formatStatNumber(follows);
 
   return (
-    <Pressable
+    <AnimatedCard
+      index={index}
       onPress={() => onPress(id)}
-      style={({ pressed }) => [
-        styles.container,
-        { width: cardWidth, opacity: pressed ? 0.8 : 1 },
-      ]}
+      style={[styles.container, { width: cardWidth }]}
     >
       {/* Cover Image Box */}
       <View
@@ -79,7 +80,7 @@ function MangaCardComponent({
             source={{ uri: coverUrl }}
             style={styles.coverImage}
             contentFit="cover"
-            transition={200}
+            transition={300}
             recyclingKey={id}
           />
         ) : (
@@ -131,7 +132,7 @@ function MangaCardComponent({
           ) : null}
         </View>
       </View>
-    </Pressable>
+    </AnimatedCard>
   );
 }
 

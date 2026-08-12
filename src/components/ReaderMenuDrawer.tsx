@@ -16,12 +16,17 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
+import { useThemeColors } from '../hooks/useThemeColor';
+import { formatChapterDate } from '../utils/date';
+import { ChapterCommentsModal } from './ChapterCommentsModal';
+import { ShareCardModal } from './ShareCardModal';
 import type { ReadingMode } from '../types';
 
 interface ChapterOption {
   id: string;
   chapterNum: string;
   title: string;
+  publishAt?: string;
 }
 
 interface ReaderMenuDrawerProps {
@@ -31,6 +36,7 @@ interface ReaderMenuDrawerProps {
   chapterTitle: string;
   uploaderName?: string;
   scanlationGroup?: string;
+  currentChapterPublishAt?: string;
   currentPage: number;
   totalPages: number;
   onSelectPage: (pageIndex: number) => void;
@@ -61,6 +67,7 @@ export function ReaderMenuDrawer({
   chapterTitle,
   uploaderName = 'MangaDex Uploader',
   scanlationGroup = 'Scanlation Team',
+  currentChapterPublishAt,
   currentPage,
   totalPages,
   onSelectPage,
@@ -83,12 +90,25 @@ export function ReaderMenuDrawer({
   onGoBackToManga,
   onGoToHome,
 }: ReaderMenuDrawerProps) {
-  const colors = Colors.dark;
+  const colors = useThemeColors();
 
   const [showPagePicker, setShowPagePicker] = useState(false);
   const [showChapterPicker, setShowChapterPicker] = useState(false);
+  const [showCommentsModal, setShowCommentsModal] = useState(false);
+  const [showShareCardModal, setShowShareCardModal] = useState(false);
+  const [pageFilter, setPageFilter] = useState('');
+  const [pageSortAsc, setPageSortAsc] = useState(false);
   const [chapterFilter, setChapterFilter] = useState('');
   const [chapterSortAsc, setChapterSortAsc] = useState(false);
+
+  const pagesList = Array.from({ length: totalPages }, (_, idx) => idx);
+  const filteredPages = pagesList
+    .filter((idx) => {
+      if (!pageFilter.trim()) return true;
+      const q = pageFilter.trim();
+      return (idx + 1).toString().includes(q);
+    })
+    .sort((a, b) => (pageSortAsc ? a - b : b - a));
 
   const filteredChapters = chapters
     .filter((ch) => {
@@ -138,31 +158,31 @@ export function ReaderMenuDrawer({
       <View style={styles.backdrop}>
         <Pressable style={styles.overlayPress} onPress={onClose} />
 
-        <SafeAreaView style={[styles.drawerContainer, { backgroundColor: '#141417', borderColor: colors.border }]}>
+        <SafeAreaView style={[styles.drawerContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           {/* Header Bar */}
           <View style={styles.drawerHeader}>
             <View style={styles.headerLeftBtns}>
               <Pressable onPress={onClose} style={styles.iconBtn}>
-                <Ionicons name="close" size={22} color="#FAFAFA" />
+                <Ionicons name="close" size={22} color={colors.text} />
               </Pressable>
               {onGoBackToManga && (
                 <Pressable onPress={onGoBackToManga} style={styles.iconBtn}>
-                  <Ionicons name="arrow-back" size={20} color="#FAFAFA" />
+                  <Ionicons name="arrow-back" size={20} color={colors.text} />
                 </Pressable>
               )}
               {onGoToHome && (
                 <Pressable onPress={onGoToHome} style={styles.iconBtn}>
-                  <Ionicons name="home-outline" size={20} color="#FAFAFA" />
+                  <Ionicons name="home-outline" size={20} color={colors.text} />
                 </Pressable>
               )}
             </View>
             <Pressable onPress={onOpenSettings} style={styles.iconBtn}>
-              <Ionicons name="options" size={20} color="#FAFAFA" />
+              <Ionicons name="options" size={20} color={colors.text} />
             </Pressable>
           </View>
 
           <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-            {/* Manga & Chapter Title (Clickable title navigates to Manga Details) */}
+            {/* Manga & Chapter Title */}
             <Pressable
               onPress={onGoBackToManga}
               disabled={!onGoBackToManga}
@@ -172,14 +192,14 @@ export function ReaderMenuDrawer({
               ]}
             >
               <View style={styles.titleRow}>
-                <Text style={styles.mangaTitleText} numberOfLines={2}>
+                <Text style={[styles.mangaTitleText, { color: colors.accent }]} numberOfLines={2}>
                   {mangaTitle}
                 </Text>
                 {onGoBackToManga && (
                   <Ionicons name="chevron-forward" size={16} color={colors.accent} style={{ marginTop: 2 }} />
                 )}
               </View>
-              <Text style={styles.chapterTitleText} numberOfLines={1}>
+              <Text style={[styles.chapterTitleText, { color: colors.text }]} numberOfLines={1}>
                 {chapterTitle}
               </Text>
             </Pressable>
@@ -191,23 +211,23 @@ export function ReaderMenuDrawer({
                 onPress={() => onSelectPage(currentPage - 1)}
                 style={[
                   styles.arrowBtn,
-                  { opacity: currentPage <= 0 ? 0.3 : 1 },
+                  { backgroundColor: colors.surfaceElevated, opacity: currentPage <= 0 ? 0.3 : 1 },
                 ]}
               >
-                <Ionicons name="chevron-back" size={18} color="#FAFAFA" />
+                <Ionicons name="chevron-back" size={18} color={colors.text} />
               </Pressable>
 
               <Pressable
                 onPress={() => setShowPagePicker(!showPagePicker)}
-                style={styles.dropdownBtn}
+                style={[styles.dropdownBtn, { backgroundColor: colors.surfaceElevated }]}
               >
                 <View style={styles.dropdownCol}>
-                  <Text style={styles.dropdownLabel}>Page</Text>
-                  <Text style={styles.dropdownValue}>
+                  <Text style={[styles.dropdownLabel, { color: colors.textMuted }]}>Page</Text>
+                  <Text style={[styles.dropdownValue, { color: colors.text }]}>
                     {currentPage + 1} / {totalPages}
                   </Text>
                 </View>
-                <Ionicons name="chevron-down" size={16} color="#A1A1AA" />
+                <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
               </Pressable>
 
               <Pressable
@@ -215,36 +235,64 @@ export function ReaderMenuDrawer({
                 onPress={() => onSelectPage(currentPage + 1)}
                 style={[
                   styles.arrowBtn,
-                  { opacity: currentPage >= totalPages - 1 ? 0.3 : 1 },
+                  { backgroundColor: colors.surfaceElevated, opacity: currentPage >= totalPages - 1 ? 0.3 : 1 },
                 ]}
               >
-                <Ionicons name="chevron-forward" size={18} color="#FAFAFA" />
+                <Ionicons name="chevron-forward" size={18} color={colors.text} />
               </Pressable>
             </View>
 
             {/* Page Picker Dropdown List */}
             {showPagePicker && (
-              <View style={styles.pickerListContainer}>
-                <ScrollView style={{ maxHeight: 150 }}>
-                  {Array.from({ length: totalPages }).map((_, idx) => (
+              <View style={[styles.pickerListContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                {/* Search & Sort Bar */}
+                <View style={[styles.chapterPickerHeader, { backgroundColor: colors.surfaceElevated, borderBottomColor: colors.border }]}>
+                  <Ionicons name="search" size={14} color={colors.textMuted} />
+                  <TextInput
+                    style={[styles.chapterSearchInput, { color: colors.text }]}
+                    placeholder="Search page #"
+                    placeholderTextColor={colors.textMuted}
+                    value={pageFilter}
+                    onChangeText={setPageFilter}
+                    keyboardType="numeric"
+                  />
+                  <Pressable
+                    onPress={() => setPageSortAsc(!pageSortAsc)}
+                    style={[styles.sortToggleBtn, { backgroundColor: colors.surface }]}
+                  >
+                    <Ionicons
+                      name={pageSortAsc ? 'arrow-up' : 'arrow-down'}
+                      size={12}
+                      color={colors.accent}
+                    />
+                    <Text style={[styles.sortToggleText, { color: colors.accent }]}>
+                      {pageSortAsc ? `1→${totalPages}` : `${totalPages}→1`}
+                    </Text>
+                  </Pressable>
+                </View>
+
+                <ScrollView style={{ maxHeight: 280 }} nestedScrollEnabled showsVerticalScrollIndicator={true}>
+                  {filteredPages.map((pageIdx) => (
                     <Pressable
-                      key={idx}
+                      key={pageIdx}
                       onPress={() => {
-                        onSelectPage(idx);
+                        onSelectPage(pageIdx);
                         setShowPagePicker(false);
                       }}
                       style={[
                         styles.pickerItem,
-                        currentPage === idx && styles.pickerItemActive,
+                        { borderBottomColor: colors.borderSubtle },
+                        currentPage === pageIdx && styles.pickerItemActive,
                       ]}
                     >
                       <Text
                         style={[
                           styles.pickerItemText,
-                          currentPage === idx && { color: colors.accent, fontWeight: 'bold' },
+                          { color: colors.text },
+                          currentPage === pageIdx && { color: colors.accent, fontWeight: 'bold' },
                         ]}
                       >
-                        Page {idx + 1}
+                        Page {pageIdx + 1} of {totalPages}
                       </Text>
                     </Pressable>
                   ))}
@@ -259,23 +307,23 @@ export function ReaderMenuDrawer({
                 onPress={onPrevChapter}
                 style={[
                   styles.arrowBtn,
-                  { opacity: !hasPrevChapter ? 0.3 : 1 },
+                  { backgroundColor: colors.surfaceElevated, opacity: !hasPrevChapter ? 0.3 : 1 },
                 ]}
               >
-                <Ionicons name="chevron-back" size={18} color="#FAFAFA" />
+                <Ionicons name="chevron-back" size={18} color={colors.text} />
               </Pressable>
 
               <Pressable
                 onPress={() => setShowChapterPicker(!showChapterPicker)}
-                style={styles.dropdownBtn}
+                style={[styles.dropdownBtn, { backgroundColor: colors.surfaceElevated }]}
               >
                 <View style={styles.dropdownCol}>
-                  <Text style={styles.dropdownLabel}>Chapter</Text>
-                  <Text style={styles.dropdownValue} numberOfLines={1}>
+                  <Text style={[styles.dropdownLabel, { color: colors.textMuted }]}>Chapter</Text>
+                  <Text style={[styles.dropdownValue, { color: colors.text }]} numberOfLines={1}>
                     {chapterTitle}
                   </Text>
                 </View>
-                <Ionicons name="chevron-down" size={16} color="#A1A1AA" />
+                <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
               </Pressable>
 
               <Pressable
@@ -283,30 +331,30 @@ export function ReaderMenuDrawer({
                 onPress={onNextChapter}
                 style={[
                   styles.arrowBtn,
-                  { opacity: !hasNextChapter ? 0.3 : 1 },
+                  { backgroundColor: colors.surfaceElevated, opacity: !hasNextChapter ? 0.3 : 1 },
                 ]}
               >
-                <Ionicons name="chevron-forward" size={18} color="#FAFAFA" />
+                <Ionicons name="chevron-forward" size={18} color={colors.text} />
               </Pressable>
             </View>
 
             {/* Chapter Picker Dropdown List */}
             {showChapterPicker && (
-              <View style={styles.pickerListContainer}>
+              <View style={[styles.pickerListContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 {/* Search & Sort Bar */}
-                <View style={styles.chapterPickerHeader}>
-                  <Ionicons name="search" size={14} color="#A1A1AA" />
+                <View style={[styles.chapterPickerHeader, { backgroundColor: colors.surfaceElevated, borderBottomColor: colors.border }]}>
+                  <Ionicons name="search" size={14} color={colors.textMuted} />
                   <TextInput
-                    style={styles.chapterSearchInput}
+                    style={[styles.chapterSearchInput, { color: colors.text }]}
                     placeholder="Search chapter #"
-                    placeholderTextColor="#71717A"
+                    placeholderTextColor={colors.textMuted}
                     value={chapterFilter}
                     onChangeText={setChapterFilter}
                     keyboardType="numeric"
                   />
                   <Pressable
                     onPress={() => setChapterSortAsc(!chapterSortAsc)}
-                    style={styles.sortToggleBtn}
+                    style={[styles.sortToggleBtn, { backgroundColor: colors.surface }]}
                   >
                     <Ionicons
                       name={chapterSortAsc ? 'arrow-up' : 'arrow-down'}
@@ -329,43 +377,60 @@ export function ReaderMenuDrawer({
                       }}
                       style={[
                         styles.pickerItem,
-                        currentChapterId === ch.id && styles.pickerItemActive,
+                        { borderBottomColor: colors.borderSubtle },
+                        currentChapterId === ch.id && {
+                          backgroundColor: colors.accentSubtle,
+                        },
                       ]}
                     >
-                      <Text
-                        style={[
-                          styles.pickerItemText,
-                          currentChapterId === ch.id && { color: colors.accent, fontWeight: 'bold' },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        Ch. {ch.chapterNum} {ch.title ? `- ${ch.title}` : ''}
-                      </Text>
+                      <View style={{ flex: 1, gap: 2 }}>
+                        <Text
+                          style={[
+                            styles.pickerItemText,
+                            { color: colors.text },
+                            currentChapterId === ch.id && { color: colors.accent, fontWeight: 'bold' },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          Ch. {ch.chapterNum} {ch.title ? `- ${ch.title}` : ''}
+                        </Text>
+                        {ch.publishAt ? (
+                          <Text style={[styles.chapterDateSubtext, { color: colors.textMuted }]}>
+                            {formatChapterDate(ch.publishAt)}
+                          </Text>
+                        ) : null}
+                      </View>
                     </Pressable>
                   ))}
                 </ScrollView>
               </View>
             )}
 
-
-
             {/* Uploaded By Credits */}
-            <View style={styles.uploaderSection}>
-              <Text style={styles.uploaderLabel}>Uploaded By</Text>
+            <View style={[styles.uploaderSection, { backgroundColor: colors.surfaceElevated }]}>
+              <Text style={[styles.uploaderLabel, { color: colors.textMuted }]}>Uploaded By</Text>
               <View style={styles.uploaderRow}>
                 <Ionicons name="people-outline" size={16} color={colors.accent} />
-                <Text style={styles.uploaderGroupText}>{scanlationGroup}</Text>
+                <Text style={[styles.uploaderGroupText, { color: colors.text }]}>{scanlationGroup}</Text>
               </View>
               <View style={styles.uploaderRow}>
-                <Ionicons name="person-circle-outline" size={16} color="#A1A1AA" />
-                <Text style={styles.uploaderUserText}>{uploaderName}</Text>
+                <Ionicons name="person-circle-outline" size={16} color={colors.textMuted} />
+                <Text style={[styles.uploaderUserText, { color: colors.textSecondary }]}>{uploaderName}</Text>
               </View>
+              {currentChapterPublishAt ? (
+                <View style={styles.uploaderRow}>
+                  <Ionicons name="time-outline" size={15} color={colors.textMuted} />
+                  <Text style={[styles.uploaderDateText, { color: colors.textMuted }]}>
+                    {formatChapterDate(currentChapterPublishAt)}
+                  </Text>
+                </View>
+              ) : null}
             </View>
 
-            <View style={styles.divider} />
+            <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
             {/* Display Mode Toggles */}
-            <Text style={styles.sectionHeaderLabel}>READER DISPLAY</Text>
+            <Text style={[styles.sectionHeaderLabel, { color: colors.textMuted }]}>READER DISPLAY</Text>
 
             {/* Reading Mode Button */}
             <Pressable
@@ -374,11 +439,11 @@ export function ReaderMenuDrawer({
                 const nextIdx = (modes.indexOf(readingMode) + 1) % modes.length;
                 onChangeReadingMode(modes[nextIdx]);
               }}
-              style={styles.menuControlBtn}
+              style={[styles.menuControlBtn, { backgroundColor: colors.surfaceElevated }]}
             >
-              <Ionicons name="document-text-outline" size={18} color="#FAFAFA" />
-              <Text style={styles.menuControlText}>{getModeLabel(readingMode)}</Text>
-              <Ionicons name="swap-horizontal" size={16} color="#A1A1AA" />
+              <Ionicons name="document-text-outline" size={18} color={colors.text} />
+              <Text style={[styles.menuControlText, { color: colors.text }]}>{getModeLabel(readingMode)}</Text>
+              <Ionicons name="swap-horizontal" size={16} color={colors.textMuted} />
             </Pressable>
 
             {/* Image Fit Button */}
@@ -388,73 +453,105 @@ export function ReaderMenuDrawer({
                 const nextIdx = (fits.indexOf(imageFit) + 1) % fits.length;
                 onChangeImageFit(fits[nextIdx]);
               }}
-              style={styles.menuControlBtn}
+              style={[styles.menuControlBtn, { backgroundColor: colors.surfaceElevated }]}
             >
-              <Ionicons name="expand-outline" size={18} color="#FAFAFA" />
-              <Text style={styles.menuControlText}>{getFitLabel(imageFit)}</Text>
-              <Ionicons name="swap-horizontal" size={16} color="#A1A1AA" />
+              <Ionicons name="expand-outline" size={18} color={colors.text} />
+              <Text style={[styles.menuControlText, { color: colors.text }]}>{getFitLabel(imageFit)}</Text>
+              <Ionicons name="swap-horizontal" size={16} color={colors.textMuted} />
             </Pressable>
 
             {/* Header Hidden Button */}
-            <Pressable onPress={onToggleHeaderHidden} style={styles.menuControlBtn}>
+            <Pressable
+              onPress={onToggleHeaderHidden}
+              style={[styles.menuControlBtn, { backgroundColor: colors.surfaceElevated }]}
+            >
               <Ionicons
                 name={headerHidden ? 'square-outline' : 'checkbox-outline'}
                 size={18}
-                color="#FAFAFA"
+                color={colors.text}
               />
-              <Text style={styles.menuControlText}>
+              <Text style={[styles.menuControlText, { color: colors.text }]}>
                 {headerHidden ? 'Header Hidden' : 'Header Shown'}
               </Text>
             </Pressable>
 
             {/* Haptic Feedback Toggle */}
-            <Pressable onPress={onToggleHaptics} style={styles.menuControlBtn}>
+            <Pressable
+              onPress={onToggleHaptics}
+              style={[styles.menuControlBtn, { backgroundColor: colors.surfaceElevated }]}
+            >
               <Ionicons
                 name={hapticsEnabled ? 'phone-portrait' : 'phone-portrait-outline'}
                 size={18}
-                color={hapticsEnabled ? colors.accent : '#A1A1AA'}
+                color={hapticsEnabled ? colors.accent : colors.textMuted}
               />
-              <Text style={styles.menuControlText}>
+              <Text style={[styles.menuControlText, { color: colors.text }]}>
                 Haptic Vibration: {hapticsEnabled ? 'ON' : 'OFF'}
               </Text>
               <Ionicons
                 name={hapticsEnabled ? 'checkmark-circle' : 'ellipse-outline'}
                 size={16}
-                color={hapticsEnabled ? colors.accent : '#A1A1AA'}
+                color={hapticsEnabled ? colors.accent : colors.textMuted}
               />
             </Pressable>
 
-            {/* Quick Navigation Actions */}
-            {(onGoBackToManga || onGoToHome) && (
-              <View style={styles.navActionsContainer}>
-                {onGoBackToManga && (
-                  <Pressable
-                    onPress={onGoBackToManga}
-                    style={({ pressed }) => [
-                      styles.actionBtnRow,
-                      pressed && { opacity: 0.8 },
-                    ]}
-                  >
-                    <Ionicons name="book-outline" size={16} color="#FAFAFA" />
-                    <Text style={styles.actionBtnText}>Go to Manga Title</Text>
-                    <Ionicons name="chevron-forward" size={14} color="#A1A1AA" style={{ marginLeft: 'auto' }} />
-                  </Pressable>
-                )}
-                {onGoToHome && (
-                  <Pressable
-                    onPress={onGoToHome}
-                    style={({ pressed }) => [
-                      styles.actionBtnRow,
-                      pressed && { opacity: 0.8 },
-                    ]}
-                  >
-                    <Ionicons name="home-outline" size={16} color="#FAFAFA" />
-                    <Text style={styles.actionBtnText}>Back to Home Page</Text>
-                    <Ionicons name="chevron-forward" size={14} color="#A1A1AA" style={{ marginLeft: 'auto' }} />
-                  </Pressable>
-                )}
-              </View>
-            )}
+            {/* Quick Community & Share Actions */}
+            <View style={styles.navActionsContainer}>
+              <Pressable
+                onPress={() => setShowCommentsModal(true)}
+                style={({ pressed }) => [
+                  styles.actionBtnRow,
+                  { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+                  pressed && { opacity: 0.8 },
+                ]}
+              >
+                <Ionicons name="chatbubbles-outline" size={16} color={colors.accent} />
+                <Text style={[styles.actionBtnText, { color: colors.text }]}>Chapter Comments</Text>
+                <Ionicons name="chevron-forward" size={14} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
+              </Pressable>
+
+              <Pressable
+                onPress={() => setShowShareCardModal(true)}
+                style={({ pressed }) => [
+                  styles.actionBtnRow,
+                  { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+                  pressed && { opacity: 0.8 },
+                ]}
+              >
+                <Ionicons name="share-social-outline" size={16} color={colors.accent} />
+                <Text style={[styles.actionBtnText, { color: colors.text }]}>Share Quote Card</Text>
+                <Ionicons name="chevron-forward" size={14} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
+              </Pressable>
+
+              {onGoBackToManga && (
+                <Pressable
+                  onPress={onGoBackToManga}
+                  style={({ pressed }) => [
+                    styles.actionBtnRow,
+                    { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+                    pressed && { opacity: 0.8 },
+                  ]}
+                >
+                  <Ionicons name="book-outline" size={16} color={colors.text} />
+                  <Text style={[styles.actionBtnText, { color: colors.text }]}>Go to Manga Title</Text>
+                  <Ionicons name="chevron-forward" size={14} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
+                </Pressable>
+              )}
+              {onGoToHome && (
+                <Pressable
+                  onPress={onGoToHome}
+                  style={({ pressed }) => [
+                    styles.actionBtnRow,
+                    { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+                    pressed && { opacity: 0.8 },
+                  ]}
+                >
+                  <Ionicons name="home-outline" size={16} color={colors.text} />
+                  <Text style={[styles.actionBtnText, { color: colors.text }]}>Back to Home Page</Text>
+                  <Ionicons name="chevron-forward" size={14} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
+                </Pressable>
+              )}
+            </View>
 
             {/* Reader Settings Modal Trigger */}
             <Pressable onPress={onOpenSettings} style={[styles.menuControlBtn, { backgroundColor: colors.surfaceElevated }]}>
@@ -465,6 +562,21 @@ export function ReaderMenuDrawer({
             </Pressable>
           </ScrollView>
         </SafeAreaView>
+
+        {/* Modals */}
+        <ChapterCommentsModal
+          visible={showCommentsModal}
+          onClose={() => setShowCommentsModal(false)}
+          chapterId={currentChapterId}
+          chapterTitle={chapterTitle}
+        />
+
+        <ShareCardModal
+          visible={showShareCardModal}
+          onClose={() => setShowShareCardModal(false)}
+          mangaTitle={mangaTitle}
+          chapterTitle={chapterTitle}
+        />
       </View>
     </Modal>
   );
@@ -520,27 +632,22 @@ const styles = StyleSheet.create({
   actionBtnRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#18181B',
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm + 2,
     borderRadius: Radius.md,
     borderWidth: 1,
-    borderColor: '#27272A',
     gap: Spacing.sm,
   },
   actionBtnText: {
     fontSize: Typography.sizes.footnote,
     fontWeight: Typography.weights.medium,
-    color: '#FAFAFA',
   },
   mangaTitleText: {
-    color: '#E11D48',
     fontSize: Typography.sizes.headline,
     fontWeight: Typography.weights.bold,
     lineHeight: 20,
   },
   chapterTitleText: {
-    color: '#FAFAFA',
     fontSize: Typography.sizes.body,
     fontWeight: Typography.weights.medium,
   },
@@ -552,7 +659,6 @@ const styles = StyleSheet.create({
   arrowBtn: {
     width: 38,
     height: 42,
-    backgroundColor: '#27272A',
     borderRadius: Radius.md,
     alignItems: 'center',
     justifyContent: 'center',
@@ -560,7 +666,6 @@ const styles = StyleSheet.create({
   dropdownBtn: {
     flex: 1,
     height: 42,
-    backgroundColor: '#27272A',
     borderRadius: Radius.md,
     flexDirection: 'row',
     alignItems: 'center',
@@ -571,21 +676,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   dropdownLabel: {
-    color: '#A1A1AA',
     fontSize: 9,
     fontWeight: Typography.weights.bold,
     textTransform: 'uppercase',
   },
   dropdownValue: {
-    color: '#FAFAFA',
     fontSize: Typography.sizes.footnote,
     fontWeight: Typography.weights.bold,
   },
   pickerListContainer: {
-    backgroundColor: '#18181B',
     borderRadius: Radius.md,
     borderWidth: 1,
-    borderColor: '#27272A',
     maxHeight: 320,
     overflow: 'hidden',
   },
@@ -595,14 +696,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: 6,
     borderBottomWidth: 1,
-    borderBottomColor: '#27272A',
-    backgroundColor: '#141417',
     gap: 6,
   },
   chapterSearchInput: {
     flex: 1,
     height: 32,
-    color: '#FAFAFA',
     fontSize: Typography.sizes.footnote,
     paddingVertical: 0,
   },
@@ -610,7 +708,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#27272A',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: Radius.xs,
@@ -623,41 +720,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm + 2,
     borderBottomWidth: 1,
-    borderBottomColor: '#27272A',
   },
   pickerItemActive: {
     backgroundColor: 'rgba(225,29,72,0.15)',
   },
   pickerItemText: {
-    color: '#FAFAFA',
     fontSize: Typography.sizes.footnote,
   },
-  actionBtnGroup: {
-    gap: Spacing.xs,
-    marginTop: Spacing.xs,
-  },
-  secondaryActionBtn: {
-    height: 38,
-    backgroundColor: '#27272A',
-    borderRadius: Radius.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.sm,
-  },
-  secondaryActionText: {
-    color: '#D4D4D8',
-    fontSize: Typography.sizes.footnote,
-    fontWeight: Typography.weights.medium,
+  chapterDateSubtext: {
+    fontSize: 10,
   },
   uploaderSection: {
-    backgroundColor: '#18181B',
     borderRadius: Radius.md,
     padding: Spacing.md,
     gap: 6,
   },
   uploaderLabel: {
-    color: '#A1A1AA',
     fontSize: 10,
     fontWeight: Typography.weights.bold,
     textTransform: 'uppercase',
@@ -668,28 +746,26 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   uploaderGroupText: {
-    color: '#FAFAFA',
     fontSize: Typography.sizes.footnote,
     fontWeight: Typography.weights.bold,
   },
   uploaderUserText: {
-    color: '#A1A1AA',
     fontSize: Typography.sizes.footnote,
+  },
+  uploaderDateText: {
+    fontSize: Typography.sizes.caption,
   },
   divider: {
     height: 1,
-    backgroundColor: '#27272A',
     marginVertical: Spacing.xs,
   },
   sectionHeaderLabel: {
-    color: '#A1A1AA',
     fontSize: 10,
     fontWeight: Typography.weights.bold,
     letterSpacing: 0.8,
   },
   menuControlBtn: {
     height: 44,
-    backgroundColor: '#27272A',
     borderRadius: Radius.md,
     flexDirection: 'row',
     alignItems: 'center',
@@ -698,7 +774,6 @@ const styles = StyleSheet.create({
   },
   menuControlText: {
     flex: 1,
-    color: '#FAFAFA',
     fontSize: Typography.sizes.footnote,
     fontWeight: Typography.weights.semibold,
   },

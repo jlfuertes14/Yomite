@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
+import { useThemeColors } from '../hooks/useThemeColor';
 
 type VectorIcon = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -45,7 +46,7 @@ export function SidebarDrawer({
   onSelectRandom,
   onSelectPopular,
 }: SidebarDrawerProps) {
-  const colors = Colors.dark;
+  const colors = useThemeColors();
 
   const navItems: SidebarItem[] = [
     {

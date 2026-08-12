@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
+import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { useLibraryStore } from '../../src/store/libraryStore';
 import { MangaCard, CARD_GAP } from '../../src/components/MangaCard';
 import type { LibraryCategory } from '../../src/types';
@@ -30,7 +31,7 @@ const CATEGORIES: { key: LibraryCategory; label: string; icon: VectorIcon }[] = 
 
 export default function LibraryScreen() {
   const router = useRouter();
-  const colors = Colors.dark;
+  const colors = useThemeColors();
   const [activeCategory, setActiveCategory] = useState<LibraryCategory>('reading');
   const entries = useLibraryStore((s) => s.entries);
 

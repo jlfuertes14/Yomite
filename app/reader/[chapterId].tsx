@@ -23,6 +23,7 @@ import * as Haptics from 'expo-haptics';
 import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
 import { useReaderStore } from '../../src/store/readerStore';
 import { useHistoryStore } from '../../src/store/historyStore';
+import { useDownloadStore } from '../../src/store/downloadStore';
 import {
   getChapterPages,
   getMangaChapters,
@@ -36,6 +37,8 @@ import {
 } from '../../src/api/mangadex';
 import { ReaderThemes } from '../../constants/Colors';
 import { ReaderMenuDrawer } from '../../src/components/ReaderMenuDrawer';
+import { OfflineState } from '../../src/components/OfflineState';
+import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
 import type { ReadingMode, Chapter } from '../../src/types';
 
 const MODE_LABELS: Record<ReadingMode, string> = {
@@ -97,10 +100,12 @@ const WebtoonPageItem = React.memo(function WebtoonPageItem({
 export default function ReaderScreen() {
   const router = useRouter();
   const colors = Colors.dark;
+  const { checkNetwork } = useNetworkStatus();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const { chapterId, mangaId } = useLocalSearchParams<{
+  const { chapterId, mangaId, page } = useLocalSearchParams<{
     chapterId: string;
     mangaId?: string;
+    page?: string;
   }>();
 
   // Dynamic Tap zones for page turning
@@ -125,6 +130,7 @@ export default function ReaderScreen() {
   const [currentPage, setCurrentPage] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [offlineUnavailable, setOfflineUnavailable] = useState(false);
   const [showModeSelector, setShowModeSelector] = useState(false);
   const [sideMenuVisible, setSideMenuVisible] = useState(false);
   const [imageFit, setImageFit] = useState<'fit_both' | 'fit_width' | 'fit_height'>('fit_both');
@@ -136,9 +142,14 @@ export default function ReaderScreen() {
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [chapterList, setChapterList] = useState<Chapter[]>([]);
   const [scanlationGroup, setScanlationGroup] = useState<string>('Scanlation Team');
+  const [currentChapterPublishAt, setCurrentChapterPublishAt] = useState<string | undefined>();
   const [uploaderName, setUploaderName] = useState<string>('Uploader');
 
   const flatListRef = useRef<FlatList>(null);
+  const webtoonListRef = useRef<FlatList<string>>(null);
+  const restoredChapterIdRef = useRef<string | null>(null);
+  const resumeTargetPageRef = useRef(0);
+  const resumeRestoreAttemptsRef = useRef(0);
 
   const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
     if (viewableItems && viewableItems.length > 0) {
@@ -161,16 +172,82 @@ export default function ReaderScreen() {
     loadMangaMeta();
   }, [chapterId, dataSaver, mangaId]);
 
+  // FlatList only uses initialScrollIndex on its first mount. This effect restores
+  // a saved webtoon position after the chapter has been loaded and laid out.
+  useEffect(() => {
+    if (
+      mode !== 'webtoon' ||
+      isLoading ||
+      pages.length === 0 ||
+      resumeTargetPageRef.current === 0 ||
+      restoredChapterIdRef.current === chapterId
+    ) {
+      return;
+    }
+
+    const frame = requestAnimationFrame(() => {
+      webtoonListRef.current?.scrollToIndex({
+        index: resumeTargetPageRef.current,
+        animated: false,
+      });
+      restoredChapterIdRef.current = chapterId;
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [chapterId, isLoading, mode, pages.length]);
+
   const loadPages = async () => {
     try {
       setIsLoading(true);
       setError(null);
-      const result = await getChapterPages(chapterId!, dataSaver);
-      setPages(result.pages);
-      setCurrentPage(0);
+      setOfflineUnavailable(false);
+      restoredChapterIdRef.current = null;
+      resumeTargetPageRef.current = 0;
+      resumeRestoreAttemptsRef.current = 0;
+
+      // Check if downloaded locally
+      const downloadedCh = useDownloadStore.getState().getChapter(chapterId!);
+      let loadedPages: string[];
+      if (downloadedCh && downloadedCh.status === 'completed' && downloadedCh.localPages.length > 0) {
+        loadedPages = downloadedCh.localPages;
+        if (downloadedCh.mangaTitle) setMangaTitle(downloadedCh.mangaTitle);
+        if (downloadedCh.chapterNum) setChapterTitle(`Ch. ${downloadedCh.chapterNum}`);
+      } else {
+        const isOnline = await checkNetwork();
+        if (!isOnline) {
+          setPages([]);
+          setOfflineUnavailable(true);
+          return;
+        }
+
+        const result = await getChapterPages(chapterId!, dataSaver);
+        loadedPages = result.pages;
+      }
+
+      setPages(loadedPages);
+
+      let targetPage = 0;
+      if (page !== undefined && page !== null && page !== '') {
+        targetPage = parseInt(page, 10);
+      } else {
+        const historyEntry = useHistoryStore.getState().entries.find((e) => e.chapterId === chapterId);
+        if (historyEntry) {
+          targetPage = historyEntry.pageIndex;
+        }
+      }
+      const maxPage = Math.max(0, loadedPages.length - 1);
+      const clampedPage = Math.max(0, Math.min(isNaN(targetPage) ? 0 : targetPage, maxPage));
+      resumeTargetPageRef.current = clampedPage;
+      setCurrentPage(clampedPage);
     } catch (err) {
       console.error('Failed to load pages:', err);
-      setError('Failed to load chapter pages. Please try again.');
+      const isOnline = await checkNetwork();
+      if (!isOnline) {
+        setPages([]);
+        setOfflineUnavailable(true);
+      } else {
+        setError('Failed to load chapter pages. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -178,6 +255,7 @@ export default function ReaderScreen() {
 
   const loadMangaMeta = async () => {
     try {
+      if (!(await checkNetwork())) return;
       let targetMangaId = mangaId;
       const chapterData = await getChapterDetails(chapterId!);
       if (chapterData) {
@@ -206,6 +284,7 @@ export default function ReaderScreen() {
 
         const activeCh = chList.data.find((c) => c.id === chapterId);
         if (activeCh) {
+          setCurrentChapterPublishAt(activeCh.attributes.publishAt || activeCh.attributes.readableAt);
           const num = activeCh.attributes.chapter ? `Ch. ${activeCh.attributes.chapter}` : 'Chapter';
           const chTitle = activeCh.attributes.title ? ` - ${activeCh.attributes.title}` : '';
           setChapterTitle(`${num}${chTitle}`);
@@ -235,6 +314,40 @@ export default function ReaderScreen() {
     }
   }, [currentPage, pages.length, mangaTitle, chapterTitle, coverUrl]);
 
+  // Chapter Switching
+  const currentChapterIdx = chapterList.findIndex((c) => c.id === chapterId);
+
+  const nextChapterId = currentChapterIdx > 0
+    ? chapterList[currentChapterIdx - 1]?.id
+    : (currentChapterIdx === -1 && chapterList.length > 0 ? chapterList[0]?.id : undefined);
+
+  const prevChapterId = (currentChapterIdx >= 0 && currentChapterIdx < chapterList.length - 1)
+    ? chapterList[currentChapterIdx + 1]?.id
+    : undefined;
+
+  const hasNextChapter = !!nextChapterId;
+  const hasPrevChapter = !!prevChapterId;
+
+  const navigateToChapter = useCallback(
+    (targetChapterId: string) => {
+      setSideMenuVisible(false);
+      router.replace(`/reader/${targetChapterId}?mangaId=${mangaId}` as any);
+    },
+    [mangaId, router]
+  );
+
+  const handlePrevChapter = useCallback(() => {
+    if (prevChapterId) {
+      navigateToChapter(prevChapterId);
+    }
+  }, [prevChapterId, navigateToChapter]);
+
+  const handleNextChapter = useCallback(() => {
+    if (nextChapterId) {
+      navigateToChapter(nextChapterId);
+    }
+  }, [nextChapterId, navigateToChapter]);
+
   // ─── Page Navigation ───────────────────────────────────────────
 
   const goToPage = useCallback(
@@ -248,6 +361,28 @@ export default function ReaderScreen() {
     [pages.length, mode]
   );
 
+  const goToNextPageOrChapter = useCallback(() => {
+    if (currentPage < pages.length - 1) {
+      goToPage(currentPage + 1);
+    } else if (hasNextChapter) {
+      if (hapticsEnabled && Platform.OS !== 'web') {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }
+      handleNextChapter();
+    }
+  }, [currentPage, pages.length, goToPage, hasNextChapter, handleNextChapter, hapticsEnabled]);
+
+  const goToPrevPageOrChapter = useCallback(() => {
+    if (currentPage > 0) {
+      goToPage(currentPage - 1);
+    } else if (hasPrevChapter) {
+      if (hapticsEnabled && Platform.OS !== 'web') {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }
+      handlePrevChapter();
+    }
+  }, [currentPage, goToPage, hasPrevChapter, handlePrevChapter, hapticsEnabled]);
+
   const handlePageTap = useCallback(
     (x: number) => {
       if (x > TAP_LEFT && x < TAP_RIGHT) {
@@ -255,48 +390,26 @@ export default function ReaderScreen() {
         return;
       }
 
-      if (hapticsEnabled) {
+      if (hapticsEnabled && Platform.OS !== 'web') {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       }
 
       if (mode === 'rtl') {
         if (x <= TAP_LEFT) {
-          goToPage(currentPage + 1);
+          goToNextPageOrChapter();
         } else {
-          goToPage(currentPage - 1);
+          goToPrevPageOrChapter();
         }
       } else {
         if (x <= TAP_LEFT) {
-          goToPage(currentPage - 1);
+          goToPrevPageOrChapter();
         } else {
-          goToPage(currentPage + 1);
+          goToNextPageOrChapter();
         }
       }
     },
-    [currentPage, mode, toggleControls, goToPage]
+    [mode, toggleControls, goToNextPageOrChapter, goToPrevPageOrChapter, hapticsEnabled]
   );
-
-  // Chapter Switching
-  const currentChapterIdx = chapterList.findIndex((c) => c.id === chapterId);
-  const hasNextChapter = currentChapterIdx > 0; // Descending list: index 0 is latest
-  const hasPrevChapter = currentChapterIdx < chapterList.length - 1;
-
-  const navigateToChapter = (targetChapterId: string) => {
-    setSideMenuVisible(false);
-    router.replace(`/reader/${targetChapterId}?mangaId=${mangaId}` as any);
-  };
-
-  const handlePrevChapter = () => {
-    if (hasPrevChapter) {
-      navigateToChapter(chapterList[currentChapterIdx + 1].id);
-    }
-  };
-
-  const handleNextChapter = () => {
-    if (hasNextChapter) {
-      navigateToChapter(chapterList[currentChapterIdx - 1].id);
-    }
-  };
 
   // ─── Render Page Items ─────────────────────────────────────────
 
@@ -361,25 +474,76 @@ export default function ReaderScreen() {
     );
   }
 
+  if (offlineUnavailable) {
+    return (
+      <View style={[styles.centerContainer, { backgroundColor: readerTheme.background }]}>
+        <OfflineState onRetry={loadPages} />
+      </View>
+    );
+  }
+
   if (error || pages.length === 0) {
     return (
       <View style={[styles.centerContainer, { backgroundColor: readerTheme.background }]}>
-        <Ionicons name="alert-circle-outline" size={48} color="#E11D48" />
+        <Ionicons name="alert-circle-outline" size={52} color="#E11D48" />
         <Text style={[styles.errorText, { color: readerTheme.text }]}>
           {error || 'No pages found for this chapter.'}
         </Text>
-        <Pressable style={styles.retryButton} onPress={loadPages}>
-          <Text style={styles.retryText}>Retry</Text>
-        </Pressable>
+
+        {/* Navigation & Action Controls for Broken / Missing Chapter */}
+        <View style={styles.errorActionRow}>
+          {hasPrevChapter && (
+            <Pressable
+              style={({ pressed }) => [
+                styles.errorNavBtn,
+                { opacity: pressed ? 0.7 : 1, borderColor: colors.border },
+              ]}
+              onPress={handlePrevChapter}
+            >
+              <Ionicons name="arrow-back" size={16} color={colors.text} />
+              <Text style={[styles.errorNavBtnText, { color: colors.text }]}>Prev Ch.</Text>
+            </Pressable>
+          )}
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.retryButton,
+              { opacity: pressed ? 0.8 : 1 },
+            ]}
+            onPress={loadPages}
+          >
+            <Ionicons name="refresh" size={16} color="#FFF" />
+            <Text style={styles.retryText}>Retry</Text>
+          </Pressable>
+
+          {hasNextChapter && (
+            <Pressable
+              style={({ pressed }) => [
+                styles.errorNextBtn,
+                { opacity: pressed ? 0.8 : 1, backgroundColor: colors.accent },
+              ]}
+              onPress={handleNextChapter}
+            >
+              <Text style={styles.errorNextBtnText}>Next Ch.</Text>
+              <Ionicons name="arrow-forward" size={16} color="#FFF" />
+            </Pressable>
+          )}
+        </View>
+
         <Pressable
           style={styles.backTextButton}
           onPress={() => {
-            if (router.canGoBack()) router.back();
-            else router.replace('/(tabs)' as any);
+            if (mangaId) {
+              router.replace(`/manga/${mangaId}` as any);
+            } else if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.replace('/(tabs)' as any);
+            }
           }}
         >
           <Text style={[styles.backTextLabel, { color: colors.textMuted }]}>
-            Go Back
+            ← Return to Manga Details
           </Text>
         </Pressable>
       </View>
@@ -396,6 +560,7 @@ export default function ReaderScreen() {
       {mode === 'webtoon' ? (
         <FlatList
           key="flatlist-webtoon"
+          ref={webtoonListRef}
           data={pages}
           keyExtractor={(item, index) => `webtoon-${item}-${index}`}
           renderItem={({ item, index }) => (
@@ -415,8 +580,46 @@ export default function ReaderScreen() {
           updateCellsBatchingPeriod={50}
           initialNumToRender={2}
           windowSize={5}
+          onScrollToIndexFailed={({ index, averageItemLength }) => {
+            if (resumeRestoreAttemptsRef.current >= 3) return;
+            resumeRestoreAttemptsRef.current += 1;
+
+            // Page heights are image-dependent. Use RN's measured average first,
+            // then retry once the target page enters the render window.
+            webtoonListRef.current?.scrollToOffset({
+              offset: averageItemLength * index,
+              animated: false,
+            });
+            setTimeout(() => {
+              webtoonListRef.current?.scrollToIndex({ index, animated: false });
+            }, 100);
+          }}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ alignItems: 'center' }}
+          ListFooterComponent={
+            pages.length > 0 ? (
+              <View style={styles.endOfChapterCard}>
+                <Ionicons name="checkmark-circle" size={36} color={Colors.dark.accent} />
+                <Text style={styles.endOfChapterTitle}>Finished {chapterTitle}</Text>
+                {hasNextChapter ? (
+                  <Pressable
+                    onPress={handleNextChapter}
+                    style={({ pressed }) => [
+                      styles.nextChapterBtn,
+                      { opacity: pressed ? 0.8 : 1 },
+                    ]}
+                  >
+                    <Text style={styles.nextChapterBtnText}>
+                      Continue to Next Chapter ({chapterList[currentChapterIdx - 1]?.attributes?.chapter ? `Ch. ${chapterList[currentChapterIdx - 1].attributes.chapter}` : 'Next'})
+                    </Text>
+                    <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+                  </Pressable>
+                ) : (
+                  <Text style={styles.lastChapterSubtext}>You've reached the latest available chapter!</Text>
+                )}
+              </View>
+            ) : null
+          }
         />
       ) : mode === 'double' ? (
         <FlatList
@@ -451,7 +654,7 @@ export default function ReaderScreen() {
             );
             setCurrentPage(newIndex);
           }}
-          initialScrollIndex={currentPage}
+          initialScrollIndex={currentPage > 0 && currentPage < pages.length ? currentPage : undefined}
           getItemLayout={(_, index) => ({
             length: windowWidth,
             offset: windowWidth * index,
@@ -576,6 +779,7 @@ export default function ReaderScreen() {
         chapterTitle={chapterTitle}
         scanlationGroup={scanlationGroup}
         uploaderName={uploaderName}
+        currentChapterPublishAt={currentChapterPublishAt}
         currentPage={currentPage}
         totalPages={pages.length}
         onSelectPage={goToPage}
@@ -584,6 +788,7 @@ export default function ReaderScreen() {
           id: c.id,
           chapterNum: c.attributes.chapter ?? '?',
           title: c.attributes.title ?? '',
+          publishAt: c.attributes.publishAt || c.attributes.readableAt,
         }))}
         onSelectChapter={navigateToChapter}
         hasPrevChapter={hasPrevChapter}
@@ -640,23 +845,63 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 40,
   },
-  retryButton: {
-    paddingHorizontal: Spacing['2xl'],
-    paddingVertical: Spacing.md,
-    backgroundColor: '#E11D48',
-    borderRadius: Radius.lg,
+  errorActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
     marginTop: Spacing.md,
+    flexWrap: 'wrap',
+    paddingHorizontal: Spacing.lg,
+  },
+  errorNavBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 2,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    backgroundColor: '#18181B',
+  },
+  errorNavBtnText: {
+    fontSize: Typography.sizes.footnote,
+    fontWeight: Typography.weights.bold,
+  },
+  errorNextBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 2,
+    borderRadius: Radius.md,
+  },
+  errorNextBtnText: {
+    color: '#FFF',
+    fontSize: Typography.sizes.footnote,
+    fontWeight: Typography.weights.bold,
+  },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 2,
+    backgroundColor: '#E11D48',
+    borderRadius: Radius.md,
   },
   retryText: {
     color: '#FFF',
-    fontWeight: '600',
-    fontSize: Typography.sizes.body,
+    fontWeight: Typography.weights.bold,
+    fontSize: Typography.sizes.footnote,
   },
   backTextButton: {
-    marginTop: Spacing.sm,
+    marginTop: Spacing.md,
+    padding: Spacing.xs,
   },
   backTextLabel: {
-    fontSize: Typography.sizes.body,
+    fontSize: Typography.sizes.footnote,
+    fontWeight: Typography.weights.medium,
   },
 
   // Paged mode
@@ -716,6 +961,7 @@ const styles = StyleSheet.create({
     borderColor: '#27272A',
     paddingVertical: Spacing.xs,
     width: 220,
+    zIndex: 30,
   },
   modeOption: {
     flexDirection: 'row',
@@ -772,5 +1018,47 @@ const styles = StyleSheet.create({
   sliderFill: {
     height: '100%',
     backgroundColor: '#E11D48',
+  },
+
+  /* End of Chapter Card */
+  endOfChapterCard: {
+    paddingVertical: 36,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    backgroundColor: '#141417',
+    borderRadius: Radius.lg,
+    marginHorizontal: 16,
+    marginVertical: 32,
+    borderWidth: 1,
+    borderColor: '#27272A',
+  },
+  endOfChapterTitle: {
+    color: '#FAFAFA',
+    fontSize: Typography.sizes.headline,
+    fontWeight: Typography.weights.bold,
+    textAlign: 'center',
+  },
+  nextChapterBtn: {
+    backgroundColor: Colors.dark.accent,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: Radius.md,
+    gap: 8,
+    marginTop: 8,
+  },
+  nextChapterBtnText: {
+    color: '#FFFFFF',
+    fontSize: Typography.sizes.body,
+    fontWeight: Typography.weights.bold,
+  },
+  lastChapterSubtext: {
+    color: '#A1A1AA',
+    fontSize: Typography.sizes.footnote,
+    textAlign: 'center',
   },
 });
