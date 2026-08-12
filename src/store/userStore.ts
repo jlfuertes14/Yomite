@@ -7,6 +7,8 @@ import type { Session, User } from '@supabase/supabase-js';
 import * as WebBrowser from 'expo-web-browser';
 import { createURL, parse } from 'expo-linking';
 
+import { syncUserDataWithCloud } from '../services/cloudSync';
+
 interface UserState {
   user: User | null;
   session: Session | null;
@@ -27,9 +29,15 @@ export const useUserStore = create<UserState>((set) => ({
     try {
       const { data } = await supabase.auth.getSession();
       set({ session: data.session, user: data.session?.user ?? null, isLoading: false });
+      if (data.session?.user?.id) {
+        syncUserDataWithCloud(data.session.user.id);
+      }
 
       supabase.auth.onAuthStateChange((_event, session) => {
         set({ session, user: session?.user ?? null, isLoading: false });
+        if (session?.user?.id) {
+          syncUserDataWithCloud(session.user.id);
+        }
       });
     } catch (err) {
       set({ isLoading: false });
@@ -40,6 +48,7 @@ export const useUserStore = create<UserState>((set) => ({
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (!error && data.session) {
       set({ session: data.session, user: data.user });
+      if (data.user?.id) syncUserDataWithCloud(data.user.id);
     }
     return { error };
   },
@@ -48,6 +57,7 @@ export const useUserStore = create<UserState>((set) => ({
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (!error && data.session) {
       set({ session: data.session, user: data.user });
+      if (data.user?.id) syncUserDataWithCloud(data.user.id);
     }
     return { error };
   },

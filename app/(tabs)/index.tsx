@@ -426,7 +426,7 @@ export default function DiscoverScreen() {
     {
       id: 'popular',
       label: 'Popular New Titles',
-      icon: 'sparkles-outline',
+      icon: 'trending-up-outline',
       action: handleSelectPopular,
     },
     {
@@ -710,8 +710,8 @@ export default function DiscoverScreen() {
                 <View style={styles.popularListHeader}>
                   <View style={styles.popularHeaderCopy}>
                     <View style={[styles.popularEyebrowPill, { backgroundColor: colors.accentSubtle, borderColor: colors.accent }]}>
-                      <Ionicons name="sparkles-outline" size={12} color={colors.accent} />
-                      <Text style={[styles.popularEyebrowText, { color: colors.accent }]}>Top 10</Text>
+                      <Ionicons name="trending-up-outline" size={13} color={colors.accent} />
+                      <Text style={[styles.popularEyebrowText, { color: colors.accent }]}>Top Ranked</Text>
                     </View>
                     <Text style={[styles.popularScreenTitle, { color: colors.text }]}>
                       Popular New Titles
@@ -748,7 +748,9 @@ export default function DiscoverScreen() {
                           ]}
                         >
                           <View style={styles.popularRankBadge}>
-                            <Text style={styles.popularRankNumber}>{String(idx + 1).padStart(2, '0')}</Text>
+                            <Text style={[styles.popularRankNumber, { color: colors.accent }]}>
+                              {String(idx + 1).padStart(2, '0')}
+                            </Text>
                           </View>
 
                           <Image
@@ -1371,7 +1373,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   popularRankNumber: {
-    color: '#F43F5E',
     fontSize: Typography.sizes.title3,
     fontWeight: Typography.weights.bold,
     letterSpacing: -0.5,

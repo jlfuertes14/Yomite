@@ -62,7 +62,7 @@ export function SidebarDrawer({
     {
       id: 'popular',
       label: 'Popular New Titles',
-      icon: 'sparkles-outline',
+      icon: 'trending-up-outline',
       action: () => {
         onClose();
         onSelectPopular();

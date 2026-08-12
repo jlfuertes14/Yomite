@@ -36,19 +36,54 @@ export const useHistoryStore = create<HistoryState>()(
         }),
 
       removeEntry: (chapterId) =>
-        set((state) => ({
-          entries: state.entries.filter((e) => e.chapterId !== chapterId),
-        })),
+        set((state) => {
+          const target = state.entries.find((e) => e.chapterId === chapterId);
+          if (target) {
+            try {
+              const { useUserStore } = require('./userStore');
+              const { deleteCloudHistoryEntry } = require('../services/cloudSync');
+              const userId = useUserStore.getState().user?.id;
+              if (userId) {
+                deleteCloudHistoryEntry(userId, target.mangaId);
+              }
+            } catch (_e) {}
+          }
+          return {
+            entries: state.entries.filter((e) => e.chapterId !== chapterId),
+          };
+        }),
 
       removeEntries: (chapterIds) =>
         set((state) => {
           const setIds = new Set(chapterIds);
+          try {
+            const { useUserStore } = require('./userStore');
+            const { deleteCloudHistoryEntry } = require('../services/cloudSync');
+            const userId = useUserStore.getState().user?.id;
+            if (userId) {
+              state.entries
+                .filter((e) => setIds.has(e.chapterId))
+                .forEach((e) => deleteCloudHistoryEntry(userId, e.mangaId));
+            }
+          } catch (_e) {}
+
           return {
             entries: state.entries.filter((e) => !setIds.has(e.chapterId)),
           };
         }),
 
-      clearHistory: () => set({ entries: [] }),
+      clearHistory: () => {
+        try {
+          const { useUserStore } = require('./userStore');
+          const { clearCloudHistory } = require('../services/cloudSync');
+          const userId = useUserStore.getState().user?.id;
+          if (userId) {
+            clearCloudHistory(userId);
+          }
+        } catch (_e) {}
+
+        set({ entries: [] });
+      },
 
       getLatest: (count = 20) => get().entries.slice(0, count),
 

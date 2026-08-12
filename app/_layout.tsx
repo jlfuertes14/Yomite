@@ -11,11 +11,15 @@ import { ThemeProvider, DarkTheme } from 'expo-router/react-navigation';
 import { Colors } from '../constants/Colors';
 import { requestStoragePermissionOnLaunch } from '../src/services/storagePermission';
 
-SplashScreen.preventAutoHideAsync();
-SplashScreen.setOptions({
-  duration: 350,
-  fade: true,
-});
+SplashScreen.preventAutoHideAsync().catch(() => {});
+try {
+  if (typeof (SplashScreen as any).setOptions === 'function') {
+    (SplashScreen as any).setOptions({
+      duration: 350,
+      fade: true,
+    });
+  }
+} catch (_e) {}
 
 const YomiteDarkTheme = {
   ...DarkTheme,
