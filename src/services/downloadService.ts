@@ -1,6 +1,6 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
-import { useDownloadStore, DownloadedChapter } from '../store/downloadStore';
+import { useDownloadStore } from '../store/downloadStore';
 import { getChapterPages } from '../api/mangadex';
 
 /**
@@ -63,7 +63,14 @@ export async function downloadChapter(params: {
   const store = useDownloadStore.getState();
 
   try {
-    // 1. Register in store
+    // 1. Skip if chapter is already downloaded to prevent duplicates
+    const existing = store.chapters[chapterId];
+    if (existing && existing.status === 'completed') {
+      console.log(`[DownloadService] Chapter ${chapterId} is already downloaded. Skipping duplicate.`);
+      return;
+    }
+
+    // 2. Register in store
     store.startDownload({
       chapterId,
       mangaId,
@@ -74,47 +81,153 @@ export async function downloadChapter(params: {
       totalFiles: 0,
     });
 
-    // 2. Fetch page image URLs from MangaDex API
+    // 3. Fetch page image URLs from MangaDex API
     const { pages } = await getChapterPages(chapterId, false);
     if (!pages || pages.length === 0) {
       throw new Error('No page URLs returned for this chapter.');
     }
 
-    // 3. Ensure target local directory exists
-    const baseDir = getBaseDownloadDirectory();
-    const chapterDir = `${baseDir}${mangaId}/${chapterId}/`;
-    await FileSystem.makeDirectoryAsync(chapterDir, { intermediates: true });
+    let baseDir = getBaseDownloadDirectory();
+    const isSaf = baseDir.startsWith('content://');
 
-    const localPages: string[] = [];
-    let totalSizeBytes = 0;
-
-    // 4. Download pages sequentially
-    for (let i = 0; i < pages.length; i++) {
-      const pageUrl = pages[i];
-      const ext = pageUrl.split('.').pop()?.split('?')[0] || 'jpg';
-      const localFilePath = `${chapterDir}page_${i + 1}.${ext}`;
-
-      const downloadResult = await FileSystem.downloadAsync(pageUrl, localFilePath);
-      localPages.push(downloadResult.uri);
-
-      // Inspect file size
+    // 4. Try SAF download if user configured a SAF content:// URI
+    if (isSaf && (FileSystem as any).StorageAccessFramework) {
       try {
-        const fileInfo = await FileSystem.getInfoAsync(downloadResult.uri);
-        if (fileInfo.exists && fileInfo.size) {
-          totalSizeBytes += fileInfo.size;
-        }
-      } catch (err) {
-        // Ignore stat errors
+        await downloadChapterSaf(params, pages, baseDir);
+        return;
+      } catch (safErr: any) {
+        console.warn(
+          'SAF location is not writable or failed. Resetting to default app storage:',
+          safErr?.message || safErr
+        );
+        useDownloadStore.getState().setCustomStorageDirectory(null);
+        baseDir = `${(FileSystem as any).documentDirectory || ''}downloads/`;
       }
-
-      // Update store progress
-      useDownloadStore.getState().updateProgress(chapterId, i + 1, pages.length, [...localPages], totalSizeBytes);
     }
 
-    // 5. Write metadata json
-    const metaPath = `${chapterDir}meta.json`;
-    await FileSystem.writeAsStringAsync(
-      metaPath,
+    // 5. Standard FileSystem download (file://...)
+    await downloadChapterStandard(params, pages, baseDir);
+  } catch (error: any) {
+    console.error(`Failed to download chapter ${chapterId}:`, error);
+    useDownloadStore.getState().setFailed(chapterId, error?.message || 'Download failed');
+  }
+}
+
+/**
+ * Standard download implementation using file:// paths
+ */
+async function downloadChapterStandard(
+  params: any,
+  pages: string[],
+  baseDir: string
+): Promise<void> {
+  const { chapterId, mangaId, mangaTitle, chapterNum, chapterTitle } = params;
+  const chapterDir = `${baseDir}${mangaId}/${chapterId}/`;
+  await FileSystem.makeDirectoryAsync(chapterDir, { intermediates: true });
+
+  const localPages: string[] = [];
+  let totalSizeBytes = 0;
+
+  for (let i = 0; i < pages.length; i++) {
+    const pageUrl = pages[i];
+    const ext = pageUrl.split('.').pop()?.split('?')[0] || 'jpg';
+    const localFilePath = `${chapterDir}page_${i + 1}.${ext}`;
+
+    const downloadResult = await FileSystem.downloadAsync(pageUrl, localFilePath);
+    localPages.push(downloadResult.uri);
+
+    try {
+      const fileInfo = await FileSystem.getInfoAsync(downloadResult.uri);
+      if (fileInfo.exists && fileInfo.size) {
+        totalSizeBytes += fileInfo.size;
+      }
+    } catch (_err) {}
+
+    useDownloadStore.getState().updateProgress(chapterId, i + 1, pages.length, [...localPages], totalSizeBytes);
+  }
+
+  const metaPath = `${chapterDir}meta.json`;
+  await FileSystem.writeAsStringAsync(
+    metaPath,
+    JSON.stringify({
+      chapterId,
+      mangaId,
+      mangaTitle,
+      chapterNum,
+      chapterTitle,
+      pagesCount: localPages.length,
+      downloadedAt: new Date().toISOString(),
+    })
+  );
+  localPages.push(metaPath);
+
+  useDownloadStore.getState().setCompleted(chapterId, localPages, totalSizeBytes);
+}
+
+/**
+ * Android StorageAccessFramework (SAF) content:// download implementation
+ */
+async function downloadChapterSaf(
+  params: any,
+  pages: string[],
+  baseDir: string
+): Promise<void> {
+  const { chapterId, mangaId, mangaTitle, chapterNum, chapterTitle } = params;
+  const SAF = (FileSystem as any).StorageAccessFramework;
+
+  const parentUri = baseDir.replace(/\/$/, '');
+
+  let mangaFolderUri: string;
+  try {
+    mangaFolderUri = await SAF.makeDirectoryAsync(parentUri, mangaId);
+  } catch (_e) {
+    mangaFolderUri = `${parentUri}%2F${mangaId}`;
+  }
+
+  let chapterFolderUri: string;
+  try {
+    chapterFolderUri = await SAF.makeDirectoryAsync(mangaFolderUri, chapterId);
+  } catch (_e) {
+    chapterFolderUri = `${mangaFolderUri}%2F${chapterId}`;
+  }
+
+  const localPages: string[] = [];
+  let totalSizeBytes = 0;
+
+  for (let i = 0; i < pages.length; i++) {
+    const pageUrl = pages[i];
+    const ext = pageUrl.split('.').pop()?.split('?')[0] || 'jpg';
+    const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
+    const tempFile = `${(FileSystem as any).cacheDirectory || ''}temp_dl_${Date.now()}_${i}.${ext}`;
+
+    const tempRes = await FileSystem.downloadAsync(pageUrl, tempFile);
+
+    const base64Data = await FileSystem.readAsStringAsync(tempRes.uri, {
+      encoding: (FileSystem as any).EncodingType?.Base64 || 'base64',
+    });
+
+    const safFileUri = await SAF.createFileAsync(chapterFolderUri, `page_${i + 1}.${ext}`, mimeType);
+    await SAF.writeAsStringAsync(safFileUri, base64Data, {
+      encoding: (FileSystem as any).EncodingType?.Base64 || 'base64',
+    });
+
+    localPages.push(safFileUri);
+
+    try {
+      const info = await FileSystem.getInfoAsync(tempRes.uri);
+      if (info.exists && info.size) {
+        totalSizeBytes += info.size;
+      }
+      await FileSystem.deleteAsync(tempRes.uri, { idempotent: true });
+    } catch (_e) {}
+
+    useDownloadStore.getState().updateProgress(chapterId, i + 1, pages.length, [...localPages], totalSizeBytes);
+  }
+
+  try {
+    const metaFileUri = await SAF.createFileAsync(chapterFolderUri, 'meta.json', 'application/json');
+    await SAF.writeAsStringAsync(
+      metaFileUri,
       JSON.stringify({
         chapterId,
         mangaId,
@@ -125,27 +238,63 @@ export async function downloadChapter(params: {
         downloadedAt: new Date().toISOString(),
       })
     );
+    localPages.push(metaFileUri);
+  } catch (_e) {}
 
-    // 6. Complete download
-    useDownloadStore.getState().setCompleted(chapterId, localPages, totalSizeBytes);
-  } catch (error: any) {
-    console.error(`Failed to download chapter ${chapterId}:`, error);
-    useDownloadStore.getState().setFailed(chapterId, error?.message || 'Download failed');
-  }
+  useDownloadStore.getState().setCompleted(chapterId, localPages, totalSizeBytes);
 }
 
 /**
- * Delete a downloaded chapter from disk and storage
+ * Delete a downloaded chapter from disk and storage at native OS level
  */
 export async function removeDownloadedChapter(chapterId: string, mangaId: string): Promise<void> {
+  const store = useDownloadStore.getState();
+  const chapterObj = store.chapters[chapterId];
+  const baseDir = getBaseDownloadDirectory();
+  const SAF = (FileSystem as any).StorageAccessFramework;
+
   try {
-    const baseDir = getBaseDownloadDirectory();
-    const chapterDir = `${baseDir}${mangaId}/${chapterId}/`;
-    await FileSystem.deleteAsync(chapterDir, { idempotent: true });
-  } catch (err) {
-    console.warn(`Error deleting chapter files for ${chapterId}:`, err);
+    // 1. Delete all recorded page file URIs directly from disk / SAF
+    if (chapterObj && chapterObj.localPages && chapterObj.localPages.length > 0) {
+      for (const fileUri of chapterObj.localPages) {
+        if (!fileUri) continue;
+        try {
+          if (fileUri.startsWith('content://') && SAF) {
+            await SAF.deleteAsync(fileUri, { idempotent: true });
+          } else {
+            await FileSystem.deleteAsync(fileUri, { idempotent: true });
+          }
+        } catch (_e) {}
+      }
+    }
+
+    // 2. Delete standard internal documentDirectory folder (file://)
+    const docDir = (FileSystem as any).documentDirectory || '';
+    if (docDir) {
+      const internalChapterDir = `${docDir}downloads/${mangaId}/${chapterId}/`;
+      try {
+        await FileSystem.deleteAsync(internalChapterDir, { idempotent: true });
+      } catch (_e) {}
+    }
+
+    // 3. Clean up SAF directory entries if custom SAF folder is active
+    if (baseDir.startsWith('content://') && SAF) {
+      try {
+        const parentUri = baseDir.replace(/\/$/, '');
+        const folderFiles = await SAF.readDirectoryAsync(parentUri);
+        for (const fileUri of folderFiles) {
+          if (fileUri.includes(chapterId) || fileUri.includes(mangaId)) {
+            try {
+              await SAF.deleteAsync(fileUri, { idempotent: true });
+            } catch (_e) {}
+          }
+        }
+      } catch (_e) {}
+    }
+  } catch (_err) {
+    // Suppress non-fatal deletion warnings
   } finally {
-    useDownloadStore.getState().deleteDownload(chapterId);
+    store.deleteDownload(chapterId);
   }
 }
 
@@ -154,10 +303,6 @@ export async function removeDownloadedChapter(chapterId: string, mangaId: string
  */
 export async function getDownloadStorageUsage(): Promise<number> {
   try {
-    const baseDir = getBaseDownloadDirectory();
-    const info = await FileSystem.getInfoAsync(baseDir);
-    if (!info.exists) return 0;
-
     let totalBytes = 0;
     const chapters = Object.values(useDownloadStore.getState().chapters);
     chapters.forEach((ch) => {

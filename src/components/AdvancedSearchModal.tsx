@@ -1,7 +1,7 @@
 /**
  * AdvancedSearchModal — Full MangaDex Filter & Advanced Search Modal
- * Complete MangaDex Sort Options (13 exact options), Grouped Tags,
- * Content Rating, Demographics, Status, and "I'm Feeling Lucky" Random button.
+ * Responsive dialog modal on Web (floating centered card with backdrop)
+ * and sleek sheet/fullscreen modal on mobile.
  */
 import React, { useState, useEffect, useMemo } from 'react';
 import {
@@ -13,6 +13,7 @@ import {
   Pressable,
   TextInput,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -31,7 +32,7 @@ interface AdvancedSearchModalProps {
 const CONTENT_RATINGS: { key: 'safe' | 'suggestive' | 'erotica' | 'pornographic'; label: string }[] = [
   { key: 'safe', label: 'Safe' },
   { key: 'suggestive', label: 'Suggestive' },
-  { key: 'erotica', label: 'Erótica' },
+  { key: 'erotica', label: 'Erotica' },
   { key: 'pornographic', label: 'Pornographic' },
 ];
 
@@ -148,53 +149,47 @@ export function AdvancedSearchModal({
     return map;
   }, [tags]);
 
-  const toggleTag = (tagId: string) => {
-    if (!includedTags.includes(tagId) && !excludedTags.includes(tagId)) {
-      setIncludedTags([...includedTags, tagId]);
-    } else if (includedTags.includes(tagId)) {
-      setIncludedTags(includedTags.filter((t) => t !== tagId));
-      setExcludedTags([...excludedTags, tagId]);
-    } else {
-      setExcludedTags(excludedTags.filter((t) => t !== tagId));
-    }
-  };
-
   const toggleRating = (rating: 'safe' | 'suggestive' | 'erotica' | 'pornographic') => {
-    if (selectedRatings.includes(rating)) {
-      setSelectedRatings(selectedRatings.filter((r) => r !== rating));
-    } else {
-      setSelectedRatings([...selectedRatings, rating]);
-    }
+    setSelectedRatings((prev) =>
+      prev.includes(rating) ? prev.filter((r) => r !== rating) : [...prev, rating]
+    );
   };
 
   const toggleStatus = (status: 'ongoing' | 'completed' | 'cancelled' | 'hiatus') => {
-    if (selectedStatus.includes(status)) {
-      setSelectedStatus(selectedStatus.filter((s) => s !== status));
-    } else {
-      setSelectedStatus([...selectedStatus, status]);
-    }
+    setSelectedStatus((prev) =>
+      prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status]
+    );
   };
 
   const toggleDemographic = (demo: 'shounen' | 'shoujo' | 'josei' | 'seinen') => {
-    if (selectedDemographic.includes(demo)) {
-      setSelectedDemographic(selectedDemographic.filter((d) => d !== demo));
+    setSelectedDemographic((prev) =>
+      prev.includes(demo) ? prev.filter((d) => d !== demo) : [...prev, demo]
+    );
+  };
+
+  const toggleTag = (tagId: string) => {
+    if (includedTags.includes(tagId)) {
+      setIncludedTags((prev) => prev.filter((id) => id !== tagId));
+      setExcludedTags((prev) => [...prev, tagId]);
+    } else if (excludedTags.includes(tagId)) {
+      setExcludedTags((prev) => prev.filter((id) => id !== tagId));
     } else {
-      setSelectedDemographic([...selectedDemographic, demo]);
+      setIncludedTags((prev) => [...prev, tagId]);
     }
   };
 
   const handleReset = () => {
     setTitle('');
+    setActiveSortId('most_follows');
     setIncludedTags([]);
     setExcludedTags([]);
     setSelectedRatings(['safe', 'suggestive']);
     setSelectedStatus([]);
     setSelectedDemographic([]);
-    setActiveSortId('most_follows');
   };
 
   const handleApply = () => {
-    const selectedSortOpt = MANGADEX_SORT_OPTIONS.find((s) => s.id === activeSortId) ?? MANGADEX_SORT_OPTIONS[7];
+    const selectedSortOpt = MANGADEX_SORT_OPTIONS.find((o) => o.id === activeSortId) || MANGADEX_SORT_OPTIONS[0];
 
     onApplyFilters({
       title: title.trim() || undefined,
@@ -209,243 +204,284 @@ export function AdvancedSearchModal({
     onClose();
   };
 
-  return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      transparent={false}
-      onRequestClose={onClose}
-    >
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-        {/* Modal Header */}
-        <View style={[styles.header, { borderBottomColor: colors.border }]}>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>
-            Advanced Search
-          </Text>
-          <View style={styles.headerRight}>
-            <Pressable onPress={handleReset} style={styles.resetBtn}>
-              <Text style={[styles.resetBtnText, { color: colors.textMuted }]}>Reset Filters</Text>
-            </Pressable>
-            <Pressable onPress={onClose} style={styles.closeBtn}>
-              <Ionicons name="close" size={22} color={colors.text} />
-            </Pressable>
-          </View>
+  const isWeb = Platform.OS === 'web';
+
+  const modalBody = (
+    <View style={[styles.modalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      {/* Modal Header */}
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>
+          Advanced Search
+        </Text>
+        <View style={styles.headerRight}>
+          <Pressable onPress={handleReset} style={styles.resetBtn}>
+            <Text style={[styles.resetBtnText, { color: colors.accent }]}>Reset</Text>
+          </Pressable>
+          <Pressable onPress={onClose} style={styles.closeBtn} hitSlop={8}>
+            <Ionicons name="close" size={22} color={colors.text} />
+          </Pressable>
+        </View>
+      </View>
+
+      {/* Scrollable Content */}
+      <ScrollView
+        style={styles.scrollBody}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Title Input */}
+        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Title / Keywords</Text>
+        <TextInput
+          style={[styles.input, { color: colors.text, backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+          placeholder="Search title or keywords..."
+          placeholderTextColor={colors.textMuted}
+          value={title}
+          onChangeText={setTitle}
+        />
+
+        {/* MangaDex Official 13 Sort Options */}
+        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Sort By</Text>
+        <View style={styles.chipRow}>
+          {MANGADEX_SORT_OPTIONS.map((opt) => {
+            const active = activeSortId === opt.id;
+            return (
+              <Pressable
+                key={opt.id}
+                onPress={() => setActiveSortId(opt.id)}
+                style={[
+                  styles.chip,
+                  {
+                    backgroundColor: active ? colors.text : colors.surfaceElevated,
+                    borderColor: active ? colors.text : colors.border,
+                  },
+                ]}
+              >
+                <Text style={[styles.chipText, { color: active ? colors.background : colors.textSecondary }]}>
+                  {opt.label}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
 
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Title Input */}
-          <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Title / Keywords</Text>
-          <TextInput
-            style={[styles.input, { color: colors.text, backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
-            placeholder="Search title..."
-            placeholderTextColor={colors.textMuted}
-            value={title}
-            onChangeText={setTitle}
-          />
+        {/* Content Rating */}
+        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Content Rating</Text>
+        <View style={styles.chipRow}>
+          {CONTENT_RATINGS.map((r) => {
+            const active = selectedRatings.includes(r.key);
+            return (
+              <Pressable
+                key={r.key}
+                onPress={() => toggleRating(r.key)}
+                style={[
+                  styles.chip,
+                  {
+                    backgroundColor: active ? colors.surfaceElevated : colors.surface,
+                    borderColor: active ? colors.accent : colors.border,
+                  },
+                ]}
+              >
+                <Text style={[styles.chipText, { color: active ? colors.accent : colors.textSecondary }]}>
+                  {r.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
-          {/* MangaDex Official 13 Sort Options */}
-          <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Sort By</Text>
-          <View style={styles.chipRow}>
-            {MANGADEX_SORT_OPTIONS.map((opt) => {
-              const active = activeSortId === opt.id;
-              return (
-                <Pressable
-                  key={opt.id}
-                  onPress={() => setActiveSortId(opt.id)}
-                  style={[
-                    styles.chip,
-                    {
-                      backgroundColor: active ? colors.text : colors.surface,
-                      borderColor: active ? colors.text : colors.border,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.chipText, { color: active ? colors.background : colors.textSecondary }]}>
-                    {opt.label}
+        {/* Publication Status */}
+        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Publication Status</Text>
+        <View style={styles.chipRow}>
+          {STATUSES.map((s) => {
+            const active = selectedStatus.includes(s.key);
+            return (
+              <Pressable
+                key={s.key}
+                onPress={() => toggleStatus(s.key)}
+                style={[
+                  styles.chip,
+                  {
+                    backgroundColor: active ? colors.surfaceElevated : colors.surface,
+                    borderColor: active ? colors.text : colors.border,
+                  },
+                ]}
+              >
+                <Text style={[styles.chipText, { color: active ? colors.text : colors.textSecondary }]}>
+                  {s.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {/* Demographic */}
+        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Magazine Demographic</Text>
+        <View style={styles.chipRow}>
+          {DEMOGRAPHICS.map((d) => {
+            const active = selectedDemographic.includes(d.key);
+            return (
+              <Pressable
+                key={d.key}
+                onPress={() => toggleDemographic(d.key)}
+                style={[
+                  styles.chip,
+                  {
+                    backgroundColor: active ? colors.surfaceElevated : colors.surface,
+                    borderColor: active ? colors.text : colors.border,
+                  },
+                ]}
+              >
+                <Text style={[styles.chipText, { color: active ? colors.text : colors.textSecondary }]}>
+                  {d.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {/* Grouped Tags (Format, Genre, Theme, Content) */}
+        <View style={styles.tagHeaderRow}>
+          <Text style={[styles.sectionLabel, { color: colors.text }]}>Tags & Genres</Text>
+          <Text style={[styles.tagHelpText, { color: colors.textMuted }]}>
+            Tap: Include (+) / Exclude (-)
+          </Text>
+        </View>
+
+        {isLoadingTags ? (
+          <ActivityIndicator color={colors.accent} style={{ marginVertical: 20 }} />
+        ) : (
+          GROUP_ORDER.map((group) => {
+            const groupTagList = groupedTags[group.key] ?? [];
+            if (groupTagList.length === 0) return null;
+
+            return (
+              <View key={group.key} style={styles.tagGroupBlock}>
+                <View style={styles.groupHeaderRow}>
+                  <Text style={[styles.groupHeaderText, { color: colors.text }]}>
+                    {group.label}
                   </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+                  <View style={[styles.groupHeaderLine, { backgroundColor: colors.border }]} />
+                </View>
 
-          {/* Content Rating */}
-          <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Content Rating</Text>
-          <View style={styles.chipRow}>
-            {CONTENT_RATINGS.map((r) => {
-              const active = selectedRatings.includes(r.key);
-              return (
-                <Pressable
-                  key={r.key}
-                  onPress={() => toggleRating(r.key)}
-                  style={[
-                    styles.chip,
-                    {
-                      backgroundColor: active ? colors.surfaceElevated : colors.surface,
-                      borderColor: active ? colors.accent : colors.border,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.chipText, { color: active ? colors.accent : colors.textSecondary }]}>
-                    {r.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          {/* Publication Status */}
-          <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Publication Status</Text>
-          <View style={styles.chipRow}>
-            {STATUSES.map((s) => {
-              const active = selectedStatus.includes(s.key);
-              return (
-                <Pressable
-                  key={s.key}
-                  onPress={() => toggleStatus(s.key)}
-                  style={[
-                    styles.chip,
-                    {
-                      backgroundColor: active ? colors.surfaceElevated : colors.surface,
-                      borderColor: active ? colors.text : colors.border,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.chipText, { color: active ? colors.text : colors.textSecondary }]}>
-                    {s.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          {/* Demographic */}
-          <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Magazine Demographic</Text>
-          <View style={styles.chipRow}>
-            {DEMOGRAPHICS.map((d) => {
-              const active = selectedDemographic.includes(d.key);
-              return (
-                <Pressable
-                  key={d.key}
-                  onPress={() => toggleDemographic(d.key)}
-                  style={[
-                    styles.chip,
-                    {
-                      backgroundColor: active ? colors.surfaceElevated : colors.surface,
-                      borderColor: active ? colors.text : colors.border,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.chipText, { color: active ? colors.text : colors.textSecondary }]}>
-                    {d.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          {/* Grouped Tags (Format, Genre, Theme, Content) */}
-          <View style={styles.tagHeaderRow}>
-            <Text style={[styles.sectionLabel, { color: colors.text }]}>Tags & Genres</Text>
-            <Text style={[styles.tagHelpText, { color: colors.textMuted }]}>
-              Tap: Include (+) / Exclude (-)
-            </Text>
-          </View>
-
-          {isLoadingTags ? (
-            <ActivityIndicator color={colors.accent} style={{ marginVertical: 20 }} />
-          ) : (
-            GROUP_ORDER.map((group) => {
-              const groupTagList = groupedTags[group.key] ?? [];
-              if (groupTagList.length === 0) return null;
-
-              return (
-                <View key={group.key} style={styles.tagGroupBlock}>
-                  {/* Group Section Header with Horizontal Line */}
-                  <View style={styles.groupHeaderRow}>
-                    <Text style={[styles.groupHeaderText, { color: colors.text }]}>
-                      {group.label}
-                    </Text>
-                    <View style={[styles.groupHeaderLine, { backgroundColor: colors.border }]} />
-                  </View>
-
-                  {/* Group Tag Chips */}
-                  <View style={styles.chipRow}>
-                    {groupTagList.map((t) => {
-                      const isInc = includedTags.includes(t.id);
-                      const isExc = excludedTags.includes(t.id);
-                      const tagName = t.attributes.name.en ?? Object.values(t.attributes.name)[0];
-                      return (
-                        <Pressable
-                          key={t.id}
-                          onPress={() => toggleTag(t.id)}
+                <View style={styles.chipRow}>
+                  {groupTagList.map((t) => {
+                    const isInc = includedTags.includes(t.id);
+                    const isExc = excludedTags.includes(t.id);
+                    const tagName = t.attributes.name.en ?? Object.values(t.attributes.name)[0];
+                    return (
+                      <Pressable
+                        key={t.id}
+                        onPress={() => toggleTag(t.id)}
+                        style={[
+                          styles.tagChip,
+                          {
+                            backgroundColor: isInc
+                              ? 'rgba(16,185,129,0.18)'
+                              : isExc
+                              ? 'rgba(244,63,94,0.18)'
+                              : colors.surfaceElevated,
+                            borderColor: isInc
+                              ? colors.emerald
+                              : isExc
+                              ? colors.accent
+                              : colors.border,
+                          },
+                        ]}
+                      >
+                        <Text
                           style={[
-                            styles.tagChip,
+                            styles.tagChipText,
                             {
-                              backgroundColor: isInc
-                                ? 'rgba(16,185,129,0.18)'
-                                : isExc
-                                ? 'rgba(244,63,94,0.18)'
-                                : colors.surface,
-                              borderColor: isInc
+                              color: isInc
                                 ? colors.emerald
                                 : isExc
                                 ? colors.accent
-                                : colors.border,
+                                : colors.textSecondary,
                             },
                           ]}
                         >
-                          <Text
-                            style={[
-                              styles.tagChipText,
-                              {
-                                color: isInc
-                                  ? colors.emerald
-                                  : isExc
-                                  ? colors.accent
-                                  : colors.textSecondary,
-                              },
-                            ]}
-                          >
-                            {isInc ? `+ ${tagName}` : isExc ? `- ${tagName}` : tagName}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
+                          {isInc ? `+ ${tagName}` : isExc ? `- ${tagName}` : tagName}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
                 </View>
-              );
-            })
-          )}
+              </View>
+            );
+          })
+        )}
 
-          <View style={{ height: 100 }} />
-        </ScrollView>
+        <View style={{ height: 24 }} />
+      </ScrollView>
 
-        {/* Apply Footer Bar */}
-        <View style={[styles.applyFooter, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
-          {onRandomManga && (
-            <Pressable
-              onPress={() => {
-                onClose();
-                onRandomManga();
-              }}
-              style={[styles.luckyBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
-            >
-              <Ionicons name="dice-outline" size={16} color={colors.text} />
-              <Text style={[styles.luckyBtnText, { color: colors.text }]}>I'm Feeling Lucky</Text>
-            </Pressable>
-          )}
-          <Pressable onPress={handleApply} style={[styles.applyBtn, { backgroundColor: colors.accent }]}>
-            <Ionicons name="search" size={18} color="#FFF" />
-            <Text style={styles.applyBtnText}>Search</Text>
+      {/* Apply Footer Bar */}
+      <View style={[styles.applyFooter, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
+        {onRandomManga && (
+          <Pressable
+            onPress={() => {
+              onClose();
+              onRandomManga();
+            }}
+            style={[styles.luckyBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+          >
+            <Ionicons name="dice-outline" size={16} color={colors.text} />
+            <Text style={[styles.luckyBtnText, { color: colors.text }]}>I'm Feeling Lucky</Text>
           </Pressable>
+        )}
+        <Pressable onPress={handleApply} style={[styles.applyBtn, { backgroundColor: colors.accent }]}>
+          <Ionicons name="search" size={18} color="#FFFFFF" />
+          <Text style={styles.applyBtnText}>Search</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+
+  return (
+    <Modal
+      visible={visible}
+      animationType={isWeb ? 'fade' : 'slide'}
+      transparent={isWeb}
+      onRequestClose={onClose}
+    >
+      {isWeb ? (
+        <View style={styles.webModalOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+          {modalBody}
         </View>
-      </SafeAreaView>
+      ) : (
+        <SafeAreaView style={[styles.mobileContainer, { backgroundColor: colors.background }]}>
+          {modalBody}
+        </SafeAreaView>
+      )}
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  webModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing.md,
+  },
+  mobileContainer: {
+    flex: 1,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: Platform.OS === 'web' ? 760 : undefined,
+    maxHeight: Platform.OS === 'web' ? ('88vh' as any) : '100%',
+    flex: Platform.OS === 'web' ? undefined : 1,
+    borderRadius: Platform.OS === 'web' ? Radius.lg : 0,
+    borderWidth: Platform.OS === 'web' ? 1 : 0,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 25,
+    elevation: 10,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -474,10 +510,13 @@ const styles = StyleSheet.create({
   closeBtn: {
     padding: 4,
   },
+  scrollBody: {
+    flexGrow: 1,
+  },
   content: {
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.lg,
-    gap: Spacing.md,
+    paddingTop: Spacing.md,
+    gap: Spacing.sm,
   },
   sectionLabel: {
     fontSize: Typography.sizes.footnote,
@@ -485,96 +524,96 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xs,
   },
   input: {
-    height: 42,
-    borderRadius: Radius.md,
+    height: 44,
     borderWidth: 1,
+    borderRadius: Radius.md,
     paddingHorizontal: Spacing.md,
     fontSize: Typography.sizes.body,
   },
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: Spacing.xs,
+    gap: 6,
   },
   chip: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     borderRadius: Radius.full,
     borderWidth: 1,
   },
   chipText: {
-    fontSize: Typography.sizes.footnote,
+    fontSize: Typography.sizes.caption,
     fontWeight: Typography.weights.medium,
   },
   tagHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: Spacing.md,
+    marginTop: Spacing.sm,
   },
   tagHelpText: {
     fontSize: Typography.sizes.caption,
   },
   tagGroupBlock: {
-    marginTop: Spacing.sm,
+    gap: Spacing.xs,
+    marginTop: Spacing.xs,
   },
   groupHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: Spacing.sm,
-    gap: Spacing.md,
+    gap: Spacing.sm,
+    marginVertical: 4,
   },
   groupHeaderText: {
-    fontSize: Typography.sizes.headline,
+    fontSize: Typography.sizes.caption,
     fontWeight: Typography.weights.bold,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   groupHeaderLine: {
     flex: 1,
     height: 1,
   },
   tagChip: {
-    paddingHorizontal: Spacing.sm + 4,
-    paddingVertical: 6,
-    borderRadius: Radius.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: Radius.full,
     borderWidth: 1,
   },
   tagChipText: {
-    fontSize: Typography.sizes.caption + 1,
+    fontSize: 11,
     fontWeight: Typography.weights.medium,
   },
   applyFooter: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: Spacing.lg,
-    borderTopWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderTopWidth: 1,
     gap: Spacing.md,
   },
   luckyBtn: {
-    height: 46,
-    paddingHorizontal: Spacing.md,
-    borderRadius: Radius.md,
-    borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    height: 44,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.md,
+    borderWidth: 1,
     gap: 6,
   },
   luckyBtnText: {
     fontSize: Typography.sizes.footnote,
-    fontWeight: Typography.weights.bold,
+    fontWeight: Typography.weights.semibold,
   },
   applyBtn: {
     flex: 1,
-    height: 46,
-    borderRadius: Radius.md,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing.sm,
+    height: 44,
+    borderRadius: Radius.md,
+    gap: 6,
   },
   applyBtnText: {
     color: '#FFFFFF',

@@ -20,6 +20,7 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CacheManager } from '../utils/cacheManager';
+import { ApiLogger } from '../services/apiLogger';
 import type {
   Manga,
   Chapter,
@@ -56,8 +57,31 @@ const api: AxiosInstance = axios.create({
   },
 });
 
-// Request interceptor: inject auth token when available
+function parseRateLimitHeaders(headers: any) {
+  if (!headers) return undefined;
+  const limitStr = headers['x-ratelimit-limit'] ?? headers['X-RateLimit-Limit'];
+  const remainingStr = headers['x-ratelimit-remaining'] ?? headers['X-RateLimit-Remaining'];
+  const retryAfterStr =
+    headers['x-ratelimit-retry-after'] ??
+    headers['X-RateLimit-Retry-After'] ??
+    headers['retry-after'] ??
+    headers['Retry-After'];
+
+  const limit = limitStr ? parseInt(limitStr, 10) : undefined;
+  const remaining = remainingStr ? parseInt(remainingStr, 10) : undefined;
+  const retryAfter = retryAfterStr ? parseInt(retryAfterStr, 10) : undefined;
+
+  return {
+    limit: limit !== undefined && !isNaN(limit) ? limit : undefined,
+    remaining: remaining !== undefined && !isNaN(remaining) ? remaining : undefined,
+    retryAfter: retryAfter !== undefined && !isNaN(retryAfter) ? retryAfter : undefined,
+  };
+}
+
+// Request interceptor: inject auth token when available & attach start time
 api.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
+  (config as any)._startTime = Date.now();
+
   // Never send auth headers to image servers
   const url = config.url ?? '';
   if (url.includes('uploads.mangadex.org') || url.includes('mangadex.network')) {
@@ -72,11 +96,50 @@ api.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
   return config;
 });
 
-// Response interceptor: auto-retry on network errors/5xx/429 & auto-refresh on 401
+// Response interceptor: auto-retry on network errors/5xx/429 & auto-refresh on 401 & log to ApiLogger
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const startTime = (response.config as any)._startTime || Date.now();
+    const durationMs = Date.now() - startTime;
+    const url = response.config.url || '';
+    const method = (response.config.method || 'GET').toUpperCase();
+    const rateLimit = parseRateLimitHeaders(response.headers);
+
+    ApiLogger.logRequest({
+      timestamp: Date.now(),
+      method,
+      url,
+      status: response.status,
+      statusText: response.statusText,
+      durationMs,
+      rateLimit,
+    });
+
+    return response;
+  },
   async (error) => {
     const original = error.config;
+    if (original) {
+      const startTime = (original as any)._startTime || Date.now();
+      const durationMs = Date.now() - startTime;
+      const url = original.url || '';
+      const method = (original.method || 'GET').toUpperCase();
+      const status = error.response?.status ?? null;
+      const statusText = error.response?.statusText || (error.message ? error.message : 'Network Error');
+      const rateLimit = parseRateLimitHeaders(error.response?.headers);
+
+      ApiLogger.logRequest({
+        timestamp: Date.now(),
+        method,
+        url,
+        status,
+        statusText,
+        durationMs,
+        error: error.response?.data?.errors?.[0]?.detail || error.message || 'Request failed',
+        rateLimit,
+      });
+    }
+
     if (!original) return Promise.reject(error);
 
     // Auto-retry up to 3 times on network errors or 5xx/429 status codes
@@ -86,7 +149,7 @@ api.interceptors.response.use(
       (!error.response || error.response.status === 429 || error.response.status >= 500)
     ) {
       original._retryCount += 1;
-      const delay = Math.pow(2, original._retryCount) * 600;
+      const delay = Math.pow(2, original._retryCount) * 800;
       await new Promise((resolve) => setTimeout(resolve, delay));
       return api(original);
     }
@@ -253,8 +316,8 @@ export function getMangaDescription(manga: Manga): string {
 // ─── Search & Discovery ──────────────────────────────────────────
 
 export async function searchManga(
-  filters: SearchFilters,
-  limit = 20,
+  filters: SearchFilters = {},
+  limit = 27,
   offset = 0
 ): Promise<{ data: Manga[]; total: number }> {
   if (offset + limit > 10000) {
@@ -318,7 +381,7 @@ export async function getPopularManga(limit = 10, bypassCache = false): Promise<
 }
 
 export async function getLatestUpdates(
-  limit = 24,
+  limit = 27,
   offset = 0,
   bypassCache = false
 ): Promise<{ data: Manga[]; total: number }> {
@@ -372,7 +435,7 @@ export async function getLatestUpdates(
 }
 
 export async function getRecentlyAdded(
-  limit = 24,
+  limit = 27,
   offset = 0,
   bypassCache = false
 ): Promise<{ data: Manga[]; total: number }> {

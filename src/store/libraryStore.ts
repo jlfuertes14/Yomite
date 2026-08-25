@@ -1,6 +1,6 @@
 /**
  * Library Store — Zustand + AsyncStorage
- * Manages bookmarks, categories, and read status
+ * Manages bookmarks, categories, total available chapters, and read/unread status
  */
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
@@ -12,8 +12,9 @@ interface LibraryState {
   addToLibrary: (entry: Omit<LibraryEntry, 'addedAt' | 'updatedAt'>) => void;
   removeFromLibrary: (mangaId: string) => void;
   updateCategory: (mangaId: string, category: LibraryCategory) => void;
-  updateReadProgress: (mangaId: string, chapterId: string, page: number) => void;
+  updateReadProgress: (mangaId: string, chapterId: string, page: number, unreadCount?: number) => void;
   updateUnreadCount: (mangaId: string, count: number) => void;
+  updateChapterCounts: (mangaId: string, totalChapters: number, unreadCount: number) => void;
   isInLibrary: (mangaId: string) => boolean;
   getEntriesByCategory: (category: LibraryCategory) => LibraryEntry[];
 }
@@ -53,7 +54,7 @@ export const useLibraryStore = create<LibraryState>()(
           };
         }),
 
-      updateReadProgress: (mangaId, chapterId, page) =>
+      updateReadProgress: (mangaId, chapterId, page, unreadCount) =>
         set((state) => {
           const existing = state.entries[mangaId];
           if (!existing) return state;
@@ -64,6 +65,7 @@ export const useLibraryStore = create<LibraryState>()(
                 ...existing,
                 lastReadChapterId: chapterId,
                 lastReadPage: page,
+                unreadCount: unreadCount !== undefined ? unreadCount : existing.unreadCount,
                 updatedAt: Date.now(),
               },
             },
@@ -78,6 +80,23 @@ export const useLibraryStore = create<LibraryState>()(
             entries: {
               ...state.entries,
               [mangaId]: { ...existing, unreadCount: count, updatedAt: Date.now() },
+            },
+          };
+        }),
+
+      updateChapterCounts: (mangaId, totalChapters, unreadCount) =>
+        set((state) => {
+          const existing = state.entries[mangaId];
+          if (!existing) return state;
+          return {
+            entries: {
+              ...state.entries,
+              [mangaId]: {
+                ...existing,
+                totalChapters,
+                unreadCount,
+                updatedAt: Date.now(),
+              },
             },
           };
         }),

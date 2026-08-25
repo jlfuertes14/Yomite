@@ -12,6 +12,7 @@ import {
   Modal,
   ScrollView,
   TextInput,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -148,28 +149,31 @@ export function ReaderMenuDrawer({
     }
   };
 
+  const isWeb = Platform.OS === 'web';
+
   return (
     <Modal
       visible={visible}
-      animationType="slide"
+      animationType={isWeb ? 'fade' : 'slide'}
       transparent
       onRequestClose={onClose}
     >
-      <View style={styles.backdrop}>
+      <View style={[styles.backdrop, isWeb && styles.webBackdrop]}>
         <Pressable style={styles.overlayPress} onPress={onClose} />
 
-        <SafeAreaView style={[styles.drawerContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <SafeAreaView
+          style={[
+            styles.drawerContainer,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+            isWeb && styles.webFloatingWindowContainer,
+          ]}
+        >
           {/* Header Bar */}
-          <View style={styles.drawerHeader}>
+          <View style={[styles.drawerHeader, isWeb && styles.webFloatingHeader]}>
             <View style={styles.headerLeftBtns}>
               <Pressable onPress={onClose} style={styles.iconBtn}>
                 <Ionicons name="close" size={22} color={colors.text} />
               </Pressable>
-              {onGoBackToManga && (
-                <Pressable onPress={onGoBackToManga} style={styles.iconBtn}>
-                  <Ionicons name="arrow-back" size={20} color={colors.text} />
-                </Pressable>
-              )}
               {onGoToHome && (
                 <Pressable onPress={onGoToHome} style={styles.iconBtn}>
                   <Ionicons name="home-outline" size={20} color={colors.text} />
@@ -588,6 +592,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.6)',
     flexDirection: 'row',
   },
+  webBackdrop: {
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    justifyContent: 'flex-end',
+    alignItems: 'flex-end',
+  },
   overlayPress: {
     flex: 1,
   },
@@ -597,11 +606,56 @@ const styles = StyleSheet.create({
     borderLeftWidth: 1,
     paddingHorizontal: Spacing.lg,
   },
+  webFloatingWindowContainer: {
+    position: 'fixed' as any,
+    top: 24,
+    right: 24,
+    bottom: 24,
+    width: 380,
+    maxHeight: 'calc(100vh - 48px)' as any,
+    borderRadius: Radius.xl,
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.65,
+    shadowRadius: 32,
+    elevation: 25,
+    overflow: 'hidden',
+    zIndex: 9999,
+  },
   drawerHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: Spacing.md,
+  },
+  webFloatingHeader: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    paddingBottom: Spacing.sm,
+  },
+  webHeaderBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(244, 63, 94, 0.12)',
+    borderColor: 'rgba(244, 63, 94, 0.3)',
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: Radius.full,
+  },
+  webStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#F43F5E',
+  },
+  webHeaderBadgeText: {
+    fontSize: 11,
+    fontWeight: Typography.weights.bold,
+    color: '#F43F5E',
+    letterSpacing: 0.4,
   },
   headerLeftBtns: {
     flexDirection: 'row',

@@ -7,6 +7,7 @@ import {
   Pressable,
   ScrollView,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,10 +18,12 @@ import { parseMangaDexUrl } from '../../src/api/mangadex';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
 import { AnimatedCard } from '../../src/components/AnimatedCard';
 import { AnimatedPressable } from '../../src/components/AnimatedPressable';
+import { SidebarDrawer } from '../../src/components/SidebarDrawer';
 
 export default function ExtensionsScreen() {
   const router = useRouter();
   const colors = useThemeColors();
+  const [drawerVisible, setDrawerVisible] = useState(false);
   const [url, setUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -98,14 +101,31 @@ export default function ExtensionsScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.text }]}>Extensions & Sources</Text>
-        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-          Manage content sources and open external MangaDex URLs directly
-        </Text>
+      <View style={[{ flex: 1, width: '100%' }, Platform.OS === 'web' && styles.webCenteredContent]}>
+        <View style={styles.header}>
+        <View style={styles.headerTitleRow}>
+          {Platform.OS === 'web' && (
+            <Pressable
+              onPress={() => setDrawerVisible(true)}
+              style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1 }]}
+              hitSlop={8}
+            >
+              <Ionicons name="menu" size={26} color={colors.text} />
+            </Pressable>
+          )}
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.title, { color: colors.text }]}>Extensions & Sources</Text>
+            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+              Manage content sources and open external MangaDex URLs directly
+            </Text>
+          </View>
+        </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.content}
+      >
         {/* Open Direct URL Card */}
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.text }]}>
@@ -203,16 +223,33 @@ export default function ExtensionsScreen() {
         onConfirm={confirmModalConfig.onConfirm}
         onCancel={() => setConfirmModalConfig((prev) => ({ ...prev, visible: false }))}
       />
+
+      {/* Hamburger Slide Drawer */}
+      <SidebarDrawer visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  webCenteredContent: {
+    maxWidth: 1400,
+    width: '100%',
+    alignSelf: 'center',
+  },
   header: {
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
     paddingBottom: Spacing.xs,
+  },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  plainIconButton: {
+    padding: 4,
   },
   title: {
     fontSize: Typography.sizes.title1,

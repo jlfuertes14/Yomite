@@ -2,7 +2,7 @@
  * Reader Engine Screen — Multi-Mode Reader (Webtoon, RTL, LTR, Single, Double)
  * Includes MangaDex Official Reader Side Menu Drawer (ReaderMenuDrawer)
  */
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -23,6 +23,7 @@ import * as Haptics from 'expo-haptics';
 import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
 import { useReaderStore } from '../../src/store/readerStore';
 import { useHistoryStore } from '../../src/store/historyStore';
+import { useLibraryStore } from '../../src/store/libraryStore';
 import { useDownloadStore } from '../../src/store/downloadStore';
 import {
   getChapterPages,
@@ -39,6 +40,8 @@ import { ReaderThemes } from '../../constants/Colors';
 import { ReaderMenuDrawer } from '../../src/components/ReaderMenuDrawer';
 import { OfflineState } from '../../src/components/OfflineState';
 import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
+import { ApiLogger } from '../../src/services/apiLogger';
+import { ZoomableImage } from '../../src/components/ZoomableImage';
 import type { ReadingMode, Chapter } from '../../src/types';
 
 const MODE_LABELS: Record<ReadingMode, string> = {
@@ -48,6 +51,121 @@ const MODE_LABELS: Record<ReadingMode, string> = {
   single: 'Single Page',
   double: 'Double Page',
 };
+
+interface ReaderImagePageProps {
+  url: string;
+  index: number;
+  width: number;
+  height: number;
+  contentFit: 'contain' | 'cover' | 'fill';
+  onTap?: (x: number) => void;
+  onAspectMeasured?: (ratio: number) => void;
+}
+
+const ReaderImagePage = React.memo(function ReaderImagePage({
+  url,
+  index,
+  width,
+  height,
+  contentFit,
+  onTap,
+  onAspectMeasured,
+}: ReaderImagePageProps) {
+  const [isError, setIsError] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const [isRetrying, setIsRetrying] = useState(false);
+
+  const imageSource = useMemo(() => {
+    if (!url) return null;
+    if (retryCount === 0) return { uri: url };
+    const separator = url.includes('?') ? '&' : '?';
+    return { uri: `${url}${separator}retry=${retryCount}` };
+  }, [url, retryCount]);
+
+  const handleImageError = useCallback(() => {
+    ApiLogger.logRequest({
+      timestamp: Date.now(),
+      method: 'GET_IMG',
+      url,
+      status: 429,
+      statusText: 'Image Load Failed',
+      durationMs: 0,
+      error: `Page ${index + 1} image failed to load (Rate limit or network error)`,
+    });
+
+    if (retryCount < 3) {
+      setIsRetrying(true);
+      const delay = Math.pow(2, retryCount + 1) * 800;
+      setTimeout(() => {
+        setRetryCount((prev) => prev + 1);
+        setIsRetrying(false);
+      }, delay);
+    } else {
+      setIsError(true);
+      setIsRetrying(false);
+    }
+  }, [url, index, retryCount]);
+
+  const handleManualRetry = useCallback(() => {
+    setIsError(false);
+    setIsRetrying(true);
+    setRetryCount((prev) => prev + 1);
+    setTimeout(() => setIsRetrying(false), 500);
+  }, []);
+
+  return (
+    <View style={{ width, height, justifyContent: 'center', alignItems: 'center' }}>
+      {isError ? (
+        <View style={[styles.imageErrorCard, { width: Math.min(width - 32, 420) }]}>
+          <Ionicons name="warning-outline" size={32} color="#F59E0B" />
+          <Text style={styles.imageErrorTitle}>Page {index + 1} Load Failed</Text>
+          <Text style={styles.imageErrorSubtext}>
+            MangaDex rate limit (429) or network timeout.
+          </Text>
+
+          <Pressable
+            onPress={handleManualRetry}
+            style={({ pressed }) => [
+              styles.imageRetryBtn,
+              pressed && { opacity: 0.8 },
+            ]}
+          >
+            <Ionicons name="refresh" size={16} color="#FFFFFF" />
+            <Text style={styles.imageRetryBtnText}>Retry Page {index + 1}</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={{ width, height, justifyContent: 'center', alignItems: 'center' }}>
+          {imageSource && (
+            <ZoomableImage
+              source={imageSource}
+              style={{ width, height }}
+              contentFit={contentFit}
+              recyclingKey={url}
+              onTap={onTap}
+              onLoad={(e) => {
+                setIsError(false);
+                if (e.source?.width && e.source?.height && onAspectMeasured) {
+                  onAspectMeasured(e.source.height / e.source.width);
+                }
+              }}
+              onError={handleImageError}
+            />
+          )}
+
+          {isRetrying && (
+            <View style={styles.imageRetryOverlay}>
+              <ActivityIndicator size="small" color="#E11D48" />
+              <Text style={styles.imageRetryingText}>
+                Rate limited / Retrying page {index + 1} ({retryCount + 1}/3)...
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
+    </View>
+  );
+});
 
 interface WebtoonPageItemProps {
   url: string;
@@ -73,27 +191,17 @@ const WebtoonPageItem = React.memo(function WebtoonPageItem({
   const displayFit = imageFit === 'fit_height' ? 'contain' : 'fill';
 
   return (
-    <Pressable
-      onPress={(e) => onTap(e.nativeEvent.locationX)}
-      style={{ width: webtoonWidth, alignItems: 'center' }}
-    >
-      <Image
-        source={{ uri: url }}
-        style={{
-          width: webtoonWidth,
-          height: displayHeight,
-        }}
-        contentFit={displayFit}
-        recyclingKey={url}
-        onLoad={(e) => {
-          if (e.source?.width && e.source?.height) {
-            const r = e.source.height / e.source.width;
-            setAspectRatio((prev) => (prev === r ? prev : r));
-          }
-        }}
-        transition={100}
-      />
-    </Pressable>
+    <ReaderImagePage
+      url={url}
+      index={index}
+      width={webtoonWidth}
+      height={displayHeight}
+      contentFit={displayFit}
+      onTap={onTap}
+      onAspectMeasured={(ratio) => {
+        setAspectRatio((prev) => (prev === ratio ? prev : ratio));
+      }}
+    />
   );
 });
 
@@ -136,7 +244,6 @@ export default function ReaderScreen() {
   const [imageFit, setImageFit] = useState<'fit_both' | 'fit_width' | 'fit_height'>('fit_both');
   const [headerHidden, setHeaderHidden] = useState(false);
 
-  // Metadata state for MangaDex side menu
   const [mangaTitle, setMangaTitle] = useState('Manga');
   const [chapterTitle, setChapterTitle] = useState(`Chapter`);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
@@ -144,6 +251,7 @@ export default function ReaderScreen() {
   const [scanlationGroup, setScanlationGroup] = useState<string>('Scanlation Team');
   const [currentChapterPublishAt, setCurrentChapterPublishAt] = useState<string | undefined>();
   const [uploaderName, setUploaderName] = useState<string>('Uploader');
+  const [resolvedMangaId, setResolvedMangaId] = useState<string | undefined>(mangaId);
 
   const flatListRef = useRef<FlatList>(null);
   const webtoonListRef = useRef<FlatList<string>>(null);
@@ -256,33 +364,42 @@ export default function ReaderScreen() {
   const loadMangaMeta = async () => {
     try {
       if (!(await checkNetwork())) return;
-      let targetMangaId = mangaId;
+      let targetMangaId = mangaId || resolvedMangaId;
+      let chapterLang = 'en';
+
       const chapterData = await getChapterDetails(chapterId!);
       if (chapterData) {
+        chapterLang = chapterData.attributes?.translatedLanguage || 'en';
         setScanlationGroup(extractScanlationGroupName(chapterData));
         setUploaderName(extractUploaderUsername(chapterData));
 
         const mangaRel = chapterData.relationships?.find((r) => r.type === 'manga');
         if (mangaRel?.id && !targetMangaId) {
           targetMangaId = mangaRel.id;
+          setResolvedMangaId(mangaRel.id);
         }
       }
 
       if (targetMangaId) {
         const [manga, chList] = await Promise.all([
           getMangaDetails(targetMangaId),
-          getMangaChapters(targetMangaId, 'en', 500, 0, 'desc'),
+          getMangaChapters(targetMangaId, chapterLang, 500, 0, 'desc'),
         ]);
 
         const title = getMangaTitle(manga);
         setMangaTitle(title);
-        setChapterList(chList.data);
+
+        let allChapters = chList.data || [];
+        if (chapterData && !allChapters.some((c) => c.id === chapterId)) {
+          allChapters = [chapterData, ...allChapters];
+        }
+        setChapterList(allChapters);
 
         const coverFile = extractCoverFileName(manga);
         const url = getCoverUrl(manga.id, coverFile, '256');
         setCoverUrl(url);
 
-        const activeCh = chList.data.find((c) => c.id === chapterId);
+        const activeCh = allChapters.find((c) => c.id === chapterId);
         if (activeCh) {
           setCurrentChapterPublishAt(activeCh.attributes.publishAt || activeCh.attributes.readableAt);
           const num = activeCh.attributes.chapter ? `Ch. ${activeCh.attributes.chapter}` : 'Chapter';
@@ -299,11 +416,12 @@ export default function ReaderScreen() {
     }
   };
 
-  // Save progress to history
+  // Save progress to history & update library unread badge
   useEffect(() => {
     if (pages.length > 0 && chapterId) {
+      const activeMangaId = mangaId ?? chapterId!;
       addHistoryEntry({
-        mangaId: mangaId ?? chapterId!,
+        mangaId: activeMangaId,
         chapterId: chapterId!,
         title: mangaTitle,
         chapterTitle: chapterTitle,
@@ -311,8 +429,21 @@ export default function ReaderScreen() {
         pageIndex: currentPage,
         totalPages: pages.length,
       });
+
+      // If manga is bookmarked in the library, update read progress & unread count
+      const libStore = useLibraryStore.getState();
+      if (libStore.isInLibrary(activeMangaId)) {
+        let unread: number | undefined;
+        if (chapterList && chapterList.length > 0) {
+          const idx = chapterList.findIndex((c) => c.id === chapterId);
+          if (idx >= 0) {
+            unread = Math.max(0, idx);
+          }
+        }
+        libStore.updateReadProgress(activeMangaId, chapterId!, currentPage, unread);
+      }
     }
-  }, [currentPage, pages.length, mangaTitle, chapterTitle, coverUrl]);
+  }, [currentPage, pages.length, mangaTitle, chapterTitle, coverUrl, chapterList]);
 
   // Chapter Switching
   const currentChapterIdx = chapterList.findIndex((c) => c.id === chapterId);
@@ -331,9 +462,11 @@ export default function ReaderScreen() {
   const navigateToChapter = useCallback(
     (targetChapterId: string) => {
       setSideMenuVisible(false);
-      router.replace(`/reader/${targetChapterId}?mangaId=${mangaId}` as any);
+      const mId = mangaId || resolvedMangaId;
+      const query = mId ? `?mangaId=${mId}` : '';
+      router.replace(`/reader/${targetChapterId}${query}` as any);
     },
-    [mangaId, router]
+    [mangaId, resolvedMangaId, router]
   );
 
   const handlePrevChapter = useCallback(() => {
@@ -351,14 +484,50 @@ export default function ReaderScreen() {
   // ─── Page Navigation ───────────────────────────────────────────
 
   const goToPage = useCallback(
-    (page: number) => {
-      const clamped = Math.max(0, Math.min(page, pages.length - 1));
+    (pageIdx: number) => {
+      const clamped = Math.max(0, Math.min(pageIdx, pages.length - 1));
       setCurrentPage(clamped);
-      if (mode !== 'webtoon') {
-        flatListRef.current?.scrollToIndex({ index: clamped, animated: false });
+
+      if (mode === 'webtoon') {
+        try {
+          webtoonListRef.current?.scrollToIndex({
+            index: clamped,
+            animated: true,
+          });
+        } catch {
+          webtoonListRef.current?.scrollToOffset({
+            offset: clamped * (windowHeight * 0.9),
+            animated: true,
+          });
+        }
+      } else if (mode === 'double') {
+        const spreadIdx = Math.floor(clamped / 2);
+        try {
+          flatListRef.current?.scrollToOffset({
+            offset: spreadIdx * windowWidth,
+            animated: false,
+          });
+        } catch {
+          flatListRef.current?.scrollToIndex({
+            index: spreadIdx,
+            animated: false,
+          });
+        }
+      } else {
+        try {
+          flatListRef.current?.scrollToOffset({
+            offset: clamped * windowWidth,
+            animated: false,
+          });
+        } catch {
+          flatListRef.current?.scrollToIndex({
+            index: clamped,
+            animated: false,
+          });
+        }
       }
     },
-    [pages.length, mode]
+    [pages.length, mode, windowWidth, windowHeight]
   );
 
   const goToNextPageOrChapter = useCallback(() => {
@@ -385,31 +554,107 @@ export default function ReaderScreen() {
 
   const handlePageTap = useCallback(
     (x: number) => {
-      if (x > TAP_LEFT && x < TAP_RIGHT) {
-        toggleControls();
-        return;
-      }
+      const isLeft = x < windowWidth * 0.5;
 
-      if (hapticsEnabled && Platform.OS !== 'web') {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      if (Platform.OS !== 'web') {
+        const centerMin = windowWidth * 0.35;
+        const centerMax = windowWidth * 0.65;
+        if (x >= centerMin && x <= centerMax) {
+          toggleControls();
+          return;
+        }
+
+        if (hapticsEnabled) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        }
       }
 
       if (mode === 'rtl') {
-        if (x <= TAP_LEFT) {
+        if (isLeft) {
           goToNextPageOrChapter();
         } else {
           goToPrevPageOrChapter();
         }
       } else {
-        if (x <= TAP_LEFT) {
+        if (isLeft) {
           goToPrevPageOrChapter();
         } else {
           goToNextPageOrChapter();
         }
       }
     },
-    [mode, toggleControls, goToNextPageOrChapter, goToPrevPageOrChapter, hapticsEnabled]
+    [windowWidth, mode, toggleControls, goToNextPageOrChapter, goToPrevPageOrChapter, hapticsEnabled]
   );
+
+  // Web Keyboard Navigation
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeTag = document.activeElement?.tagName?.toLowerCase();
+      if (activeTag === 'input' || activeTag === 'textarea') return;
+
+      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+        e.preventDefault();
+        if (mode === 'rtl') {
+          goToNextPageOrChapter();
+        } else {
+          goToPrevPageOrChapter();
+        }
+      } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D' || e.key === ' ') {
+        e.preventDefault();
+        if (mode === 'rtl') {
+          goToPrevPageOrChapter();
+        } else {
+          goToNextPageOrChapter();
+        }
+      } else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
+        if (mode === 'webtoon') {
+          webtoonListRef.current?.scrollToOffset({
+            offset: Math.max(0, (currentPage - 1) * windowHeight * 0.8),
+            animated: true,
+          });
+        } else {
+          goToPrevPageOrChapter();
+        }
+      } else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
+        if (mode === 'webtoon') {
+          webtoonListRef.current?.scrollToOffset({
+            offset: (currentPage + 1) * windowHeight * 0.8,
+            animated: true,
+          });
+        } else {
+          goToNextPageOrChapter();
+        }
+      } else if (e.key === '[' || e.key === 'p' || e.key === 'P') {
+        if (hasPrevChapter) {
+          e.preventDefault();
+          handlePrevChapter();
+        }
+      } else if (e.key === ']' || e.key === 'n' || e.key === 'N') {
+        if (hasNextChapter) {
+          e.preventDefault();
+          handleNextChapter();
+        }
+      } else if (e.key === 'm' || e.key === 'M' || e.key === 'Escape') {
+        setSideMenuVisible((prev) => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    mode,
+    currentPage,
+    pages.length,
+    hasNextChapter,
+    hasPrevChapter,
+    goToNextPageOrChapter,
+    goToPrevPageOrChapter,
+    handleNextChapter,
+    handlePrevChapter,
+    windowHeight,
+  ]);
 
   // ─── Render Page Items ─────────────────────────────────────────
 
@@ -420,18 +665,15 @@ export default function ReaderScreen() {
     else fitMode = 'contain';
 
     return (
-      <Pressable
+      <ReaderImagePage
         key={index}
-        style={[styles.pagedPageContainer, { width: windowWidth, height: windowHeight }]}
-        onPress={(e) => handlePageTap(e.nativeEvent.locationX)}
-      >
-        <Image
-          source={{ uri: url }}
-          style={[styles.pagedImage, { width: windowWidth, height: windowHeight }]}
-          contentFit={fitMode}
-          transition={150}
-        />
-      </Pressable>
+        url={url}
+        index={index}
+        width={windowWidth}
+        height={windowHeight}
+        contentFit={fitMode}
+        onTap={handlePageTap}
+      />
     );
   };
 
@@ -440,24 +682,29 @@ export default function ReaderScreen() {
     const rightUrl = pages[pageIndex + 1];
 
     return (
-      <Pressable
+      <View
         key={pageIndex}
         style={[styles.doubleSpreadContainer, { width: windowWidth, height: windowHeight }]}
-        onPress={(e) => handlePageTap(e.nativeEvent.locationX)}
       >
-        <Image
-          source={{ uri: mode === 'rtl' ? rightUrl || leftUrl : leftUrl }}
-          style={[styles.doubleImage, { width: windowWidth / 2, height: windowHeight }]}
+        <ReaderImagePage
+          url={mode === 'rtl' ? rightUrl || leftUrl : leftUrl}
+          index={pageIndex}
+          width={windowWidth / 2}
+          height={windowHeight}
           contentFit="contain"
+          onTap={handlePageTap}
         />
         {rightUrl && (
-          <Image
-            source={{ uri: mode === 'rtl' ? leftUrl : rightUrl }}
-            style={[styles.doubleImage, { width: windowWidth / 2, height: windowHeight }]}
+          <ReaderImagePage
+            url={mode === 'rtl' ? leftUrl : rightUrl}
+            index={pageIndex + 1}
+            width={windowWidth / 2}
+            height={windowHeight}
             contentFit="contain"
+            onTap={handlePageTap}
           />
         )}
-      </Pressable>
+      </View>
     );
   };
 
@@ -559,7 +806,7 @@ export default function ReaderScreen() {
       {/* Reader Layout Mode */}
       {mode === 'webtoon' ? (
         <FlatList
-          key="flatlist-webtoon"
+          key={`flatlist-webtoon-${chapterId}`}
           ref={webtoonListRef}
           data={pages}
           keyExtractor={(item, index) => `webtoon-${item}-${index}`}
@@ -623,7 +870,7 @@ export default function ReaderScreen() {
         />
       ) : mode === 'double' ? (
         <FlatList
-          key="flatlist-double"
+          key={`flatlist-double-${chapterId}`}
           ref={flatListRef}
           data={Array.from({ length: Math.ceil(pages.length / 2) })}
           horizontal
@@ -640,7 +887,7 @@ export default function ReaderScreen() {
         />
       ) : (
         <FlatList
-          key="flatlist-single"
+          key={`flatlist-single-${chapterId}`}
           ref={flatListRef}
           data={pages}
           horizontal
@@ -663,7 +910,6 @@ export default function ReaderScreen() {
         />
       )}
 
-
       {/* Page Number Indicator */}
       {showPageNumber && pages.length > 0 && (
         <View style={styles.pageIndicator}>
@@ -673,8 +919,8 @@ export default function ReaderScreen() {
         </View>
       )}
 
-      {/* Controls Overlay */}
-      {controlsVisible && (
+      {/* Controls Overlay (Mobile Only) */}
+      {Platform.OS !== 'web' && controlsVisible && (
         <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
           {/* Top Bar */}
           <View style={styles.topBar}>
@@ -822,6 +1068,20 @@ export default function ReaderScreen() {
           router.replace('/(tabs)' as any);
         }}
       />
+
+      {/* Web Persistent Floating Menu Window Trigger Button */}
+      {Platform.OS === 'web' && !sideMenuVisible && (
+        <Pressable
+          onPress={() => setSideMenuVisible(true)}
+          style={({ pressed }) => [
+            styles.webFloatingMenuTrigger,
+            pressed && { opacity: 0.85, transform: [{ scale: 0.96 }] },
+          ]}
+        >
+          <Ionicons name="options-outline" size={18} color="#FFFFFF" />
+          <Text style={styles.webFloatingMenuTriggerText}>Menu</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -1060,5 +1320,105 @@ const styles = StyleSheet.create({
     color: '#A1A1AA',
     fontSize: Typography.sizes.footnote,
     textAlign: 'center',
+  },
+  webFloatingMenuTrigger: {
+    position: 'fixed' as any,
+    bottom: 28,
+    right: 28,
+    backgroundColor: '#18181B',
+    borderColor: '#27272A',
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: Radius.full,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 10,
+    zIndex: 999,
+    cursor: 'pointer' as any,
+  },
+  webFloatingMenuTriggerText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: 0.3,
+  },
+  imageErrorCard: {
+    backgroundColor: '#18181B',
+    borderColor: '#27272A',
+    borderWidth: 1,
+    borderRadius: Radius.lg,
+    padding: Spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginVertical: 20,
+  },
+  imageErrorTitle: {
+    color: '#FAFAFA',
+    fontSize: Typography.sizes.body,
+    fontWeight: Typography.weights.bold,
+    textAlign: 'center',
+  },
+  imageErrorSubtext: {
+    color: '#A1A1AA',
+    fontSize: Typography.sizes.footnote,
+    textAlign: 'center',
+  },
+  imageRetryBtn: {
+    backgroundColor: '#E11D48',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: Radius.md,
+    marginTop: 8,
+  },
+  imageRetryBtnText: {
+    color: '#FFFFFF',
+    fontSize: Typography.sizes.footnote,
+    fontWeight: Typography.weights.bold,
+  },
+  imageRetryOverlay: {
+    position: 'absolute',
+    bottom: 20,
+    backgroundColor: 'rgba(9,9,11,0.85)',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: Radius.full,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  imageRetryingText: {
+    color: '#FAFAFA',
+    fontSize: 11,
+    fontWeight: Typography.weights.bold,
+  },
+  zoomResetBtn: {
+    position: 'absolute',
+    top: 20,
+    right: 20,
+    backgroundColor: 'rgba(9, 9, 11, 0.85)',
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: Radius.full,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    zIndex: 99,
+  },
+  zoomResetText: {
+    color: '#FAFAFA',
+    fontSize: 11,
+    fontWeight: Typography.weights.bold,
   },
 });

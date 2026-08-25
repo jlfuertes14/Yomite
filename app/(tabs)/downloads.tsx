@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -8,29 +8,50 @@ import {
   Modal,
   TextInput,
   Platform,
+  LayoutAnimation,
+  UIManager,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useDownloadStore, DownloadedChapter } from '../../src/store/downloadStore';
-import { removeDownloadedChapter, downloadChapter, getBaseDownloadDirectory, getDisplayDownloadDirectory, pickAndroidStorageDirectory } from '../../src/services/downloadService';
-import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
+import {
+  removeDownloadedChapter,
+  downloadChapter,
+  getDisplayDownloadDirectory,
+  pickAndroidStorageDirectory,
+} from '../../src/services/downloadService';
+import { Spacing, Radius, Typography } from '../../constants/Colors';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
-import { formatChapterDate } from '../../src/utils/date';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
 import { AnimatedCard } from '../../src/components/AnimatedCard';
 import { AnimatedPressable } from '../../src/components/AnimatedPressable';
+import { SidebarDrawer } from '../../src/components/SidebarDrawer';
+
+interface MangaDownloadGroup {
+  mangaId: string;
+  mangaTitle: string;
+  coverUrl: string | null;
+  chapters: DownloadedChapter[];
+  completedCount: number;
+  downloadingCount: number;
+  totalSizeBytes: number;
+}
 
 export default function DownloadsScreen() {
   const router = useRouter();
   const colors = useThemeColors();
+  const [drawerVisible, setDrawerVisible] = useState(false);
   const { chapters, downloadDirectory, setCustomStorageDirectory } = useDownloadStore();
 
   const [activeTab, setActiveTab] = useState<'all' | 'completed' | 'in_progress'>('all');
   const [showFolderModal, setShowFolderModal] = useState(false);
   const [customPathInput, setCustomPathInput] = useState('');
   const [selectedChapterIds, setSelectedChapterIds] = useState<Set<string>>(new Set());
+
+  // Track expanded manga accordion cards
+  const [expandedMangaIds, setExpandedMangaIds] = useState<Set<string>>(new Set());
 
   // Custom Confirmation Dialog State
   const [confirmModalConfig, setConfirmModalConfig] = useState<{
@@ -55,16 +76,55 @@ export default function DownloadsScreen() {
 
   const filteredChapters = chapterList.filter((item) => {
     if (activeTab === 'completed') return item.status === 'completed';
-    if (activeTab === 'in_progress') return item.status === 'downloading' || item.status === 'pending' || item.status === 'error';
+    if (activeTab === 'in_progress')
+      return item.status === 'downloading' || item.status === 'pending' || item.status === 'error';
     return true;
   });
+
+  // Group chapters by Manga
+  const groupedManga: MangaDownloadGroup[] = React.useMemo(() => {
+    const map = new Map<string, MangaDownloadGroup>();
+
+    filteredChapters.forEach((ch) => {
+      if (!map.has(ch.mangaId)) {
+        map.set(ch.mangaId, {
+          mangaId: ch.mangaId,
+          mangaTitle: ch.mangaTitle,
+          coverUrl: ch.coverUrl || null,
+          chapters: [],
+          completedCount: 0,
+          downloadingCount: 0,
+          totalSizeBytes: 0,
+        });
+      }
+      const group = map.get(ch.mangaId)!;
+      group.chapters.push(ch);
+      if (ch.status === 'completed') group.completedCount++;
+      if (ch.status === 'downloading' || ch.status === 'pending') group.downloadingCount++;
+      group.totalSizeBytes += ch.sizeBytes || 0;
+    });
+
+    return Array.from(map.values());
+  }, [filteredChapters]);
 
   const totalSizeBytes = chapterList.reduce((acc, curr) => acc + (curr.sizeBytes || 0), 0);
   const totalMB = (totalSizeBytes / (1024 * 1024)).toFixed(1);
 
   const activeDirectory = getDisplayDownloadDirectory();
   const isSelecting = selectedChapterIds.size > 0;
-  const allVisibleSelected = filteredChapters.length > 0 && filteredChapters.every((item) => selectedChapterIds.has(item.chapterId));
+  const allVisibleSelected =
+    filteredChapters.length > 0 &&
+    filteredChapters.every((item) => selectedChapterIds.has(item.chapterId));
+
+  const toggleMangaExpand = (mangaId: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpandedMangaIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(mangaId)) next.delete(mangaId);
+      else next.add(mangaId);
+      return next;
+    });
+  };
 
   const toggleChapterSelection = (chapterId: string) => {
     setSelectedChapterIds((current) => {
@@ -145,6 +205,23 @@ export default function DownloadsScreen() {
     });
   };
 
+  const handleDeleteMangaGroup = (group: MangaDownloadGroup) => {
+    setConfirmModalConfig({
+      visible: true,
+      title: `Delete ${group.mangaTitle}`,
+      message: `Are you sure you want to remove all ${group.chapters.length} downloaded chapters of "${group.mangaTitle}"?`,
+      iconName: 'trash-outline',
+      confirmText: 'Delete All Chapters',
+      confirmVariant: 'destructive',
+      onConfirm: async () => {
+        await Promise.all(
+          group.chapters.map((item) => removeDownloadedChapter(item.chapterId, item.mangaId))
+        );
+        setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
+      },
+    });
+  };
+
   const handleDeleteSelected = () => {
     const selected = chapterList.filter((item) => selectedChapterIds.has(item.chapterId));
     if (selected.length === 0) return;
@@ -175,274 +252,384 @@ export default function DownloadsScreen() {
     });
   };
 
-  const renderDownloadItem = ({ item, index }: { item: DownloadedChapter; index: number }) => {
-    const isCompleted = item.status === 'completed';
-    const isError = item.status === 'error';
-    const isDownloading = item.status === 'downloading';
-    const progressPercent = item.totalFiles > 0 ? Math.round((item.downloadedFiles / item.totalFiles) * 100) : 0;
+  const renderMangaGroup = ({ item: group, index }: { item: MangaDownloadGroup; index: number }) => {
+    const isExpanded = expandedMangaIds.has(group.mangaId) || group.downloadingCount > 0;
+    const sizeMB = (group.totalSizeBytes / (1024 * 1024)).toFixed(1);
 
     return (
       <AnimatedCard
         index={index}
-        onPress={() => {
-          if (isSelecting) toggleChapterSelection(item.chapterId);
-          else if (isCompleted) handleReadChapter(item);
-        }}
         style={[
-          styles.itemCard,
+          styles.groupCard,
           {
             backgroundColor: colors.surface,
             borderColor: colors.border,
           },
         ]}
       >
-        {isSelecting && (
-          <Pressable
-            onPress={() => toggleChapterSelection(item.chapterId)}
-            hitSlop={8}
-            style={styles.selectionCheck}
-          >
-            <Ionicons
-              name={selectedChapterIds.has(item.chapterId) ? 'checkmark-circle' : 'ellipse-outline'}
-              size={22}
-              color={selectedChapterIds.has(item.chapterId) ? colors.accent : colors.textMuted}
-            />
-          </Pressable>
-        )}
-        <View style={[styles.coverContainer, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-          {item.coverUrl ? (
-            <Image source={{ uri: item.coverUrl }} style={styles.coverImage} contentFit="cover" transition={200} />
-          ) : (
-            <Ionicons name="book-outline" size={24} color={colors.textMuted} />
-          )}
-        </View>
+        {/* Accordion Header Row */}
+        <Pressable
+          onPress={() => toggleMangaExpand(group.mangaId)}
+          style={styles.groupHeader}
+        >
+          <View style={[styles.coverContainer, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+            {group.coverUrl ? (
+              <Image source={{ uri: group.coverUrl }} style={styles.coverImage} contentFit="cover" transition={200} />
+            ) : (
+              <Ionicons name="book-outline" size={24} color={colors.textMuted} />
+            )}
+          </View>
 
-        <View style={styles.itemInfo}>
-          <Text style={[styles.mangaTitle, { color: colors.text }]} numberOfLines={1}>
-            {item.mangaTitle}
-          </Text>
-          <Text style={[styles.chapterTitle, { color: colors.textSecondary }]} numberOfLines={1}>
-            Ch. {item.chapterNum} {item.chapterTitle ? `· ${item.chapterTitle}` : ''}
-          </Text>
+          <View style={styles.groupInfo}>
+            <Text style={[styles.mangaTitle, { color: colors.text }]} numberOfLines={1}>
+              {group.mangaTitle}
+            </Text>
 
-          {isDownloading && (
-            <View style={styles.progressRow}>
-              <View style={[styles.progressBarTrack, { backgroundColor: colors.surfaceElevated }]}>
-                <View style={[styles.progressBarFill, { backgroundColor: colors.accent, width: `${progressPercent}%` }]} />
-              </View>
-              <Text style={[styles.progressText, { color: colors.accent }]}>
-                {item.downloadedFiles}/{item.totalFiles} ({progressPercent}%)
+            <View style={styles.groupMetaRow}>
+              <Text style={[styles.groupMetaText, { color: colors.textSecondary }]}>
+                {group.chapters.length} {group.chapters.length === 1 ? 'Chapter' : 'Chapters'} · {sizeMB} MB
               </Text>
+              {group.downloadingCount > 0 && (
+                <View style={[styles.downloadingBadge, { backgroundColor: colors.accentSubtle }]}>
+                  <Text style={[styles.downloadingBadgeText, { color: colors.accent }]}>
+                    Downloading ({group.downloadingCount})
+                  </Text>
+                </View>
+              )}
             </View>
-          )}
+          </View>
 
-          {isCompleted && (
-            <View style={styles.metaRow}>
-              <Ionicons name="checkmark-circle" size={14} color={colors.emerald} />
-              <Text style={[styles.metaText, { color: colors.emerald }]}>
-                Saved Offline · {(item.sizeBytes / (1024 * 1024)).toFixed(1)} MB
-              </Text>
-            </View>
-          )}
-
-          {isError && (
-            <View style={styles.metaRow}>
-              <Ionicons name="alert-circle" size={14} color="#EF4444" />
-              <Text style={[styles.metaText, { color: '#EF4444' }]}>
-                Download Error: {item.errorMessage || 'Network failed'}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.itemActions}>
-          {isError && (
-            <Pressable onPress={() => handleRetryItem(item)} style={styles.iconBtn}>
-              <Ionicons name="refresh-outline" size={20} color={colors.accent} />
+          {/* Action Buttons & Dropdown Chevron */}
+          <View style={styles.groupHeaderActions}>
+            <Pressable
+              onPress={() => handleDeleteMangaGroup(group)}
+              hitSlop={8}
+              style={styles.iconBtn}
+            >
+              <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
             </Pressable>
-          )}
 
-          <Pressable onPress={() => handleDeleteItem(item)} style={styles.iconBtn}>
-            <Ionicons name="trash-outline" size={20} color={colors.textMuted} />
-          </Pressable>
-        </View>
+            <View style={[styles.chevronBtn, { backgroundColor: colors.surfaceElevated }]}>
+              <Ionicons
+                name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                size={18}
+                color={colors.accent}
+              />
+            </View>
+          </View>
+        </Pressable>
+
+        {/* Dropdown Chapter List Accordion */}
+        {isExpanded && (
+          <View style={[styles.chapterDropdown, { borderTopColor: colors.border }]}>
+            {group.chapters.map((ch) => {
+              const isCompleted = ch.status === 'completed';
+              const isError = ch.status === 'error';
+              const isDownloading = ch.status === 'downloading';
+              const progressPercent = ch.totalFiles > 0 ? Math.round((ch.downloadedFiles / ch.totalFiles) * 100) : 0;
+              const isSelected = selectedChapterIds.has(ch.chapterId);
+
+              return (
+                <View
+                  key={ch.chapterId}
+                  style={[
+                    styles.subChapterItem,
+                    { borderBottomColor: colors.border },
+                    isSelected && { backgroundColor: colors.accentSubtle },
+                  ]}
+                >
+                  {isSelecting && (
+                    <Pressable
+                      onPress={() => toggleChapterSelection(ch.chapterId)}
+                      hitSlop={8}
+                      style={styles.selectionCheck}
+                    >
+                      <Ionicons
+                        name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
+                        size={20}
+                        color={isSelected ? colors.accent : colors.textMuted}
+                      />
+                    </Pressable>
+                  )}
+
+                  <View style={styles.subChapterInfo}>
+                    <Text style={[styles.subChapterTitle, { color: colors.text }]} numberOfLines={1}>
+                      Ch. {ch.chapterNum} {ch.chapterTitle ? `· ${ch.chapterTitle}` : ''}
+                    </Text>
+
+                    {isDownloading && (
+                      <View style={styles.progressRow}>
+                        <View style={[styles.progressBarTrack, { backgroundColor: colors.surfaceElevated }]}>
+                          <View style={[styles.progressBarFill, { backgroundColor: colors.accent, width: `${progressPercent}%` }]} />
+                        </View>
+                        <Text style={[styles.progressText, { color: colors.accent }]}>
+                          Downloading {ch.downloadedFiles}/{ch.totalFiles} ({progressPercent}%)
+                        </Text>
+                      </View>
+                    )}
+
+                    {isCompleted && (
+                      <Text style={[styles.subMetaText, { color: colors.emerald }]}>
+                        Saved Offline · {(ch.sizeBytes / (1024 * 1024)).toFixed(1)} MB
+                      </Text>
+                    )}
+
+                    {isError && (
+                      <Text style={[styles.subMetaText, { color: '#EF4444' }]}>
+                        Error: {ch.errorMessage || 'Failed'}
+                      </Text>
+                    )}
+                  </View>
+
+                  <View style={styles.subChapterActions}>
+                    {isError && (
+                      <Pressable onPress={() => handleRetryItem(ch)} style={styles.iconBtn}>
+                        <Ionicons name="refresh-outline" size={18} color={colors.accent} />
+                      </Pressable>
+                    )}
+
+                    {isCompleted && (
+                      <Pressable onPress={() => handleReadChapter(ch)} style={styles.iconBtn}>
+                        <Ionicons name="play-circle-outline" size={22} color={colors.accent} />
+                      </Pressable>
+                    )}
+
+                    <Pressable onPress={() => handleDeleteItem(ch)} style={styles.iconBtn}>
+                      <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
+                    </Pressable>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
       </AnimatedCard>
     );
   };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>
-            {isSelecting ? `${selectedChapterIds.size} Selected` : 'Downloads'}
-          </Text>
-          <Text style={[styles.headerSubTitle, { color: colors.textSecondary }]}>
-            {chapterList.filter((c) => c.status === 'completed').length} Chapters ({totalMB} MB total)
-          </Text>
-        </View>
-
-        <View style={styles.headerActions}>
-          {isSelecting ? (
-            <>
-              <Pressable onPress={toggleSelectAllVisible} style={[styles.folderConfigBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-                <Ionicons name={allVisibleSelected ? 'remove-circle-outline' : 'checkmark-done-outline'} size={18} color={colors.accent} />
-                <Text style={[styles.folderConfigText, { color: colors.text }]}>{allVisibleSelected ? 'Clear' : 'All'}</Text>
-              </Pressable>
-              <Pressable onPress={handleDeleteSelected} style={[styles.folderConfigBtn, { backgroundColor: colors.accentSubtle, borderColor: colors.accent }]}>
-                <Ionicons name="trash-outline" size={18} color={colors.accent} />
-                <Text style={[styles.folderConfigText, { color: colors.accent }]}>Delete</Text>
-              </Pressable>
-              <Pressable onPress={clearSelection} hitSlop={8} style={styles.iconBtn}>
-                <Ionicons name="close" size={22} color={colors.textMuted} />
-              </Pressable>
-            </>
-          ) : (
-            <>
-              {filteredChapters.length > 0 && (
-                <Pressable onPress={toggleSelectAllVisible} style={[styles.folderConfigBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-                  <Ionicons name="checkmark-circle-outline" size={18} color={colors.accent} />
-                  <Text style={[styles.folderConfigText, { color: colors.text }]}>Select</Text>
-                </Pressable>
-              )}
-              <AnimatedPressable
-                onPress={() => {
-                  setCustomPathInput(downloadDirectory || '');
-                  setShowFolderModal(true);
-                }}
-                style={[styles.folderConfigBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+      <View style={[{ flex: 1, width: '100%' }, Platform.OS === 'web' && styles.webCenteredContent]}>
+        {/* Header */}
+        <View style={styles.header}>
+          <View style={styles.headerTitleRow}>
+            {Platform.OS === 'web' && (
+              <Pressable
+                onPress={() => setDrawerVisible(true)}
+                style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1 }]}
+                hitSlop={8}
               >
-                <Ionicons name="folder-open-outline" size={18} color={colors.accent} />
-                <Text style={[styles.folderConfigText, { color: colors.text }]}>Location</Text>
-              </AnimatedPressable>
-            </>
-          )}
+                <Ionicons name="menu" size={26} color={colors.text} />
+              </Pressable>
+            )}
+            <View>
+              <Text style={[styles.headerTitle, { color: colors.text }]}>
+                {isSelecting ? `${selectedChapterIds.size} Selected` : 'Downloads'}
+              </Text>
+              <Text style={[styles.headerSubTitle, { color: colors.textSecondary }]}>
+                {groupedManga.length} {groupedManga.length === 1 ? 'Manga' : 'Titles'} ({totalMB} MB total)
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.headerActions}>
+            {isSelecting ? (
+              <>
+                <Pressable
+                  onPress={toggleSelectAllVisible}
+                  style={[styles.folderConfigBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+                >
+                  <Ionicons
+                    name={allVisibleSelected ? 'remove-circle-outline' : 'checkmark-done-outline'}
+                    size={18}
+                    color={colors.accent}
+                  />
+                  <Text style={[styles.folderConfigText, { color: colors.text }]}>
+                    {allVisibleSelected ? 'Clear' : 'All'}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={handleDeleteSelected}
+                  style={[styles.folderConfigBtn, { backgroundColor: colors.accentSubtle, borderColor: colors.accent }]}
+                >
+                  <Ionicons name="trash-outline" size={18} color={colors.accent} />
+                  <Text style={[styles.folderConfigText, { color: colors.accent }]}>Delete</Text>
+                </Pressable>
+                <Pressable onPress={clearSelection} hitSlop={8} style={styles.iconBtn}>
+                  <Ionicons name="close" size={22} color={colors.textMuted} />
+                </Pressable>
+              </>
+            ) : (
+              <>
+                {filteredChapters.length > 0 && (
+                  <Pressable
+                    onPress={toggleSelectAllVisible}
+                    style={[styles.folderConfigBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+                  >
+                    <Ionicons name="checkmark-circle-outline" size={18} color={colors.accent} />
+                    <Text style={[styles.folderConfigText, { color: colors.text }]}>Select</Text>
+                  </Pressable>
+                )}
+                <AnimatedPressable
+                  onPress={() => {
+                    setCustomPathInput(downloadDirectory || '');
+                    setShowFolderModal(true);
+                  }}
+                  style={[styles.folderConfigBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+                >
+                  <Ionicons name="folder-open-outline" size={18} color={colors.accent} />
+                  <Text style={[styles.folderConfigText, { color: colors.text }]}>Location</Text>
+                </AnimatedPressable>
+              </>
+            )}
+          </View>
         </View>
-      </View>
 
-      {/* Active Storage Banner */}
-      <View style={[styles.storageBanner, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-        <Ionicons name="hardware-chip-outline" size={16} color={colors.accent} />
-        <Text style={[styles.storageBannerText, { color: colors.textSecondary }]} numberOfLines={1}>
-          Path: {activeDirectory}
-        </Text>
-      </View>
+        {/* Active Storage Banner */}
+        <View style={[styles.storageBanner, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+          <Ionicons name="hardware-chip-outline" size={16} color={colors.accent} />
+          <Text style={[styles.storageBannerText, { color: colors.textSecondary }]} numberOfLines={1}>
+            Path: {activeDirectory}
+          </Text>
+        </View>
 
-      {/* Tabs */}
-      <View style={styles.tabsRow}>
-        {(['all', 'completed', 'in_progress'] as const).map((tab) => (
-          <Pressable
-            key={tab}
-            onPress={() => setActiveTab(tab)}
-            style={[
-              styles.tabBtn,
-              { backgroundColor: activeTab === tab ? colors.accent : colors.surfaceElevated },
-            ]}
-          >
-            <Text
+        {/* Tabs */}
+        <View style={styles.tabsRow}>
+          {(['all', 'completed', 'in_progress'] as const).map((tab) => (
+            <Pressable
+              key={tab}
+              onPress={() => setActiveTab(tab)}
               style={[
-                styles.tabBtnText,
-                { color: activeTab === tab ? '#FFFFFF' : colors.textSecondary },
+                styles.tabBtn,
+                { backgroundColor: activeTab === tab ? colors.accent : colors.surfaceElevated },
               ]}
             >
-              {tab === 'all' ? 'All' : tab === 'completed' ? 'Completed' : 'Downloading'}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+              <Text
+                style={[
+                  styles.tabBtnText,
+                  { color: activeTab === tab ? '#FFFFFF' : colors.textSecondary },
+                ]}
+              >
+                {tab === 'all' ? 'All' : tab === 'completed' ? 'Completed' : 'Downloading'}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
 
-      {/* Downloads List */}
-      <FlatList
-        data={filteredChapters}
-        keyExtractor={(item) => item.chapterId}
-        renderItem={renderDownloadItem}
-        contentContainerStyle={styles.listContainer}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Ionicons name="cloud-download-outline" size={54} color={colors.border} />
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>No Downloads Found</Text>
-            <Text style={[styles.emptySub, { color: colors.textMuted }]}>
-              {activeTab === 'completed'
-                ? 'You have no completed chapter downloads.'
-                : 'Downloaded chapters will appear here for offline reading.'}
-            </Text>
-          </View>
-        }
-      />
-
-      {/* Storage Folder Selection Modal */}
-      <Modal visible={showFolderModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <View style={styles.modalHeader}>
-              <Ionicons name="folder" size={22} color={colors.accent} />
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Storage Folder Path</Text>
+        {/* Grouped Manga Downloads List */}
+        <FlatList
+          data={groupedManga}
+          keyExtractor={(group) => group.mangaId}
+          renderItem={renderMangaGroup}
+          contentContainerStyle={styles.listContainer}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Ionicons name="cloud-download-outline" size={54} color={colors.border} />
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>No Downloads Found</Text>
+              <Text style={[styles.emptySub, { color: colors.textMuted }]}>
+                {activeTab === 'completed'
+                  ? 'You have no completed chapter downloads.'
+                  : 'Downloaded chapters will appear here grouped by manga title.'}
+              </Text>
             </View>
+          }
+        />
 
-            <Text style={[styles.modalSubtext, { color: colors.textSecondary }]}>
-              Open Android's native File Manager to select or create a folder, or enter a custom path manually:
-            </Text>
+        {/* Storage Folder Selection Modal */}
+        <Modal visible={showFolderModal} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View style={styles.modalHeader}>
+                <Ionicons name="folder" size={22} color={colors.accent} />
+                <Text style={[styles.modalTitle, { color: colors.text }]}>Storage Folder Path</Text>
+              </View>
 
-            {Platform.OS === 'android' && (
+              <Text style={[styles.modalSubtext, { color: colors.textSecondary }]}>
+                {Platform.OS === 'web'
+                  ? 'Enter your custom local directory path for downloaded chapters below:'
+                  : "Open Android's native File Manager to select or create a folder, or enter a custom path manually:"}
+              </Text>
+
               <AnimatedPressable
-                onPress={handlePickNativeFolder}
+                onPress={() => {
+                  if (Platform.OS === 'android') {
+                    handlePickNativeFolder();
+                  }
+                }}
                 style={[styles.pickFolderBtn, { backgroundColor: colors.accent }]}
               >
                 <Ionicons name="folder-open" size={18} color="#FFFFFF" />
-                <Text style={styles.pickFolderBtnText}>Browse & Select Android Storage Folder</Text>
+                <Text style={styles.pickFolderBtnText}>
+                  {Platform.OS === 'web'
+                    ? 'Browse Storage Folder'
+                    : 'Browse Android Storage Folder'}
+                </Text>
               </AnimatedPressable>
-            )}
 
-            <View style={{ gap: 6, marginVertical: Spacing.sm }}>
-              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Custom Local Directory Path:</Text>
-              <TextInput
-                style={[styles.modalInput, { backgroundColor: colors.surfaceElevated, borderColor: colors.border, color: colors.text }]}
-                placeholder="/storage/emulated/0/Download/Yomite"
-                placeholderTextColor={colors.textMuted}
-                value={customPathInput}
-                onChangeText={setCustomPathInput}
-                autoCapitalize="none"
-              />
-            </View>
+              <View style={{ gap: 6, marginVertical: Spacing.sm }}>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Custom Directory Path:</Text>
+                <TextInput
+                  style={[
+                    styles.modalInput,
+                    { backgroundColor: colors.surfaceElevated, borderColor: colors.border, color: colors.text },
+                  ]}
+                  placeholder={Platform.OS === 'web' ? 'downloads/yomite' : '/storage/emulated/0/Download/Yomite'}
+                  placeholderTextColor={colors.textMuted}
+                  value={customPathInput}
+                  onChangeText={setCustomPathInput}
+                  autoCapitalize="none"
+                />
+              </View>
 
-            <View style={styles.modalActionsRow}>
-              <Pressable
-                onPress={() => setShowFolderModal(false)}
-                style={[styles.modalBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border, borderWidth: 1 }]}
-              >
-                <Text style={[styles.modalBtnText, { color: colors.text }]}>Cancel</Text>
-              </Pressable>
+              <View style={styles.modalActionsRow}>
+                <Pressable
+                  onPress={() => setShowFolderModal(false)}
+                  style={[
+                    styles.modalBtn,
+                    { backgroundColor: colors.surfaceElevated, borderColor: colors.border, borderWidth: 1 },
+                  ]}
+                >
+                  <Text style={[styles.modalBtnText, { color: colors.text }]}>Cancel</Text>
+                </Pressable>
 
-              <AnimatedPressable
-                onPress={handleSaveCustomDirectory}
-                style={[styles.modalBtn, { backgroundColor: colors.accent }]}
-              >
-                <Text style={[styles.modalBtnText, { color: '#FFFFFF' }]}>Save Location</Text>
-              </AnimatedPressable>
+                <AnimatedPressable
+                  onPress={handleSaveCustomDirectory}
+                  style={[styles.modalBtn, { backgroundColor: colors.accent }]}
+                >
+                  <Text style={[styles.modalBtnText, { color: '#FFFFFF' }]}>Save Location</Text>
+                </AnimatedPressable>
+              </View>
             </View>
           </View>
-        </View>
-      </Modal>
+        </Modal>
 
-      {/* Sleek Custom Deletion & Storage Confirmation Dialog */}
-      <ConfirmationModal
-        visible={confirmModalConfig.visible}
-        title={confirmModalConfig.title}
-        message={confirmModalConfig.message}
-        iconName={confirmModalConfig.iconName || 'folder-outline'}
-        confirmVariant={confirmModalConfig.confirmVariant || 'primary'}
-        confirmText={confirmModalConfig.confirmText || 'OK'}
-        cancelText={confirmModalConfig.cancelText}
-        onConfirm={confirmModalConfig.onConfirm}
-        onCancel={() => setConfirmModalConfig((prev) => ({ ...prev, visible: false }))}
-      />
+        {/* Confirmation Modal */}
+        <ConfirmationModal
+          visible={confirmModalConfig.visible}
+          title={confirmModalConfig.title}
+          message={confirmModalConfig.message}
+          iconName={confirmModalConfig.iconName || 'folder-outline'}
+          confirmVariant={confirmModalConfig.confirmVariant || 'primary'}
+          confirmText={confirmModalConfig.confirmText || 'OK'}
+          cancelText={confirmModalConfig.cancelText}
+          onConfirm={confirmModalConfig.onConfirm}
+          onCancel={() => setConfirmModalConfig((prev) => ({ ...prev, visible: false }))}
+        />
+
+        {/* Hamburger Slide Drawer */}
+        <SidebarDrawer visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  webCenteredContent: {
+    maxWidth: 1400,
+    width: '100%',
+    alignSelf: 'center',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -450,6 +637,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
     paddingBottom: Spacing.xs,
+  },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  plainIconButton: {
+    padding: 4,
   },
   headerActions: {
     flexDirection: 'row',
@@ -510,22 +705,24 @@ const styles = StyleSheet.create({
   listContainer: {
     paddingHorizontal: Spacing.lg,
     paddingBottom: 100,
-    gap: Spacing.sm,
+    gap: Spacing.md,
   },
-  itemCard: {
+
+  /* Group Card */
+  groupCard: {
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  groupHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: Spacing.md,
-    borderRadius: Radius.lg,
-    borderWidth: 1,
     gap: Spacing.md,
   },
-  selectionCheck: {
-    marginRight: -Spacing.xs,
-  },
   coverContainer: {
-    width: 44,
-    height: 62,
+    width: 46,
+    height: 64,
     borderRadius: Radius.sm,
     borderWidth: 1,
     overflow: 'hidden',
@@ -536,16 +733,78 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  itemInfo: {
+  groupInfo: {
     flex: 1,
-    gap: 2,
+    gap: 4,
   },
   mangaTitle: {
     fontSize: Typography.sizes.body,
+    fontWeight: Typography.weights.bold,
+  },
+  groupMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  groupMetaText: {
+    fontSize: Typography.sizes.footnote,
+  },
+  downloadingBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: Radius.full,
+  },
+  downloadingBadgeText: {
+    fontSize: 11,
+    fontWeight: Typography.weights.bold,
+  },
+  groupHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  chevronBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  /* Sub Chapter Dropdown */
+  chapterDropdown: {
+    borderTopWidth: 1,
+    paddingHorizontal: Spacing.md,
+    paddingBottom: Spacing.xs,
+  },
+  subChapterItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.sm + 2,
+    borderBottomWidth: 1,
+    gap: Spacing.sm,
+  },
+  selectionCheck: {
+    marginRight: 2,
+  },
+  subChapterInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  subChapterTitle: {
+    fontSize: Typography.sizes.footnote,
     fontWeight: Typography.weights.semibold,
   },
-  chapterTitle: {
-    fontSize: Typography.sizes.footnote,
+  subMetaText: {
+    fontSize: Typography.sizes.caption,
+    fontWeight: Typography.weights.medium,
+    marginTop: 2,
+  },
+  subChapterActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   progressRow: {
     gap: 4,
@@ -563,21 +822,6 @@ const styles = StyleSheet.create({
   progressText: {
     fontSize: Typography.sizes.caption,
     fontWeight: Typography.weights.semibold,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 4,
-  },
-  metaText: {
-    fontSize: Typography.sizes.caption,
-    fontWeight: Typography.weights.medium,
-  },
-  itemActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
   },
   iconBtn: {
     padding: 6,
@@ -610,6 +854,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: Spacing.lg,
     gap: Spacing.md,
+    maxWidth: 540,
+    width: '100%',
+    alignSelf: 'center',
   },
   modalHeader: {
     flexDirection: 'row',

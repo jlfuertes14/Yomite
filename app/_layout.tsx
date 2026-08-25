@@ -2,24 +2,19 @@
  * Root Layout — App-wide providers and navigation stack with Dark Theme & dark transition backgrounds
  */
 import React, { useEffect } from 'react';
+import { View, Platform, StyleSheet } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import * as SystemUI from 'expo-system-ui';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ThemeProvider, DarkTheme } from 'expo-router/react-navigation';
 import { Colors } from '../constants/Colors';
 import { requestStoragePermissionOnLaunch } from '../src/services/storagePermission';
+import { useUserStore } from '../src/store/userStore';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
-try {
-  if (typeof (SplashScreen as any).setOptions === 'function') {
-    (SplashScreen as any).setOptions({
-      duration: 350,
-      fade: true,
-    });
-  }
-} catch (_e) {}
 
 const YomiteDarkTheme = {
   ...DarkTheme,
@@ -38,9 +33,10 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
-    // Set native Android window background to dark & request storage permissions on initial launch
+    // Set native Android window background to dark, request storage permissions & initialize auth sync on launch
     SystemUI.setBackgroundColorAsync('#09090B').catch(() => {});
     requestStoragePermissionOnLaunch();
+    useUserStore.getState().initializeAuth();
   }, []);
 
   useEffect(() => {
@@ -52,38 +48,67 @@ export default function RootLayout() {
   if (!fontsLoaded) return null;
 
   return (
-    <ThemeProvider value={YomiteDarkTheme}>
-      <StatusBar style="light" />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: '#09090B' },
-          animation: 'slide_from_right',
-        }}
-      >
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen
-          name="manga/[id]"
-          options={{
-            headerShown: false,
-            animation: 'slide_from_right',
-            contentStyle: { backgroundColor: '#09090B' },
-          }}
-        />
-        <Stack.Screen
-          name="reader/[chapterId]"
-          options={{
-            headerShown: false,
-            animation: 'fade',
-            gestureEnabled: false,
-            contentStyle: { backgroundColor: '#000000' },
-          }}
-        />
-        <Stack.Screen
-          name="+not-found"
-          options={{ title: 'Not Found', headerShown: true }}
-        />
-      </Stack>
-    </ThemeProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemeProvider value={YomiteDarkTheme}>
+        <StatusBar style="light" />
+        <View
+          style={
+            Platform.OS === 'web'
+              ? styles.webGlobalContainer
+              : styles.nativeGlobalContainer
+          }
+        >
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: '#09090B' },
+              animation: 'slide_from_right',
+            }}
+          >
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen
+              name="manga/[id]"
+              options={{
+                headerShown: false,
+                animation: 'slide_from_right',
+                contentStyle: { backgroundColor: '#09090B' },
+              }}
+            />
+            <Stack.Screen
+              name="reader/[chapterId]"
+              options={{
+                headerShown: false,
+                animation: 'fade',
+                gestureEnabled: false,
+                contentStyle: { backgroundColor: '#000000' },
+              }}
+            />
+            <Stack.Screen
+              name="profile"
+              options={{
+                headerShown: false,
+                animation: 'slide_from_right',
+                contentStyle: { backgroundColor: '#09090B' },
+              }}
+            />
+            <Stack.Screen
+              name="+not-found"
+              options={{ title: 'Not Found', headerShown: true }}
+            />
+          </Stack>
+        </View>
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }
+
+const styles = StyleSheet.create({
+  nativeGlobalContainer: {
+    flex: 1,
+  },
+  webGlobalContainer: {
+    flex: 1,
+    width: '100%',
+    backgroundColor: '#09090B',
+  },
+});

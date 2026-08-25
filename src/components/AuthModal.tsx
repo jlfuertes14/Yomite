@@ -1,6 +1,7 @@
 /**
- * AuthModal — Modern Bottom Sheet Auth Modal for Google & Email Sign In / Registration
- * Features official 4-color Google G logo, email/password form, password toggle, and native haptics.
+ * AuthModal — Modern Bottom Sheet / Web Dialog Auth Modal for Google & Email Sign In / Registration
+ * Features official 4-color Google G logo, preferred username field for registration,
+ * password toggle, and native haptics.
  */
 import React, { useState } from 'react';
 import {
@@ -36,6 +37,7 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
   const signInWithGoogle = useUserStore((s) => s.signInWithGoogle);
 
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -58,15 +60,26 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
       Alert.alert('Missing Fields', 'Please enter your email and password.');
       return;
     }
+
+    if (authMode === 'signup' && !username.trim()) {
+      Alert.alert('Username Required', 'Please choose a preferred username for your public display name.');
+      return;
+    }
+
+    if (authMode === 'signup' && username.trim().length < 3) {
+      Alert.alert('Invalid Username', 'Username must be at least 3 characters long.');
+      return;
+    }
+
     triggerHaptic();
     setIsSubmitting(true);
     if (authMode === 'signup') {
-      const { error } = await signUpWithEmail(email.trim(), password.trim());
+      const { error } = await signUpWithEmail(email.trim(), password.trim(), username.trim());
       setIsSubmitting(false);
       if (error) {
         Alert.alert('Registration Failed', error.message);
       } else {
-        Alert.alert('Success', 'Account created successfully! Check your email if confirmation is required.');
+        Alert.alert('Success', 'Account created successfully! Welcome to Yomite.');
         onClose();
       }
     } else {
@@ -80,18 +93,26 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
     }
   };
 
+  const isWeb = Platform.OS === 'web';
+
   return (
     <Modal
       visible={visible}
-      animationType="slide"
+      animationType={isWeb ? 'fade' : 'slide'}
       transparent
       onRequestClose={onClose}
     >
-      <View style={styles.backdrop}>
+      <View style={[styles.backdrop, isWeb && styles.webBackdrop]}>
         <Pressable style={styles.overlayPress} onPress={onClose} />
 
-        <View style={[styles.sheetContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <View style={[styles.dragHandle, { backgroundColor: colors.border }]} />
+        <View
+          style={[
+            styles.sheetContainer,
+            isWeb && styles.webSheetContainer,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          {!isWeb && <View style={[styles.dragHandle, { backgroundColor: colors.border }]} />}
 
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
             {/* Header */}
@@ -104,7 +125,7 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
                   Sync your library & reading history across all your devices
                 </Text>
               </View>
-              <Pressable onPress={onClose} style={styles.closeBtn}>
+              <Pressable onPress={onClose} style={styles.closeBtn} hitSlop={8}>
                 <Ionicons name="close" size={20} color={colors.textMuted} />
               </Pressable>
             </View>
@@ -177,6 +198,27 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
 
             {/* Form Inputs */}
             <View style={styles.formGroup}>
+              {/* Preferred Username (Only for Sign Up) */}
+              {authMode === 'signup' && (
+                <View>
+                  <View style={[styles.inputBox, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                    <Ionicons name="person-outline" size={18} color={colors.textMuted} />
+                    <TextInput
+                      style={[styles.textInput, { color: colors.text }]}
+                      placeholder="Preferred Username / Display Name"
+                      placeholderTextColor={colors.textMuted}
+                      value={username}
+                      onChangeText={setUsername}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                  </View>
+                  <Text style={[styles.helperText, { color: colors.textMuted }]}>
+                    Your public display name in community discussions & reviews.
+                  </Text>
+                </View>
+              )}
+
               <View style={[styles.inputBox, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
                 <Ionicons name="mail-outline" size={18} color={colors.textMuted} />
                 <TextInput
@@ -200,7 +242,7 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
                   onChangeText={setPassword}
                   secureTextEntry={!showPassword}
                 />
-                <Pressable onPress={() => setShowPassword(!showPassword)} style={styles.eyeBtn}>
+                <Pressable onPress={() => setShowPassword(!showPassword)} style={styles.eyeBtn} hitSlop={8}>
                   <Ionicons
                     name={showPassword ? 'eye-off-outline' : 'eye-outline'}
                     size={18}
@@ -239,18 +281,40 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: 'rgba(0,0,0,0.75)',
     justifyContent: 'flex-end',
   },
+  webBackdrop: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing.md,
+  },
   overlayPress: {
-    flex: 1,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   sheetContainer: {
     borderTopLeftRadius: Radius.xl,
     borderTopRightRadius: Radius.xl,
     borderWidth: 1,
     borderBottomWidth: 0,
-    maxHeight: '85%',
+    maxHeight: '90%',
+  },
+  webSheetContainer: {
+    width: '100%',
+    maxWidth: 480,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderBottomWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 25,
+    elevation: 10,
+    overflow: 'hidden',
   },
   dragHandle: {
     width: 36,
@@ -346,6 +410,11 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: Typography.sizes.body,
     paddingVertical: 0,
+  },
+  helperText: {
+    fontSize: 10,
+    marginTop: 4,
+    marginLeft: 4,
   },
   eyeBtn: {
     padding: 4,

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Yomite",
     "slug": "yomite",
-    "version": "1.0.1",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "mangaapp",
@@ -56,7 +56,9 @@
         }
       ],
       "expo-asset",
-      "expo-system-ui"
+      "expo-system-ui",
+      "expo-image",
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true

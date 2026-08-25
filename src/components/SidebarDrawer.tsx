@@ -1,6 +1,7 @@
 /**
- * SidebarDrawer — Left Sidebar Navigation Menu
+ * SidebarDrawer — Left Slide Drawer Navigation Menu
  * Branding: Yomite (with Anime Mascot Logo)
+ * Contains both Main Navigation Links and Discover Quick Filters.
  */
 import React from 'react';
 import {
@@ -10,16 +11,25 @@ import {
   Pressable,
   Modal,
   ScrollView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter, usePathname } from 'expo-router';
 import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
 import { useThemeColors } from '../hooks/useThemeColor';
 
 type VectorIcon = React.ComponentProps<typeof Ionicons>['name'];
 
-interface SidebarItem {
+interface NavigationItem {
+  id: string;
+  label: string;
+  icon: VectorIcon;
+  path: string;
+}
+
+interface FilterItem {
   id: string;
   label: string;
   icon: VectorIcon;
@@ -30,11 +40,11 @@ interface SidebarItem {
 interface SidebarDrawerProps {
   visible: boolean;
   onClose: () => void;
-  onSelectAdvancedSearch: () => void;
-  onSelectLatest: () => void;
-  onSelectRecentlyAdded: () => void;
-  onSelectRandom: () => void;
-  onSelectPopular: () => void;
+  onSelectAdvancedSearch?: () => void;
+  onSelectLatest?: () => void;
+  onSelectRecentlyAdded?: () => void;
+  onSelectRandom?: () => void;
+  onSelectPopular?: () => void;
 }
 
 export function SidebarDrawer({
@@ -47,15 +57,35 @@ export function SidebarDrawer({
   onSelectPopular,
 }: SidebarDrawerProps) {
   const colors = useThemeColors();
+  const router = useRouter();
+  const pathname = usePathname();
 
-  const navItems: SidebarItem[] = [
+  const mainPages: NavigationItem[] = [
+    { id: 'discover', label: 'Discover', icon: 'compass-outline', path: '/' },
+    ...(Platform.OS === 'web'
+      ? [{ id: 'download', label: 'Get Mobile App', icon: 'phone-portrait-outline' as const, path: '/download' }]
+      : []),
+    { id: 'library', label: 'Library', icon: 'library-outline', path: '/library' },
+    { id: 'downloads', label: 'Downloads', icon: 'download-outline', path: '/downloads' },
+    { id: 'extensions', label: 'Extensions', icon: 'grid-outline', path: '/extensions' },
+    { id: 'community', label: 'Community', icon: 'chatbubbles-outline', path: '/community' },
+    { id: 'history', label: 'History', icon: 'time-outline', path: '/history' },
+    { id: 'profile', label: 'My Profile', icon: 'person-outline', path: '/profile' },
+    { id: 'settings', label: 'Settings', icon: 'settings-outline', path: '/settings' },
+  ];
+
+  const filterItems: FilterItem[] = [
     {
       id: 'advanced_search',
       label: 'Advanced Search',
       icon: 'options-outline',
       action: () => {
         onClose();
-        onSelectAdvancedSearch();
+        if (onSelectAdvancedSearch) {
+          onSelectAdvancedSearch();
+        } else {
+          router.push('/(tabs)' as any);
+        }
       },
       badge: 'Filter',
     },
@@ -65,7 +95,11 @@ export function SidebarDrawer({
       icon: 'trending-up-outline',
       action: () => {
         onClose();
-        onSelectPopular();
+        if (onSelectPopular) {
+          onSelectPopular();
+        } else {
+          router.push('/(tabs)' as any);
+        }
       },
     },
     {
@@ -74,7 +108,11 @@ export function SidebarDrawer({
       icon: 'time-outline',
       action: () => {
         onClose();
-        onSelectLatest();
+        if (onSelectLatest) {
+          onSelectLatest();
+        } else {
+          router.push('/(tabs)' as any);
+        }
       },
     },
     {
@@ -83,7 +121,11 @@ export function SidebarDrawer({
       icon: 'add-circle-outline',
       action: () => {
         onClose();
-        onSelectRecentlyAdded();
+        if (onSelectRecentlyAdded) {
+          onSelectRecentlyAdded();
+        } else {
+          router.push('/(tabs)' as any);
+        }
       },
     },
     {
@@ -92,10 +134,32 @@ export function SidebarDrawer({
       icon: 'dice-outline',
       action: () => {
         onClose();
-        onSelectRandom();
+        if (onSelectRandom) {
+          onSelectRandom();
+        } else {
+          router.push('/(tabs)' as any);
+        }
       },
     },
   ];
+
+  const isPageActive = (path: string) => {
+    if (path === '/') {
+      return pathname === '/' || pathname === '/(tabs)' || pathname === '/(tabs)/index' || pathname === '';
+    }
+    return pathname.includes(path);
+  };
+
+  const handleNavigate = (path: string) => {
+    onClose();
+    if (path === '/') {
+      router.push('/(tabs)' as any);
+    } else if (path === '/profile') {
+      router.push('/profile' as any);
+    } else {
+      router.push(`/(tabs)${path}` as any);
+    }
+  };
 
   return (
     <Modal
@@ -116,20 +180,74 @@ export function SidebarDrawer({
                   contentFit="cover"
                 />
               </View>
-              <Text style={[styles.brandTitle, { color: colors.text }]}>Yomite</Text>
+              <View>
+                <Text style={[styles.brandTitle, { color: colors.text }]}>Yomite</Text>
+                <Text style={[styles.brandSubtitle, { color: colors.textMuted }]}>Manga & Comic Reader</Text>
+              </View>
             </View>
-            <Pressable onPress={onClose} style={styles.closeBtn}>
-              <Ionicons name="close" size={20} color={colors.textMuted} />
+            <Pressable onPress={onClose} style={styles.closeBtn} hitSlop={8}>
+              <Ionicons name="close" size={22} color={colors.textMuted} />
             </Pressable>
           </View>
 
-          {/* Navigation Items */}
-          <ScrollView contentContainerStyle={styles.itemList}>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.itemList}>
+            {/* Section 1: Main App Navigation (Web Only) */}
+            {Platform.OS === 'web' && (
+              <>
+                <Text style={[styles.sectionHeading, { color: colors.textMuted }]}>
+                  MAIN NAVIGATION
+                </Text>
+
+                {mainPages.map((page) => {
+                  const active = isPageActive(page.path);
+                  return (
+                    <Pressable
+                      key={page.id}
+                      onPress={() => handleNavigate(page.path)}
+                      style={({ pressed }) => [
+                        styles.itemRow,
+                        {
+                          backgroundColor: pressed ? colors.surfaceElevated : 'transparent',
+                          borderColor: 'transparent',
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name={page.icon}
+                        size={18}
+                        color={active ? colors.accent : colors.text}
+                      />
+                      <Text
+                        style={[
+                          styles.itemLabel,
+                          {
+                            color: active ? colors.accent : colors.text,
+                            fontWeight: active ? Typography.weights.bold : Typography.weights.medium,
+                          },
+                        ]}
+                      >
+                        {page.label}
+                      </Text>
+                      <Ionicons
+                        name="chevron-forward"
+                        size={14}
+                        color={active ? colors.accent : colors.textMuted}
+                      />
+                    </Pressable>
+                  );
+                })}
+
+                {/* Divider */}
+                <View style={[styles.divider, { backgroundColor: colors.borderSubtle }]} />
+              </>
+            )}
+
+            {/* Section 2: Discover & Filters */}
             <Text style={[styles.sectionHeading, { color: colors.textMuted }]}>
-              DISCOVER & NAVIGATION
+              DISCOVER & QUICK FILTERS
             </Text>
 
-            {navItems.map((item) => (
+            {filterItems.map((item) => (
               <Pressable
                 key={item.id}
                 onPress={item.action}
@@ -137,7 +255,7 @@ export function SidebarDrawer({
                   styles.itemRow,
                   {
                     backgroundColor: pressed ? colors.surfaceElevated : 'transparent',
-                    borderColor: colors.borderSubtle,
+                    borderColor: 'transparent',
                   },
                 ]}
               >
@@ -180,7 +298,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   drawerContent: {
-    width: 280,
+    width: 290,
     height: '100%',
     borderRightWidth: 1,
     paddingHorizontal: Spacing.lg,
@@ -190,7 +308,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: Spacing.md,
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.xs,
   },
   brandRow: {
     flexDirection: 'row',
@@ -198,10 +316,10 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   mascotAvatar: {
-    width: 36,
-    height: 36,
+    width: 38,
+    height: 38,
     borderRadius: Radius.full,
-    borderWidth: 1,
+    borderWidth: 1.5,
     overflow: 'hidden',
   },
   mascotImage: {
@@ -213,6 +331,10 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.bold,
     letterSpacing: -0.3,
   },
+  brandSubtitle: {
+    fontSize: 10,
+    marginTop: -2,
+  },
   closeBtn: {
     padding: 4,
   },
@@ -220,23 +342,35 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: Typography.weights.bold,
     letterSpacing: 1,
-    marginBottom: Spacing.sm,
+    marginTop: Spacing.xs,
+    marginBottom: Spacing.xs,
   },
   itemList: {
-    gap: Spacing.xs,
+    gap: 4,
+    paddingBottom: Spacing.md,
+  },
+  divider: {
+    height: 1,
+    marginVertical: Spacing.sm,
   },
   itemRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: Spacing.md - 2,
+    paddingVertical: 10,
     paddingHorizontal: Spacing.md,
     borderRadius: Radius.md,
+    borderWidth: 1,
     gap: Spacing.md,
   },
   itemLabel: {
     flex: 1,
-    fontSize: Typography.sizes.body,
+    fontSize: Typography.sizes.body - 1,
     fontWeight: Typography.weights.medium,
+  },
+  activeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   badge: {
     paddingHorizontal: 6,
@@ -252,6 +386,21 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md,
     borderTopWidth: 1,
     marginTop: 'auto',
+    gap: 2,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  statusText: {
+    fontSize: 11,
+    fontWeight: Typography.weights.medium,
   },
   footerText: {
     fontSize: Typography.sizes.caption,

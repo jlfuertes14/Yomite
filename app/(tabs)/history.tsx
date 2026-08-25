@@ -24,6 +24,7 @@ import { useDownloadStore } from '../../src/store/downloadStore';
 import { downloadChapter, removeDownloadedChapter } from '../../src/services/downloadService';
 import { getMangaDetails, extractCoverFileName, getCoverUrl } from '../../src/api/mangadex';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
+import { SidebarDrawer } from '../../src/components/SidebarDrawer';
 import type { HistoryEntry } from '../../src/types';
 import { triggerHaptic } from '../../src/utils/haptics';
 
@@ -190,6 +191,7 @@ function HistoryRowItem({
 export default function HistoryScreen() {
   const router = useRouter();
   const colors = useThemeColors();
+  const [drawerVisible, setDrawerVisible] = useState(false);
   const entries = useHistoryStore((s) => s.entries);
   const removeEntry = useHistoryStore((s) => s.removeEntry);
   const removeEntries = useHistoryStore((s) => s.removeEntries);
@@ -323,8 +325,20 @@ export default function HistoryScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.text }]}>History</Text>
+      <View style={[{ flex: 1, width: '100%' }, Platform.OS === 'web' && styles.webCenteredContent]}>
+        <View style={styles.header}>
+        <View style={styles.titleRow}>
+          {Platform.OS === 'web' && (
+            <Pressable
+              onPress={() => setDrawerVisible(true)}
+              style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1 }]}
+              hitSlop={8}
+            >
+              <Ionicons name="menu" size={26} color={colors.text} />
+            </Pressable>
+          )}
+          <Text style={[styles.title, { color: colors.text }]}>History</Text>
+        </View>
 
         {entries.length > 0 && (
           <View style={styles.headerRightActions}>
@@ -510,12 +524,21 @@ export default function HistoryScreen() {
         onConfirm={confirmModalConfig.onConfirm}
         onCancel={() => setConfirmModalConfig((prev) => ({ ...prev, visible: false }))}
       />
+
+      {/* Hamburger Slide Drawer */}
+      <SidebarDrawer visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  webCenteredContent: {
+    maxWidth: 1400,
+    width: '100%',
+    alignSelf: 'center',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -523,6 +546,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
     paddingBottom: Spacing.xs,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  plainIconButton: {
+    padding: 4,
   },
   title: {
     fontSize: Typography.sizes.title1,

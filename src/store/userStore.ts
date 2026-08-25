@@ -1,5 +1,5 @@
 /**
- * User Store — Handles Supabase User Authentication, Session State & Google Auth
+ * User Store — Handles Supabase User Authentication, Session State, User Profile & Google Auth
  */
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
@@ -9,43 +9,134 @@ import { createURL, parse } from 'expo-linking';
 
 import { syncUserDataWithCloud } from '../services/cloudSync';
 
+export interface UserProfileData {
+  username?: string;
+  display_name?: string;
+  avatar_url?: string;
+}
+
 interface UserState {
   user: User | null;
   session: Session | null;
   isLoading: boolean;
   initializeAuth: () => Promise<void>;
-  signUpWithEmail: (email: string, password: string) => Promise<{ error: any }>;
+  refreshUser: () => Promise<void>;
+  signUpWithEmail: (email: string, password: string, username?: string) => Promise<{ error: any }>;
   signInWithEmail: (email: string, password: string) => Promise<{ error: any }>;
   signInWithGoogle: () => Promise<{ error: any }>;
+  updateProfile: (data: UserProfileData) => Promise<{ data?: User | null; error: any }>;
   signOut: () => Promise<void>;
 }
 
-export const useUserStore = create<UserState>((set) => ({
+/**
+ * Clean helper function to get preferred display name or fallback
+ */
+export function getUserDisplayName(user: User | null | undefined): string {
+  if (!user) return 'Guest';
+  const meta = user.user_metadata || {};
+  return (
+    meta.display_name ||
+    meta.username ||
+    meta.full_name ||
+    meta.name ||
+    (user.email ? user.email.split('@')[0] : 'Yomite Reader')
+  );
+}
+
+/**
+ * Clean helper function to get username handle (e.g. "otaku99")
+ */
+export function getUserHandle(user: User | null | undefined): string {
+  if (!user) return 'guest';
+  const meta = user.user_metadata || {};
+  const name = meta.username || meta.display_name || (user.email ? user.email.split('@')[0] : 'reader');
+  return name.toLowerCase().replace(/\s+/g, '_');
+}
+
+/**
+ * Clean helper function to get user avatar URL or null
+ */
+export function getUserAvatarUrl(user: User | null | undefined): string | null {
+  if (!user) return null;
+  const meta = user.user_metadata || {};
+  const url = meta.avatar_url || meta.picture || meta.avatar || (user as any).avatar_url || null;
+  if (!url || typeof url !== 'string' || url.trim().length === 0) return null;
+  return url.trim();
+}
+
+let isAuthInitialized = false;
+let authListenerSubscription: any = null;
+
+export const useUserStore = create<UserState>((set, get) => ({
   user: null,
   session: null,
   isLoading: true,
 
   initializeAuth: async () => {
+    if (isAuthInitialized) {
+      get().refreshUser();
+      return;
+    }
+    isAuthInitialized = true;
+
     try {
       const { data } = await supabase.auth.getSession();
-      set({ session: data.session, user: data.session?.user ?? null, isLoading: false });
-      if (data.session?.user?.id) {
-        syncUserDataWithCloud(data.session.user.id);
+      const session = data?.session ?? null;
+      set({ session, user: session?.user ?? null, isLoading: false });
+
+      if (session?.user?.id) {
+        // Fetch fresh user record from server to ensure metadata like avatar_url is in sync
+        const { data: freshUser } = await supabase.auth.getUser();
+        if (freshUser?.user) {
+          set({ user: freshUser.user });
+        }
+        syncUserDataWithCloud(session.user.id);
       }
 
-      supabase.auth.onAuthStateChange((_event, session) => {
-        set({ session, user: session?.user ?? null, isLoading: false });
-        if (session?.user?.id) {
-          syncUserDataWithCloud(session.user.id);
+      if (authListenerSubscription) {
+        authListenerSubscription.unsubscribe();
+      }
+
+      const { data: authListener } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+        set({ session: newSession, user: newSession?.user ?? null, isLoading: false });
+        if (newSession?.user?.id && (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED')) {
+          const { data: freshUser } = await supabase.auth.getUser();
+          if (freshUser?.user) {
+            set({ user: freshUser.user });
+          }
+          syncUserDataWithCloud(newSession.user.id);
         }
       });
+      authListenerSubscription = authListener.subscription;
     } catch (err) {
       set({ isLoading: false });
     }
   },
 
-  signUpWithEmail: async (email, password) => {
-    const { data, error } = await supabase.auth.signUp({ email, password });
+  refreshUser: async () => {
+    try {
+      const { data, error } = await supabase.auth.getUser();
+      if (!error && data?.user) {
+        set({ user: data.user });
+      }
+    } catch (err) {
+      // Ignore
+    }
+  },
+
+  signUpWithEmail: async (email, password, username) => {
+    const cleanUsername = username?.trim() || email.split('@')[0];
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          username: cleanUsername,
+          display_name: cleanUsername,
+        },
+      },
+    });
+
     if (!error && data.session) {
       set({ session: data.session, user: data.user });
       if (data.user?.id) syncUserDataWithCloud(data.user.id);
@@ -106,6 +197,22 @@ export const useUserStore = create<UserState>((set) => ({
         }
       }
       return { error: null };
+    } catch (err: any) {
+      return { error: err };
+    }
+  },
+
+  updateProfile: async (profileData) => {
+    try {
+      const { data, error } = await supabase.auth.updateUser({
+        data: profileData,
+      });
+
+      if (!error && data?.user) {
+        set({ user: data.user });
+        syncUserDataWithCloud(data.user.id);
+      }
+      return { data: data?.user, error };
     } catch (err: any) {
       return { error: err };
     }

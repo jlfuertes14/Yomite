@@ -7,6 +7,7 @@ import {
   Text,
   StyleSheet,
   useWindowDimensions,
+  Platform,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -49,12 +50,25 @@ function MangaCardComponent({
   const colors = useThemeColors();
   const { width: windowWidth } = useWindowDimensions();
 
+  const isDesktop = windowWidth >= 1024;
   const isMobile = windowWidth < 600;
-  const columns = isMobile ? 3 : Math.max(4, Math.floor((windowWidth - 32) / 140));
+
+  // On Web, use exact percentage calculation: 9 columns = calc((100% - 80px) / 9)
+  const webWidth = isDesktop || windowWidth >= 900
+    ? ('calc((100% - 80px) / 9)' as any)
+    : isMobile
+    ? ('calc((100% - 20px) / 3)' as any)
+    : ('calc((100% - 50px) / 6)' as any);
+
+  // On Native Android/iOS, use pixel calculation
+  const availableContentWidth = isDesktop ? windowWidth - 260 : windowWidth;
   const horizontalPadding = isMobile ? 24 : 32;
+  const columns = isDesktop || availableContentWidth >= 900 ? 9 : isMobile ? 3 : 6;
   const totalGap = (columns - 1) * CARD_GAP;
-  const cardWidth = Math.floor((windowWidth - horizontalPadding - totalGap) / columns);
-  const cardHeight = cardWidth * 1.44;
+  const nativeWidth = Math.floor((availableContentWidth - horizontalPadding - totalGap - 2) / columns);
+
+  const cardWidth = Platform.OS === 'web' ? webWidth : nativeWidth;
+  const cardHeight = typeof cardWidth === 'number' ? Math.floor(cardWidth * 1.44) : undefined;
 
   const formattedFollows = formatStatNumber(follows);
 
@@ -68,8 +82,8 @@ function MangaCardComponent({
       <View
         style={[
           styles.imageContainer,
+          cardHeight ? { height: cardHeight } : null,
           {
-            height: cardHeight,
             backgroundColor: colors.surface,
             borderColor: colors.border,
           },
@@ -116,7 +130,7 @@ function MangaCardComponent({
         <View style={styles.subMetaRow}>
           {author ? (
             <Text
-              style={[styles.author, { color: colors.textMuted, flex: 1 }]}
+              style={[styles.author, { color: colors.textSecondary, flex: 1 }]}
               numberOfLines={1}
             >
               {author}
@@ -125,7 +139,7 @@ function MangaCardComponent({
           {formattedFollows ? (
             <View style={styles.followsRow}>
               <Ionicons name="bookmark" size={9} color={colors.accent} />
-              <Text style={[styles.statText, { color: colors.textMuted }]}>
+              <Text style={[styles.statText, { color: colors.textSecondary }]}>
                 {formattedFollows}
               </Text>
             </View>
@@ -144,6 +158,7 @@ const styles = StyleSheet.create({
   },
   imageContainer: {
     width: '100%',
+    aspectRatio: 1 / 1.44,
     borderRadius: Radius.md,
     overflow: 'hidden',
     borderWidth: 1,
@@ -164,9 +179,9 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   title: {
-    fontSize: Typography.sizes.footnote,
+    fontSize: Platform.OS === 'web' ? 14 : Typography.sizes.footnote,
     fontWeight: Typography.weights.semibold,
-    lineHeight: 16,
+    lineHeight: Platform.OS === 'web' ? 19 : 16,
   },
   subMetaRow: {
     flexDirection: 'row',
@@ -175,7 +190,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   author: {
-    fontSize: Typography.sizes.caption,
+    fontSize: Platform.OS === 'web' ? 12 : Typography.sizes.caption,
     fontWeight: Typography.weights.regular,
   },
   followsRow: {
@@ -184,7 +199,7 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   statText: {
-    fontSize: 10,
+    fontSize: Platform.OS === 'web' ? 11 : 10,
     fontWeight: Typography.weights.medium,
   },
   ratingBadge: {
@@ -195,30 +210,37 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 3,
     backgroundColor: 'rgba(9,9,11,0.85)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: Platform.OS === 'web' ? 8 : 6,
+    paddingVertical: Platform.OS === 'web' ? 3 : 2,
     borderRadius: Radius.xs,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
   },
   ratingText: {
     color: '#FAFAFA',
-    fontSize: 10,
+    fontSize: Platform.OS === 'web' ? 11 : 10,
     fontWeight: Typography.weights.bold,
   },
   badge: {
     position: 'absolute',
     top: 6,
     right: 6,
-    minWidth: 18,
-    height: 18,
-    borderRadius: Radius.full,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 4,
+    paddingHorizontal: 5,
+    borderWidth: 1.5,
+    borderColor: '#09090B',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.4,
+    shadowRadius: 2,
+    elevation: 3,
   },
   badgeText: {
-    color: '#FFFFFF',
+    color: '#09090B',
     fontSize: 10,
     fontWeight: Typography.weights.bold,
   },

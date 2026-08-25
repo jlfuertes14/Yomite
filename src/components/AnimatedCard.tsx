@@ -84,19 +84,18 @@ export function AnimatedCard({
     <Pressable
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
+      style={style}
       {...props}
     >
       <Animated.View
-        style={[
-          style,
-          {
-            opacity: fadeAnim,
-            transform: [
-              { translateY: slideAnim },
-              { scale: scaleAnim },
-            ],
-          },
-        ]}
+        style={{
+          width: '100%',
+          opacity: fadeAnim,
+          transform: [
+            { translateY: slideAnim },
+            { scale: scaleAnim },
+          ],
+        }}
       >
         {children}
       </Animated.View>

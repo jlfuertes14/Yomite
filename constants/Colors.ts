@@ -35,8 +35,8 @@ export const Colors = {
   },
   dark: {
     text: '#FAFAFA',
-    textSecondary: '#A1A1AA',
-    textMuted: '#71717A',
+    textSecondary: '#E4E4E7',
+    textMuted: '#A1A1AA',
     background: '#09090B',     // Neutral Zinc-950
     surface: '#141417',        // Elevated Card Surface
     surfaceElevated: '#1F1F23', // Input & Pill Surface

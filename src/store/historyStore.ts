@@ -1,6 +1,6 @@
 /**
  * History Store — Zustand + AsyncStorage
- * Tracks reading history with timestamps and page progress
+ * Tracks reading history with timestamps, page progress, and read chapters
  */
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
@@ -11,7 +11,11 @@ const MAX_HISTORY = 200;
 
 interface HistoryState {
   entries: HistoryEntry[];
-  addEntry: (entry: Omit<HistoryEntry, 'timestamp'>) => void;
+  readChapterIds: Record<string, boolean>;
+  addEntry: (entry: Omit<HistoryEntry, 'timestamp'> & { timestamp?: number }) => void;
+  markChapterRead: (chapterId: string) => void;
+  markChapterUnread: (chapterId: string) => void;
+  isChapterRead: (chapterId: string) => boolean;
   removeEntry: (chapterId: string) => void;
   removeEntries: (chapterIds: string[]) => void;
   clearHistory: () => void;
@@ -23,17 +27,58 @@ export const useHistoryStore = create<HistoryState>()(
   persist(
     (set, get) => ({
       entries: [],
+      readChapterIds: {},
 
-      addEntry: (entry) =>
+      addEntry: (entry) => {
+        const timestamp = entry.timestamp || Date.now();
+        const newEntry: HistoryEntry = { ...entry, timestamp };
+
         set((state) => {
           // Remove existing entry for the same manga to prevent duplicate history rows
           const filtered = state.entries.filter(
             (e) => (entry.mangaId ? e.mangaId !== entry.mangaId : e.chapterId !== entry.chapterId)
           );
-          const newEntry: HistoryEntry = { ...entry, timestamp: Date.now() };
-          // Prepend new entry, cap at MAX_HISTORY
-          return { entries: [newEntry, ...filtered].slice(0, MAX_HISTORY) };
+          return {
+            entries: [newEntry, ...filtered].slice(0, MAX_HISTORY),
+            readChapterIds: {
+              ...(state.readChapterIds || {}),
+              [entry.chapterId]: true,
+            },
+          };
+        });
+
+        // Real-time background push to Supabase if user is logged in
+        try {
+          const { useUserStore } = require('./userStore');
+          const { pushHistoryEntryToCloud } = require('../services/cloudSync');
+          const userId = useUserStore.getState().user?.id;
+          if (userId) {
+            pushHistoryEntryToCloud(userId, newEntry);
+          }
+        } catch (_e) {}
+      },
+
+      markChapterRead: (chapterId: string) =>
+        set((state) => ({
+          readChapterIds: {
+            ...(state.readChapterIds || {}),
+            [chapterId]: true,
+          },
+        })),
+
+      markChapterUnread: (chapterId: string) =>
+        set((state) => {
+          const updated = { ...(state.readChapterIds || {}) };
+          delete updated[chapterId];
+          return { readChapterIds: updated };
         }),
+
+      isChapterRead: (chapterId: string) => {
+        const state = get();
+        if (state.readChapterIds?.[chapterId]) return true;
+        // Check if present in entries list
+        return state.entries.some((e) => e.chapterId === chapterId);
+      },
 
       removeEntry: (chapterId) =>
         set((state) => {
@@ -82,7 +127,7 @@ export const useHistoryStore = create<HistoryState>()(
           }
         } catch (_e) {}
 
-        set({ entries: [] });
+        set({ entries: [], readChapterIds: {} });
       },
 
       getLatest: (count = 20) => get().entries.slice(0, count),

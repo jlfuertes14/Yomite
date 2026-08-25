@@ -27,6 +27,7 @@ interface ConfirmationModalProps {
   confirmText?: string;
   cancelText?: string;
   confirmVariant?: 'destructive' | 'primary' | 'success';
+  children?: React.ReactNode;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -40,6 +41,7 @@ export function ConfirmationModal({
   confirmText = 'Confirm',
   cancelText = 'Cancel',
   confirmVariant = 'primary',
+  children,
   onConfirm,
   onCancel,
 }: ConfirmationModalProps) {
@@ -105,6 +107,8 @@ export function ConfirmationModal({
           <Text style={[styles.message, { color: colors.textSecondary }]}>
             {message}
           </Text>
+
+          {children}
 
           {/* Action Buttons Row */}
           <View style={styles.buttonRow}>

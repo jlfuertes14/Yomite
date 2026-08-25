@@ -45,8 +45,10 @@ import { OfflineState } from '../../src/components/OfflineState';
 import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
 import { LibraryCategoryModal } from '../../src/components/LibraryCategoryModal';
 import { ChapterSkeleton } from '../../src/components/Skeleton';
+import { ZoomableImage } from '../../src/components/ZoomableImage';
 import { triggerHaptic } from '../../src/utils/haptics';
 import { formatChapterDate } from '../../src/utils/date';
+import { getLanguageInfo } from '../../src/utils/language';
 import type { Manga, Chapter, LibraryCategory } from '../../src/types';
 
 export default function MangaDetailScreen() {
@@ -57,6 +59,8 @@ export default function MangaDetailScreen() {
   const [manga, setManga] = useState<Manga | null>(null);
   const [stats, setStats] = useState<MangaStatistics | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [selectedLanguage, setSelectedLanguage] = useState<string>('en');
+  const [isLanguageDropdownOpen, setIsLanguageDropdownOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingChapters, setIsLoadingChapters] = useState(true);
   const [isStartingReading, setIsStartingReading] = useState(false);
@@ -70,12 +74,38 @@ export default function MangaDetailScreen() {
   const removeFromLibrary = useLibraryStore((s) => s.removeFromLibrary);
   const updateCategory = useLibraryStore((s) => s.updateCategory);
   const lastProgress = useHistoryStore((s) => s.getMangaProgress(id!));
+  const isChapterRead = useHistoryStore((s) => s.isChapterRead);
   const downloadMap = useDownloadStore((s) => s.chapters);
+
+  // Available translated languages list
+  const rawAvailableLanguages = manga?.attributes?.availableTranslatedLanguages || ['en'];
+  const availableLanguages = Array.from(new Set(rawAvailableLanguages.filter(Boolean)));
+  availableLanguages.sort((a, b) => {
+    if (a === 'en') return -1;
+    if (b === 'en') return 1;
+    return getLanguageInfo(a).name.localeCompare(getLanguageInfo(b).name);
+  });
+
+  // Auto-align selected language if default 'en' is not in available languages
+  useEffect(() => {
+    if (manga?.attributes?.availableTranslatedLanguages?.length) {
+      const avail = manga.attributes.availableTranslatedLanguages;
+      if (!avail.includes(selectedLanguage)) {
+        if (avail.includes('en')) {
+          setSelectedLanguage('en');
+        } else if (avail[0]) {
+          setSelectedLanguage(avail[0]);
+        }
+      }
+    }
+  }, [manga]);
 
   // Modals state
   const [categoryModalVisible, setCategoryModalVisible] = useState(false);
   const [downloadModalVisible, setDownloadModalVisible] = useState(false);
   const [selectedDownloadIds, setSelectedDownloadIds] = useState<Set<string>>(new Set());
+  const [isCoverHovered, setIsCoverHovered] = useState(false);
+  const [isCoverLightboxOpen, setIsCoverLightboxOpen] = useState(false);
 
   // Custom Confirmation Dialog State
   const [confirmModalConfig, setConfirmModalConfig] = useState<{
@@ -101,8 +131,8 @@ export default function MangaDetailScreen() {
 
   useEffect(() => {
     if (!id) return;
-    loadChapters();
-  }, [id, sortOrder]);
+    loadChapters(selectedLanguage, sortOrder);
+  }, [id, sortOrder, selectedLanguage]);
 
   const loadMangaDetails = async () => {
     try {
@@ -122,11 +152,28 @@ export default function MangaDetailScreen() {
     }
   };
 
-  const loadChapters = async () => {
+  const loadChapters = async (lang = selectedLanguage, order = sortOrder) => {
     try {
       setIsLoadingChapters(true);
-      const result = await getMangaChapters(id!, 'en', 100, 0, sortOrder);
-      setChapters(result.data);
+      const result = await getMangaChapters(id!, lang, 100, 0, order);
+      const chs = result.data || [];
+      setChapters(chs);
+
+      // Reconcile total chapters and unread count badge in library
+      if (id && chs.length > 0) {
+        const libStore = useLibraryStore.getState();
+        if (libStore.isInLibrary(id)) {
+          const progress = useHistoryStore.getState().getMangaProgress(id);
+          let unread = chs.length;
+          if (progress?.chapterId) {
+            const idx = chs.findIndex((c) => c.id === progress.chapterId);
+            if (idx >= 0) {
+              unread = order === 'desc' ? idx : chs.length - 1 - idx;
+            }
+          }
+          libStore.updateChapterCounts(id, chs.length, Math.max(0, unread));
+        }
+      }
     } catch (err: any) {
       console.error('Failed to load chapters:', err);
     } finally {
@@ -140,19 +187,28 @@ export default function MangaDetailScreen() {
         updateCategory(id!, category);
       } else if (manga) {
         const coverFileName = extractCoverFileName(manga);
+        const progress = useHistoryStore.getState().getMangaProgress(id!);
+        let unread = chapters.length;
+        if (progress?.chapterId && chapters.length > 0) {
+          const idx = chapters.findIndex((c) => c.id === progress.chapterId);
+          if (idx >= 0) {
+            unread = sortOrder === 'desc' ? idx : chapters.length - 1 - idx;
+          }
+        }
+
         addToLibrary({
           mangaId: manga.id,
           title: getMangaTitle(manga),
           coverUrl: getCoverUrl(manga.id, coverFileName, '256'),
           category,
-          lastReadChapterId: null,
-          lastReadPage: 0,
+          lastReadChapterId: progress?.chapterId || null,
+          lastReadPage: progress?.pageIndex || 0,
           totalChapters: chapters.length,
-          unreadCount: chapters.length,
+          unreadCount: Math.max(0, unread),
         });
       }
     },
-    [isInLibrary, updateCategory, id, manga, chapters.length, addToLibrary]
+    [isInLibrary, updateCategory, id, manga, chapters, sortOrder, addToLibrary]
   );
 
   const getCategoryDisplayLabel = (cat?: LibraryCategory | null): string => {
@@ -190,7 +246,7 @@ export default function MangaDetailScreen() {
 
     try {
       setIsStartingReading(true);
-      const result = await getMangaChapters(id, 'en', 1, 0, 'asc');
+      const result = await getMangaChapters(id, selectedLanguage, 1, 0, 'asc');
       const firstChapter = result.data[0];
 
       if (firstChapter) {
@@ -201,7 +257,7 @@ export default function MangaDetailScreen() {
     } finally {
       setIsStartingReading(false);
     }
-  }, [handleReadChapter, id, isStartingReading, lastProgress]);
+  }, [handleReadChapter, id, isStartingReading, lastProgress, selectedLanguage]);
 
   const handleToggleSelectDownload = (chapterId: string) => {
     triggerHaptic();
@@ -217,10 +273,11 @@ export default function MangaDetailScreen() {
   };
 
   const handleSelectAllDownloads = () => {
-    if (selectedDownloadIds.size === chapters.length) {
+    const unDownloadedChapters = chapters.filter((c) => downloadMap[c.id]?.status !== 'completed');
+    if (selectedDownloadIds.size === unDownloadedChapters.length) {
       setSelectedDownloadIds(new Set());
     } else {
-      setSelectedDownloadIds(new Set(chapters.map((c) => c.id)));
+      setSelectedDownloadIds(new Set(unDownloadedChapters.map((c) => c.id)));
     }
   };
 
@@ -228,8 +285,24 @@ export default function MangaDetailScreen() {
     if (selectedDownloadIds.size === 0 || !manga) return;
     const coverFileName = extractCoverFileName(manga);
     const coverUrl = getCoverUrl(manga.id, coverFileName, '512');
-    const selectedList = chapters.filter((c) => selectedDownloadIds.has(c.id));
+    const selectedList = chapters.filter(
+      (c) => selectedDownloadIds.has(c.id) && downloadMap[c.id]?.status !== 'completed'
+    );
     setDownloadModalVisible(false);
+
+    if (selectedList.length === 0) {
+      setConfirmModalConfig({
+        visible: true,
+        title: 'Already Downloaded',
+        message: 'All selected chapters are already saved on your device for offline reading.',
+        iconName: 'checkmark-circle-outline',
+        confirmText: 'OK',
+        cancelText: '',
+        confirmVariant: 'primary',
+        onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
+      });
+      return;
+    }
 
     setConfirmModalConfig({
       visible: true,
@@ -310,7 +383,7 @@ export default function MangaDetailScreen() {
             colors={['rgba(9,9,11,0.2)', 'rgba(9,9,11,0.7)', colors.background]}
             style={styles.backdropGradient}
           />
-          {/* Back button */}
+          {/* Back button on far upper left */}
           <SafeAreaView style={styles.backButtonContainer}>
             <Pressable
               onPress={() => {
@@ -320,86 +393,110 @@ export default function MangaDetailScreen() {
                   router.replace('/(tabs)' as any);
                 }
               }}
-              style={[styles.backButton, { backgroundColor: 'rgba(24,24,27,0.7)', borderColor: colors.border }]}
+              style={({ pressed }) => [{ opacity: pressed ? 0.6 : 1, padding: 4 }]}
+              hitSlop={8}
             >
-              <Ionicons name="arrow-back" size={20} color="#FAFAFA" />
+              <Ionicons name="arrow-back" size={26} color="#FAFAFA" />
             </Pressable>
           </SafeAreaView>
 
-          {/* Cover + Info overlay */}
-          <View style={styles.heroContent}>
-            <View style={[styles.coverContainer, { borderColor: colors.border }]}>
-              {coverUrl ? (
-                <Image
-                  source={{ uri: coverUrl }}
-                  style={styles.coverImage}
-                  contentFit="cover"
-                  transition={200}
-                />
-              ) : (
-                <View style={[styles.coverPlaceholder, { backgroundColor: colors.surfaceElevated }]}>
-                  <Ionicons name="book-outline" size={32} color={colors.textMuted} />
-                </View>
-              )}
-            </View>
-            <View style={styles.heroMeta}>
-              <Text style={[styles.mangaTitle, { color: colors.text }]} numberOfLines={3}>
-                {title}
-              </Text>
-              <Text style={[styles.authorText, { color: colors.textSecondary }]}>
-                {author}
-                {artist !== author ? ` · Art: ${artist}` : ''}
-              </Text>
-              <View style={styles.statusRow}>
-                {stats?.rating?.bayesian || stats?.rating?.average ? (
-                  <View style={[styles.statusPill, { backgroundColor: 'rgba(245, 158, 11, 0.15)', borderColor: '#F59E0B', flexDirection: 'row', alignItems: 'center', gap: 3 }]}>
-                    <Ionicons name="star" size={10} color="#F59E0B" />
-                    <Text style={[styles.statusPillText, { color: '#F59E0B' }]}>
-                      {(stats.rating.bayesian || stats.rating.average!).toFixed(2)}
-                    </Text>
-                  </View>
-                ) : null}
-
-                <Pressable
-                  onPress={() => setCategoryModalVisible(true)}
-                  style={({ pressed }) => [
-                    styles.statusPill,
-                    {
-                      backgroundColor: isInLibrary ? 'rgba(244, 63, 94, 0.2)' : colors.surfaceElevated,
-                      borderColor: isInLibrary ? colors.accent : colors.border,
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 4,
-                      opacity: pressed ? 0.7 : 1,
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name={isInLibrary ? 'bookmark' : 'bookmark-outline'}
-                    size={11}
-                    color={colors.accent}
+          {/* Inner hero content centered with global web margins */}
+          <View style={[{ width: '100%' }, Platform.OS === 'web' && styles.webCenteredContent]}>
+            {/* Cover + Info overlay */}
+            <View style={styles.heroContent}>
+              <Pressable
+                onPress={() => {
+                  if (coverUrl) {
+                    if (Platform.OS !== 'web') {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    }
+                    setIsCoverLightboxOpen(true);
+                  }
+                }}
+                onHoverIn={() => setIsCoverHovered(true)}
+                onHoverOut={() => setIsCoverHovered(false)}
+                style={({ pressed }) => [
+                  styles.coverContainer,
+                  { borderColor: colors.border },
+                  Platform.OS === 'web' && coverUrl && ({ cursor: 'pointer' } as any),
+                  pressed && coverUrl && { opacity: 0.85, transform: [{ scale: 0.98 }] },
+                ]}
+              >
+                {coverUrl ? (
+                  <Image
+                    source={{ uri: coverUrl }}
+                    style={styles.coverImage}
+                    contentFit="cover"
+                    transition={200}
                   />
-                  <Text style={[styles.statusPillText, { color: isInLibrary ? colors.accent : colors.text }]}>
-                    {isInLibrary ? getCategoryDisplayLabel(libraryEntry?.category) : 'Add to Library'}
-                  </Text>
-                </Pressable>
-
-                <View style={[styles.statusPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-                  <Text style={[styles.statusPillText, { color: colors.accent }]}>
-                    {manga.attributes.status?.toLowerCase()}
-                  </Text>
-                </View>
-                {manga.attributes.publicationDemographic && (
-                  <View style={[styles.statusPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-                    <Text style={[styles.statusPillText, { color: colors.textSecondary }]}>
-                      {manga.attributes.publicationDemographic.toLowerCase()}
-                    </Text>
+                ) : (
+                  <View style={[styles.coverPlaceholder, { backgroundColor: colors.surfaceElevated }]}>
+                    <Ionicons name="book-outline" size={32} color={colors.textMuted} />
                   </View>
                 )}
+              </Pressable>
+              <View style={styles.heroMeta}>
+                <Text style={[styles.mangaTitle, { color: colors.text }]} numberOfLines={3}>
+                  {title}
+                </Text>
+                <Text style={[styles.authorText, { color: colors.textSecondary }]}>
+                  {author}
+                  {artist !== author ? ` · Art: ${artist}` : ''}
+                </Text>
+                <View style={styles.statusRow}>
+                  {stats?.rating?.bayesian || stats?.rating?.average ? (
+                    <View style={[styles.statusPill, { backgroundColor: 'rgba(245, 158, 11, 0.15)', borderColor: '#F59E0B', flexDirection: 'row', alignItems: 'center', gap: 3 }]}>
+                      <Ionicons name="star" size={10} color="#F59E0B" />
+                      <Text style={[styles.statusPillText, { color: '#F59E0B' }]}>
+                        {(stats.rating.bayesian || stats.rating.average!).toFixed(2)}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  <Pressable
+                    onPress={() => setCategoryModalVisible(true)}
+                    style={({ pressed }) => [
+                      styles.statusPill,
+                      {
+                        backgroundColor: isInLibrary ? 'rgba(244, 63, 94, 0.2)' : colors.surfaceElevated,
+                        borderColor: isInLibrary ? colors.accent : colors.border,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 4,
+                        opacity: pressed ? 0.7 : 1,
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name={isInLibrary ? 'bookmark' : 'bookmark-outline'}
+                      size={11}
+                      color={colors.accent}
+                    />
+                    <Text style={[styles.statusPillText, { color: isInLibrary ? colors.accent : colors.text }]}>
+                      {isInLibrary ? getCategoryDisplayLabel(libraryEntry?.category) : 'Add to Library'}
+                    </Text>
+                  </Pressable>
+
+                  <View style={[styles.statusPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                    <Text style={[styles.statusPillText, { color: colors.accent }]}>
+                      {manga.attributes.status?.toLowerCase()}
+                    </Text>
+                  </View>
+                  {manga.attributes.publicationDemographic && (
+                    <View style={[styles.statusPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                      <Text style={[styles.statusPillText, { color: colors.textSecondary }]}>
+                        {manga.attributes.publicationDemographic.toLowerCase()}
+                      </Text>
+                    </View>
+                  )}
+                </View>
               </View>
             </View>
           </View>
         </View>
+
+        {/* Main Body Content centered with global web margins */}
+        <View style={[{ width: '100%' }, Platform.OS === 'web' && styles.webCenteredContent]}>
 
         {/* Action Buttons Row */}
         <View style={styles.actionRow}>
@@ -435,7 +532,10 @@ export default function MangaDetailScreen() {
           {/* Download Chapters Modal Trigger Button */}
           <AnimatedPressable
             onPress={() => {
-              setSelectedDownloadIds(new Set(chapters.map((c) => c.id)));
+              const unDownloadedIds = chapters
+                .filter((c) => downloadMap[c.id]?.status !== 'completed')
+                .map((c) => c.id);
+              setSelectedDownloadIds(new Set(unDownloadedIds));
               setDownloadModalVisible(true);
             }}
             style={[
@@ -461,7 +561,7 @@ export default function MangaDetailScreen() {
               disabled={isStartingReading}
               style={[
                 styles.actionButton,
-                { backgroundColor: colors.accent, flex: 1.2 },
+                { backgroundColor: colors.accent, flex: 1.4 },
                 isStartingReading && { opacity: 0.6 },
               ]}
             >
@@ -469,10 +569,14 @@ export default function MangaDetailScreen() {
                 <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
                 <>
-                  <Ionicons name="play" size={15} color="#FFFFFF" />
-                  <Text style={[styles.actionButtonText, { color: '#FFFFFF' }]} numberOfLines={1}>
+                  <Ionicons name="play" size={14} color="#FFFFFF" />
+                  <Text
+                    style={[styles.actionButtonText, { color: '#FFFFFF', flexShrink: 1 }]}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
                     {lastProgress
-                      ? `Continue · Page ${lastProgress.pageIndex + 1} of ${lastProgress.totalPages}`
+                      ? `Continue (p. ${lastProgress.pageIndex + 1}/${lastProgress.totalPages})`
                       : 'Start Reading'}
                   </Text>
                 </>
@@ -515,22 +619,153 @@ export default function MangaDetailScreen() {
 
         {/* Chapter List Header */}
         <View style={styles.chapterHeader}>
-          <Text style={[styles.chapterHeaderTitle, { color: colors.text }]}>
-            Chapters ({chapters.length})
-          </Text>
-          <Pressable
-            onPress={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-            style={styles.sortButton}
-          >
-            <Ionicons
-              name={sortOrder === 'asc' ? 'arrow-up' : 'arrow-down'}
-              size={14}
-              color={colors.accent}
-            />
-            <Text style={[styles.sortText, { color: colors.accent }]}>
-              {sortOrder === 'asc' ? 'Oldest' : 'Newest'}
+          <View style={styles.chapterHeaderLeft}>
+            <Text style={[styles.chapterHeaderTitle, { color: colors.text }]}>
+              Chapters ({chapters.length})
             </Text>
-          </Pressable>
+          </View>
+
+          <View style={styles.chapterHeaderRight}>
+            {/* Multi-Language Selector Dropdown (When 2 or more available) */}
+            {availableLanguages.length > 1 && (
+              <View style={styles.languagePickerContainer}>
+                <Pressable
+                  onPress={() => {
+                    triggerHaptic();
+                    setIsLanguageDropdownOpen((prev) => !prev);
+                  }}
+                  style={({ pressed }) => [
+                    styles.languagePickerBtn,
+                    {
+                      backgroundColor: colors.surfaceElevated,
+                      borderColor: isLanguageDropdownOpen ? colors.accent : colors.border,
+                      opacity: pressed ? 0.7 : 1,
+                    },
+                  ]}
+                >
+                  <Image
+                    source={{ uri: getLanguageInfo(selectedLanguage).flagUrl }}
+                    style={styles.languagePickerFlagImage}
+                    contentFit="cover"
+                  />
+                  <Text
+                    style={[styles.languagePickerText, { color: colors.text }]}
+                    numberOfLines={1}
+                  >
+                    {getLanguageInfo(selectedLanguage).name}
+                  </Text>
+                  <Ionicons
+                    name={isLanguageDropdownOpen ? 'chevron-up' : 'chevron-down'}
+                    size={12}
+                    color={colors.textSecondary}
+                  />
+                </Pressable>
+
+                {/* Floating Dropdown Modal / Popup on Web */}
+                {Platform.OS === 'web' && isLanguageDropdownOpen && (
+                  <>
+                    <Pressable
+                      style={styles.languageWebBackdrop}
+                      onPress={(e: any) => {
+                        e?.stopPropagation?.();
+                        setIsLanguageDropdownOpen(false);
+                      }}
+                    />
+                    <View
+                      style={[
+                        styles.languageDropdownMenu,
+                        {
+                          backgroundColor: colors.surface,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.languageDropdownTitle, { color: colors.textMuted }]}>
+                        TRANSLATIONS ({availableLanguages.length})
+                      </Text>
+                      <ScrollView
+                        style={styles.languageDropdownScroll}
+                        showsVerticalScrollIndicator={true}
+                      >
+                        {availableLanguages.map((langCode) => {
+                          const langInfo = getLanguageInfo(langCode);
+                          const isSelected = langCode === selectedLanguage;
+                          return (
+                            <Pressable
+                              key={langCode}
+                              onPress={(e: any) => {
+                                e?.stopPropagation?.();
+                                triggerHaptic();
+                                setSelectedLanguage(langCode);
+                                setIsLanguageDropdownOpen(false);
+                              }}
+                              style={({ pressed }) => [
+                                styles.languageDropdownItem,
+                                {
+                                  backgroundColor: isSelected
+                                    ? colors.accent + '22'
+                                    : pressed
+                                    ? colors.surfaceElevated
+                                    : 'transparent',
+                                },
+                              ]}
+                            >
+                              <Image
+                                source={{ uri: langInfo.flagUrl }}
+                                style={styles.languageDropdownItemFlagImage}
+                                contentFit="cover"
+                              />
+                              <Text
+                                style={[
+                                  styles.languageDropdownItemName,
+                                  {
+                                    color: isSelected ? colors.accent : colors.text,
+                                    fontWeight: isSelected ? 'bold' : 'normal',
+                                  },
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {langInfo.name}
+                              </Text>
+                              <View style={[styles.langCodeBadge, { backgroundColor: colors.borderSubtle }]}>
+                                <Text style={[styles.langCodeBadgeText, { color: colors.textSecondary }]}>
+                                  {langCode.toUpperCase()}
+                                </Text>
+                              </View>
+                              {isSelected && (
+                                <Ionicons name="checkmark" size={15} color={colors.accent} />
+                              )}
+                            </Pressable>
+                          );
+                        })}
+                      </ScrollView>
+                    </View>
+                  </>
+                )}
+              </View>
+            )}
+
+            {/* Sort Button */}
+            <Pressable
+              onPress={() => {
+                triggerHaptic();
+                setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+              }}
+              style={[
+                styles.sortButton,
+                { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+              ]}
+            >
+              <Ionicons
+                name={sortOrder === 'asc' ? 'arrow-up' : 'arrow-down'}
+                size={13}
+                color={colors.accent}
+              />
+              <Text style={[styles.sortText, { color: colors.accent }]}>
+                {sortOrder === 'asc' ? 'Oldest' : 'Newest'}
+              </Text>
+            </Pressable>
+          </View>
         </View>
 
         {/* Chapter List */}
@@ -547,6 +782,8 @@ export default function MangaDetailScreen() {
             const dlItem = downloadMap[chapter.id];
             const isDownloading = dlItem?.status === 'downloading';
             const isDownloaded = dlItem?.status === 'completed';
+            const isRead = isChapterRead(chapter.id);
+            const isCurrentReading = lastProgress?.chapterId === chapter.id;
 
             const handleDownload = (e: any) => {
               e.stopPropagation();
@@ -587,15 +824,48 @@ export default function MangaDetailScreen() {
                   styles.chapterRow,
                   {
                     borderBottomColor: colors.borderSubtle,
+                    opacity: isRead ? 0.52 : 1,
+                    backgroundColor: isCurrentReading
+                      ? colors.accent + '14'
+                      : isRead
+                      ? (Platform.OS === 'web' ? 'rgba(255,255,255,0.015)' : 'transparent')
+                      : 'transparent',
                   },
                 ]}
               >
                 <View style={styles.chapterInfo}>
-                  <Text style={[styles.chapterNumber, { color: colors.text }]}>
-                    {chapterNum ? `Ch. ${chapterNum}` : 'Oneshot'}
-                    {chapterTitle ? ` - ${chapterTitle}` : ''}
-                  </Text>
-                  <Text style={[styles.chapterMeta, { color: colors.textMuted }]}>
+                  <View style={styles.chapterTitleRow}>
+                    <Text
+                      style={[
+                        styles.chapterNumber,
+                        {
+                          color: isRead ? colors.textMuted : colors.text,
+                          fontWeight: isRead ? Typography.weights.medium : Typography.weights.bold,
+                        },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {chapterNum ? `Ch. ${chapterNum}` : 'Oneshot'}
+                      {chapterTitle ? ` - ${chapterTitle}` : ''}
+                    </Text>
+
+                    {/* Status Badges: In-Progress Reading vs Completed Read */}
+                    {isCurrentReading ? (
+                      <View style={[styles.readingBadge, { backgroundColor: colors.accent + '22', borderColor: colors.accent }]}>
+                        <Ionicons name="book" size={11} color={colors.accent} />
+                        <Text style={[styles.readingBadgeText, { color: colors.accent }]}>
+                          Reading · p. {(lastProgress?.pageIndex || 0) + 1}/{lastProgress?.totalPages || chapter.attributes.pages || 1}
+                        </Text>
+                      </View>
+                    ) : isRead ? (
+                      <View style={[styles.readBadge, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}>
+                        <Ionicons name="checkmark-done" size={11} color={colors.emerald} />
+                        <Text style={[styles.readBadgeText, { color: colors.emerald }]}>Read</Text>
+                      </View>
+                    ) : null}
+                  </View>
+
+                  <Text style={[styles.chapterMeta, { color: isRead ? colors.textMuted : colors.textSecondary }]}>
                     {getChapterCredit(chapter)} · {chapter.attributes.pages} pages · {formatChapterDate(chapter.attributes.publishAt || chapter.attributes.readableAt)}
                   </Text>
                 </View>
@@ -611,7 +881,7 @@ export default function MangaDetailScreen() {
                     ) : isDownloaded ? (
                       <Ionicons name="checkmark-circle" size={20} color={colors.emerald} />
                     ) : (
-                      <Ionicons name="download-outline" size={20} color={colors.textSecondary} />
+                      <Ionicons name="download-outline" size={20} color={isRead ? colors.textMuted : colors.textSecondary} />
                     )}
                   </Pressable>
                   <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
@@ -620,6 +890,8 @@ export default function MangaDetailScreen() {
             );
           })
         )}
+
+        </View>
 
         <View style={{ height: 60 }} />
       </ScrollView>
@@ -633,6 +905,103 @@ export default function MangaDetailScreen() {
         onSelectCategory={handleSelectCategory}
         onRemoveFromLibrary={() => removeFromLibrary(id!)}
       />
+
+      {/* Native Mobile Chapter Language Selection Modal */}
+      {Platform.OS !== 'web' && (
+        <Modal
+          visible={isLanguageDropdownOpen}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setIsLanguageDropdownOpen(false)}
+        >
+          <Pressable
+            style={styles.modalOverlay}
+            onPress={() => setIsLanguageDropdownOpen(false)}
+          >
+            <Pressable
+              style={[
+                styles.modalContent,
+                { backgroundColor: colors.surface, borderTopColor: colors.border },
+              ]}
+              onPress={(e) => e.stopPropagation()}
+            >
+              <View style={[styles.modalHeader, { borderBottomColor: colors.borderSubtle }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.modalTitle, { color: colors.text }]}>Chapter Language</Text>
+                  <Text style={[styles.modalSub, { color: colors.textSecondary }]}>
+                    Select translation language ({availableLanguages.length} available)
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => setIsLanguageDropdownOpen(false)}
+                  style={styles.closeBtn}
+                  hitSlop={8}
+                >
+                  <Ionicons name="close" size={22} color={colors.text} />
+                </Pressable>
+              </View>
+
+              <ScrollView
+                contentContainerStyle={{ padding: Spacing.md, gap: Spacing.xs, paddingBottom: Spacing['2xl'] }}
+                showsVerticalScrollIndicator={true}
+              >
+                {availableLanguages.map((langCode) => {
+                  const langInfo = getLanguageInfo(langCode);
+                  const isSelected = langCode === selectedLanguage;
+                  return (
+                    <Pressable
+                      key={langCode}
+                      onPress={() => {
+                        triggerHaptic();
+                        setSelectedLanguage(langCode);
+                        setIsLanguageDropdownOpen(false);
+                      }}
+                      style={({ pressed }) => [
+                        styles.mobileLanguageRow,
+                        {
+                          backgroundColor: isSelected
+                            ? colors.accent + '20'
+                            : pressed
+                            ? colors.surfaceElevated
+                            : 'transparent',
+                          borderColor: isSelected ? colors.accent : colors.borderSubtle,
+                        },
+                      ]}
+                    >
+                      <Image
+                        source={{ uri: langInfo.flagUrl }}
+                        style={styles.mobileLanguageFlagImage}
+                        contentFit="cover"
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[
+                            styles.mobileLanguageName,
+                            {
+                              color: isSelected ? colors.accent : colors.text,
+                              fontWeight: isSelected ? 'bold' : '500',
+                            },
+                          ]}
+                        >
+                          {langInfo.name}
+                        </Text>
+                      </View>
+                      <View style={[styles.langCodeBadge, { backgroundColor: colors.surfaceElevated }]}>
+                        <Text style={[styles.langCodeBadgeText, { color: colors.textSecondary }]}>
+                          {langCode.toUpperCase()}
+                        </Text>
+                      </View>
+                      {isSelected && (
+                        <Ionicons name="checkmark-circle" size={20} color={colors.accent} />
+                      )}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
 
       {/* Selective & Batch Chapter Download Modal */}
       <Modal
@@ -761,15 +1130,43 @@ export default function MangaDetailScreen() {
         onConfirm={confirmModalConfig.onConfirm}
         onCancel={() => setConfirmModalConfig((prev) => ({ ...prev, visible: false }))}
       />
+
+      {/* Full-Screen Cover Image Lightbox Modal */}
+      <Modal
+        visible={isCoverLightboxOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsCoverLightboxOpen(false)}
+      >
+        <Pressable
+          style={styles.lightboxOverlay}
+          onPress={() => setIsCoverLightboxOpen(false)}
+        >
+          {coverUrl && (
+            <ZoomableImage
+              source={{ uri: coverUrl }}
+              style={styles.lightboxImage}
+              contentFit="contain"
+              onTap={() => setIsCoverLightboxOpen(false)}
+            />
+          )}
+        </Pressable>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  webCenteredContent: {
+    maxWidth: 1400,
+    width: '100%',
+    alignSelf: 'center',
+    paddingHorizontal: Platform.OS === 'web' ? 24 : 0,
+  },
   heroContainer: {
     position: 'relative',
-    minHeight: 290,
+    minHeight: Platform.OS === 'web' ? 380 : 290,
     justifyContent: 'flex-end',
     paddingTop: Platform.OS === 'ios' ? 54 : 44,
   },
@@ -806,18 +1203,49 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: Spacing.lg,
     paddingBottom: Spacing.sm,
-    gap: Spacing.md,
+    gap: Platform.OS === 'web' ? Spacing.lg : Spacing.md,
   },
   coverContainer: {
-    width: 100,
-    height: 148,
-    borderRadius: Radius.md,
+    width: Platform.OS === 'web' ? 180 : 100,
+    height: Platform.OS === 'web' ? 260 : 148,
+    borderRadius: Platform.OS === 'web' ? Radius.lg : Radius.md,
     overflow: 'hidden',
     borderWidth: 1,
+    position: 'relative',
   },
   coverImage: {
     width: '100%',
     height: '100%',
+  },
+  mobileExpandBadge: {
+    position: 'absolute',
+    bottom: 6,
+    right: 6,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    padding: 4,
+    borderRadius: Radius.xs,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  coverHoverOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  expandIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   coverPlaceholder: {
     width: '100%',
@@ -828,16 +1256,16 @@ const styles = StyleSheet.create({
   heroMeta: {
     flex: 1,
     justifyContent: 'flex-end',
-    gap: 4,
+    gap: Platform.OS === 'web' ? 8 : 4,
   },
   mangaTitle: {
-    fontSize: Typography.sizes.title3,
+    fontSize: Platform.OS === 'web' ? 32 : Typography.sizes.title3,
     fontWeight: Typography.weights.bold,
-    lineHeight: 22,
+    lineHeight: Platform.OS === 'web' ? 38 : 22,
     letterSpacing: -0.3,
   },
   authorText: {
-    fontSize: Typography.sizes.footnote,
+    fontSize: Platform.OS === 'web' ? 16 : Typography.sizes.footnote,
   },
   statusRow: {
     flexDirection: 'row',
@@ -846,62 +1274,62 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   statusPill: {
-    paddingHorizontal: 7,
-    paddingVertical: 3,
+    paddingHorizontal: Platform.OS === 'web' ? 10 : 7,
+    paddingVertical: Platform.OS === 'web' ? 5 : 3,
     borderRadius: Radius.xs,
     borderWidth: 1,
   },
   statusPillText: {
-    fontSize: 10,
+    fontSize: Platform.OS === 'web' ? 12 : 10,
     fontWeight: Typography.weights.bold,
     letterSpacing: 0.3,
   },
   actionRow: {
     flexDirection: 'row',
     paddingHorizontal: Spacing.lg,
-    gap: Spacing.sm,
-    marginTop: Spacing.md,
+    gap: Platform.OS === 'web' ? Spacing.md : Spacing.sm,
+    marginTop: Platform.OS === 'web' ? Spacing.xl : Spacing.md,
   },
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    paddingVertical: Spacing.md,
+    gap: 8,
+    paddingVertical: Platform.OS === 'web' ? 14 : Spacing.md,
+    paddingHorizontal: Platform.OS === 'web' ? 24 : 6,
     borderRadius: Radius.md,
-    paddingHorizontal: 6,
   },
   actionButtonText: {
-    fontSize: Typography.sizes.footnote,
-    fontWeight: Typography.weights.semibold,
+    fontSize: Platform.OS === 'web' ? 15 : Typography.sizes.footnote,
+    fontWeight: Typography.weights.bold,
   },
   tagsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     paddingHorizontal: Spacing.lg,
-    marginTop: Spacing.lg,
-    gap: Spacing.xs,
+    marginTop: Platform.OS === 'web' ? Spacing.xl : Spacing.lg,
+    gap: Platform.OS === 'web' ? Spacing.sm : Spacing.xs,
   },
   tagChip: {
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 4,
+    paddingHorizontal: Platform.OS === 'web' ? 12 : Spacing.sm,
+    paddingVertical: Platform.OS === 'web' ? 6 : 4,
     borderRadius: Radius.xs,
     borderWidth: 1,
   },
   tagText: {
-    fontSize: Typography.sizes.caption,
+    fontSize: Platform.OS === 'web' ? 13 : Typography.sizes.caption,
     fontWeight: Typography.weights.medium,
   },
   synopsisContainer: {
     paddingHorizontal: Spacing.lg,
-    marginTop: Spacing.lg,
+    marginTop: Platform.OS === 'web' ? Spacing.xl : Spacing.lg,
   },
   synopsisText: {
-    fontSize: Typography.sizes.body,
-    lineHeight: 20,
+    fontSize: Platform.OS === 'web' ? 15 : Typography.sizes.body,
+    lineHeight: Platform.OS === 'web' ? 24 : 20,
   },
   expandText: {
-    fontSize: Typography.sizes.footnote,
+    fontSize: Platform.OS === 'web' ? 14 : Typography.sizes.footnote,
     fontWeight: Typography.weights.bold,
     marginTop: 6,
   },
@@ -910,41 +1338,187 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg,
-    marginTop: Spacing['2xl'],
+    marginTop: Platform.OS === 'web' ? Spacing['2xl'] + 8 : Spacing['2xl'],
     marginBottom: Spacing.md,
+    gap: Spacing.sm,
+    zIndex: 100,
+  },
+  chapterHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  chapterHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    zIndex: 100,
   },
   chapterHeaderTitle: {
-    fontSize: 11,
+    fontSize: Platform.OS === 'web' ? 14 : 11,
     fontWeight: Typography.weights.bold,
     letterSpacing: 1.2,
+  },
+  languagePickerContainer: {
+    position: 'relative',
+    zIndex: 100,
+  },
+  languagePickerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+  },
+  languagePickerFlagImage: {
+    width: 18,
+    height: 12,
+    borderRadius: 2,
+  },
+  languagePickerText: {
+    fontSize: Platform.OS === 'web' ? 12 : 11,
+    fontWeight: Typography.weights.semibold,
+    maxWidth: 110,
+  },
+  languageWebBackdrop: {
+    position: 'fixed' as any,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 9998,
+  },
+  languageDropdownMenu: {
+    position: 'absolute',
+    top: 38,
+    right: 0,
+    width: 220,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    padding: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.45,
+    shadowRadius: 16,
+    elevation: 20,
+    zIndex: 9999,
+  },
+  languageDropdownTitle: {
+    fontSize: 10,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: 0.8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  languageDropdownScroll: {
+    maxHeight: 280,
+  },
+  languageDropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    borderRadius: Radius.sm,
+    gap: 8,
+  },
+  languageDropdownItemFlagImage: {
+    width: 20,
+    height: 14,
+    borderRadius: 2,
+  },
+  languageDropdownItemName: {
+    flex: 1,
+    fontSize: 13,
+  },
+  langCodeBadge: {
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  langCodeBadgeText: {
+    fontSize: 9,
+    fontWeight: Typography.weights.bold,
+  },
+  mobileLanguageRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 12,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    gap: 12,
+  },
+  mobileLanguageFlagImage: {
+    width: 24,
+    height: 17,
+    borderRadius: 3,
+  },
+  mobileLanguageName: {
+    fontSize: Typography.sizes.body,
   },
   sortButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: Radius.md,
+    borderWidth: 1,
   },
   sortText: {
-    fontSize: 10,
+    fontSize: Platform.OS === 'web' ? 12 : 10,
     fontWeight: Typography.weights.bold,
     letterSpacing: 0.8,
   },
   chapterRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: Spacing.md,
+    paddingVertical: Platform.OS === 'web' ? Spacing.md + 4 : Spacing.md,
     paddingHorizontal: Spacing.lg,
-    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   chapterInfo: {
     flex: 1,
-    gap: 2,
+    gap: 4,
+  },
+  chapterTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
   },
   chapterNumber: {
-    fontSize: Typography.sizes.body,
-    fontWeight: Typography.weights.medium,
+    fontSize: Platform.OS === 'web' ? 16 : Typography.sizes.body,
   },
   chapterMeta: {
-    fontSize: Typography.sizes.caption,
+    fontSize: Platform.OS === 'web' ? 13 : Typography.sizes.caption,
+  },
+  readBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: Radius.xs,
+    borderWidth: 1,
+  },
+  readBadgeText: {
+    fontSize: 10,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: 0.3,
+  },
+  readingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: Radius.xs,
+    borderWidth: 1,
+  },
+  readingBadgeText: {
+    fontSize: 10,
+    fontWeight: Typography.weights.bold,
   },
 
   /* Modal Styling */
@@ -1049,5 +1623,19 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: Typography.sizes.body,
     fontWeight: Typography.weights.bold,
+  },
+  lightboxOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  lightboxImage: {
+    width: '90%',
+    height: '90%',
+    maxWidth: Platform.OS === 'web' ? 650 : 450,
+    maxHeight: Platform.OS === 'web' ? 900 : 700,
+    aspectRatio: 0.68,
+    borderRadius: Radius.lg,
   },
 });

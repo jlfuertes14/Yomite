@@ -1,7 +1,7 @@
 /**
  * Settings Screen — Modern Minimalist Theme & MangaDex Auth
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -16,10 +16,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { Image } from 'expo-image';
 import { Colors, Spacing, Radius, Typography, ReaderThemes } from '../../constants/Colors';
 import { useReaderStore } from '../../src/store/readerStore';
 import { useHistoryStore } from '../../src/store/historyStore';
-import { useUserStore } from '../../src/store/userStore';
+import { useUserStore, getUserDisplayName, getUserHandle, getUserAvatarUrl } from '../../src/store/userStore';
 import { useThemeStore, AppThemeMode, ACCENT_PRESETS } from '../../src/store/themeStore';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { requestNotificationPermissions, sendNewChapterNotification } from '../../src/services/notificationService';
@@ -30,6 +32,8 @@ import type { ReadingMode, ReaderTheme } from '../../src/types';
 import { triggerHaptic } from '../../src/utils/haptics';
 
 import { AuthModal } from '../../src/components/AuthModal';
+import { SidebarDrawer } from '../../src/components/SidebarDrawer';
+import { syncUserDataWithCloud } from '../../src/services/cloudSync';
 
 type VectorIcon = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -43,32 +47,69 @@ const READING_MODES: { key: ReadingMode; label: string; icon: VectorIcon }[] = [
 
 const THEME_KEYS = Object.keys(ReaderThemes) as ReaderTheme[];
 
-export default function SettingsScreen() {
-  const colors = useThemeColors();
-  const { appThemeMode, setAppThemeMode, accentColor, setAccentColor } = useThemeStore();
+function CustomSwitch({
+  value,
+  onValueChange,
+  activeColor,
+}: {
+  value: boolean;
+  onValueChange: (val: boolean) => void;
+  activeColor: string;
+}) {
+  return (
+    <Switch
+      value={value}
+      onValueChange={onValueChange}
+      trackColor={{ false: '#27272A', true: activeColor }}
+      thumbColor={value ? '#FFFFFF' : '#A1A1AA'}
+      ios_backgroundColor="#27272A"
+    />
+  );
+}
 
-  // Reader store
+export default function SettingsScreen() {
+  const router = useRouter();
+  const colors = useThemeColors();
+  const accentColor = useThemeStore((s) => s.accentColor);
+  const appThemeMode = useThemeStore((s) => s.appThemeMode);
+  const setAccentColor = useThemeStore((s) => s.setAccentColor);
+  const setAppThemeMode = useThemeStore((s) => s.setAppThemeMode);
+  const [drawerVisible, setDrawerVisible] = useState(false);
+
+  // Global reader preferences
   const mode = useReaderStore((s) => s.mode);
-  const theme = useReaderStore((s) => s.theme);
+  const readerTheme = useReaderStore((s) => s.theme);
   const dataSaver = useReaderStore((s) => s.dataSaver);
+  const setDataSaver = useReaderStore((s) => s.setDataSaver);
   const showPageNumber = useReaderStore((s) => s.showPageNumber);
   const hapticsEnabled = useReaderStore((s) => s.hapticsEnabled);
   const setMode = useReaderStore((s) => s.setMode);
   const setTheme = useReaderStore((s) => s.setTheme);
-  const setDataSaver = useReaderStore((s) => s.setDataSaver);
   const setShowPageNumber = useReaderStore((s) => s.setShowPageNumber);
   const setHapticsEnabled = useReaderStore((s) => s.setHapticsEnabled);
   const clearHistory = useHistoryStore((s) => s.clearHistory);
 
   // Supabase User store
   const user = useUserStore((s) => s.user);
-  const initializeAuth = useUserStore((s) => s.initializeAuth);
   const signOut = useUserStore((s) => s.signOut);
+  const refreshUser = useUserStore((s) => s.refreshUser);
+
+  // Sync fresh user details from Supabase on mount and whenever Settings tab gains focus
+  useEffect(() => {
+    refreshUser();
+  }, [refreshUser]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshUser();
+    }, [refreshUser])
+  );
 
   // Modal & Notification State
   const [authModalVisible, setAuthModalVisible] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [isScanning, setIsScanning] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [customHex, setCustomHex] = useState('');
 
   // Custom Confirmation Dialog State
@@ -88,9 +129,24 @@ export default function SettingsScreen() {
     onConfirm: () => {},
   });
 
-  useEffect(() => {
-    initializeAuth();
-  }, []);
+  const handleManualSync = async () => {
+    if (!user?.id) return;
+    setIsSyncing(true);
+    const res = await syncUserDataWithCloud(user.id);
+    setIsSyncing(false);
+    setConfirmModalConfig({
+      visible: true,
+      title: res.success ? 'Cloud Sync Complete' : 'Sync Failed',
+      message: res.success
+        ? 'Your reading history and library bookmarks have been synchronized with Supabase.'
+        : res.message,
+      iconName: res.success ? 'checkmark-done-circle-outline' : 'alert-circle-outline',
+      confirmText: 'OK',
+      cancelText: '',
+      confirmVariant: 'primary',
+      onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
+    });
+  };
 
   const handleToggleNotifications = async (value: boolean) => {
     if (value) {
@@ -187,43 +243,137 @@ export default function SettingsScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.text }]}>Settings</Text>
+      <View style={[{ flex: 1, width: '100%' }, Platform.OS === 'web' && styles.webCenteredContent]}>
+        <View style={styles.header}>
+        <View style={styles.titleRow}>
+          {Platform.OS === 'web' && (
+            <Pressable
+              onPress={() => setDrawerVisible(true)}
+              style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1 }]}
+              hitSlop={8}
+            >
+              <Ionicons name="menu" size={26} color={colors.text} />
+            </Pressable>
+          )}
+          <Text style={[styles.title, { color: colors.text }]}>Settings</Text>
+        </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.content}
+      >
         {/* Yomite Account & Cloud Sync (Supabase Auth) */}
         <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
-          Yomite Account & Cloud Sync
+          Yomite Account & Profile Settings
         </Text>
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
           {user ? (
-            <View style={styles.authStatusRow}>
-              <View style={styles.authStatusLeft}>
-                <Ionicons name="person-circle-outline" size={36} color={colors.accent} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.optionLabel, { color: colors.text }]}>
-                    {user.email ?? 'Signed In User'}
-                  </Text>
-                  <Text style={[styles.optionDesc, { color: colors.emerald }]}>
-                    ● Cloud Sync & Library Registry Active
-                  </Text>
-                </View>
-              </View>
+            <View style={{ gap: Spacing.sm }}>
               <Pressable
-                onPress={handleLogout}
-                style={({ pressed }) => [
-                  styles.logoutBtn,
-                  {
-                    backgroundColor: colors.surfaceElevated,
-                    borderColor: colors.border,
-                    borderWidth: 1,
-                    opacity: pressed ? 0.7 : 1,
-                  },
-                ]}
+                onPress={() => router.push('/profile' as any)}
+                style={({ pressed }) => [styles.profileCardHeader, { opacity: pressed ? 0.7 : 1 }]}
               >
-                <Text style={[styles.logoutBtnText, { color: colors.accent }]}>Sign out</Text>
+                <View style={styles.authStatusLeft}>
+                  <View
+                    style={[
+                      styles.profileAvatarCircle,
+                      {
+                        backgroundColor: getUserAvatarUrl(user) ? 'transparent' : colors.accent,
+                        borderColor: colors.border,
+                        borderWidth: 1.5,
+                        overflow: 'hidden',
+                      },
+                    ]}
+                  >
+                    {getUserAvatarUrl(user) ? (
+                      <Image
+                        source={{ uri: getUserAvatarUrl(user)! }}
+                        style={styles.profileAvatarImage}
+                        contentFit="cover"
+                        transition={200}
+                        cachePolicy="memory-disk"
+                      />
+                    ) : (
+                      <Text style={styles.profileAvatarText}>
+                        {getUserDisplayName(user).charAt(0).toUpperCase()}
+                      </Text>
+                    )}
+                  </View>
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <Text style={[styles.profileNameText, { color: colors.text }]}>
+                      {getUserDisplayName(user)}
+                    </Text>
+                    <Text style={[styles.profileHandleText, { color: colors.textMuted }]}>
+                      @{getUserHandle(user)} · {user.email}
+                    </Text>
+                    <Text style={[styles.optionDesc, { color: colors.emerald, marginTop: 2 }]}>
+                      ● Cloud Sync & Multi-Device Active
+                    </Text>
+                  </View>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </Pressable>
+
+              <View style={[styles.accountDivider, { backgroundColor: colors.border }]} />
+
+              <View style={styles.accountActionRow}>
+                <Pressable
+                  onPress={() => router.push('/profile' as any)}
+                  style={({ pressed }) => [
+                    styles.profileActionBtn,
+                    {
+                      backgroundColor: colors.surfaceElevated,
+                      borderColor: colors.border,
+                      opacity: pressed ? 0.7 : 1,
+                    },
+                  ]}
+                >
+                  <Ionicons name="person-outline" size={14} color={colors.accent} />
+                  <Text style={[styles.profileActionBtnText, { color: colors.accent }]}>
+                    Profile Settings
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={handleManualSync}
+                  disabled={isSyncing}
+                  style={({ pressed }) => [
+                    styles.profileActionBtn,
+                    {
+                      backgroundColor: colors.surfaceElevated,
+                      borderColor: colors.border,
+                      opacity: isSyncing ? 0.6 : pressed ? 0.7 : 1,
+                    },
+                  ]}
+                >
+                  {isSyncing ? (
+                    <ActivityIndicator size="small" color={colors.emerald} />
+                  ) : (
+                    <Ionicons name="sync-outline" size={14} color={colors.emerald} />
+                  )}
+                  <Text style={[styles.profileActionBtnText, { color: colors.emerald }]}>
+                    {isSyncing ? 'Syncing...' : 'Sync Now'}
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={handleLogout}
+                  style={({ pressed }) => [
+                    styles.profileActionBtn,
+                    {
+                      backgroundColor: colors.surfaceElevated,
+                      borderColor: colors.border,
+                      opacity: pressed ? 0.7 : 1,
+                    },
+                  ]}
+                >
+                  <Ionicons name="log-out-outline" size={14} color={colors.textSecondary} />
+                  <Text style={[styles.profileActionBtnText, { color: colors.textSecondary }]}>
+                    Sign out
+                  </Text>
+                </Pressable>
+              </View>
             </View>
           ) : (
             <View style={styles.signedOutCard}>
@@ -246,6 +396,10 @@ export default function SettingsScreen() {
                 style={[
                   styles.openAuthBtn,
                   { backgroundColor: colors.accent },
+                  Platform.OS === 'web' && {
+                    alignSelf: 'flex-start',
+                    paddingHorizontal: 24,
+                  },
                 ]}
               >
                 <Ionicons name="log-in-outline" size={18} color="#FFFFFF" />
@@ -406,7 +560,7 @@ export default function SettingsScreen() {
         <View style={styles.themeRow}>
           {THEME_KEYS.map((key) => {
             const t = ReaderThemes[key];
-            const isActive = theme === key;
+            const isActive = readerTheme === key;
             return (
               <Pressable
                 key={key}
@@ -445,11 +599,10 @@ export default function SettingsScreen() {
                 Notify when library titles get new chapters
               </Text>
             </View>
-            <Switch
+            <CustomSwitch
               value={notificationsEnabled}
               onValueChange={handleToggleNotifications}
-              trackColor={{ false: colors.surfaceElevated, true: colors.accent }}
-              thumbColor="#FFFFFF"
+              activeColor={colors.accent}
             />
           </View>
 
@@ -488,11 +641,10 @@ export default function SettingsScreen() {
                 Load lower resolution images to save mobile data
               </Text>
             </View>
-            <Switch
+            <CustomSwitch
               value={dataSaver}
               onValueChange={setDataSaver}
-              trackColor={{ false: colors.surfaceElevated, true: colors.accent }}
-              thumbColor="#FFFFFF"
+              activeColor={colors.accent}
             />
           </View>
 
@@ -503,11 +655,10 @@ export default function SettingsScreen() {
                 Show Page Number in Reader
               </Text>
             </View>
-            <Switch
+            <CustomSwitch
               value={showPageNumber}
               onValueChange={setShowPageNumber}
-              trackColor={{ false: colors.surfaceElevated, true: colors.accent }}
-              thumbColor="#FFFFFF"
+              activeColor={colors.accent}
             />
           </View>
 
@@ -517,11 +668,10 @@ export default function SettingsScreen() {
               <Text style={[styles.optionLabel, { color: colors.text }]}>Subtle Haptic Feedback</Text>
               <Text style={[styles.optionDesc, { color: colors.textMuted }]}>Vibrate lightly when tapping buttons and controls</Text>
             </View>
-            <Switch
+            <CustomSwitch
               value={hapticsEnabled}
               onValueChange={setHapticsEnabled}
-              trackColor={{ false: colors.surfaceElevated, true: colors.accent }}
-              thumbColor="#FFFFFF"
+              activeColor={colors.accent}
             />
           </View>
 
@@ -540,10 +690,44 @@ export default function SettingsScreen() {
           </Pressable>
         </View>
 
+        {/* Mobile App & APK Download Promo (Only shown on Web) */}
+        {Platform.OS === 'web' && (
+          <>
+            <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
+              Mobile Application
+            </Text>
+            <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Pressable
+                onPress={() => router.push('/download' as any)}
+                style={({ pressed }) => [
+                  styles.optionRow,
+                  { opacity: pressed ? 0.7 : 1 },
+                ]}
+              >
+                <Ionicons name="phone-portrait-outline" size={20} color={colors.accent} />
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[styles.optionLabel, { color: colors.text }]}>
+                      Get Yomite for Mobile
+                    </Text>
+                    <View style={[styles.promoBadge, { backgroundColor: colors.accentSubtle }]}>
+                      <Text style={[styles.promoBadgeText, { color: colors.accent }]}>APK v1.2.0</Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.optionDesc, { color: colors.textMuted }]}>
+                    Download direct Android APK or install iOS Web PWA with full offline capabilities
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+              </Pressable>
+            </View>
+          </>
+        )}
+
         {/* App Info */}
         <View style={styles.footer}>
           <Text style={[styles.footerText, { color: colors.textMuted }]}>
-            Yomite Manga Reader v1.0.0
+            Yomite Manga Reader v1.2.0
           </Text>
           <Text style={[styles.footerSubText, { color: colors.textMuted }]}>
             Powered by MangaDex API & Supabase Cloud Sync
@@ -566,16 +750,33 @@ export default function SettingsScreen() {
         onConfirm={confirmModalConfig.onConfirm}
         onCancel={() => setConfirmModalConfig((prev) => ({ ...prev, visible: false }))}
       />
+
+      {/* Hamburger Slide Drawer */}
+      <SidebarDrawer visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  webCenteredContent: {
+    maxWidth: 1400,
+    width: '100%',
+    alignSelf: 'center',
+  },
   header: {
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
     paddingBottom: Spacing.xs,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  plainIconButton: {
+    padding: 4,
   },
   title: {
     fontSize: Typography.sizes.title1,
@@ -631,7 +832,63 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.medium,
   },
 
-  /* Auth Status Card */
+  /* Auth Status & Profile Card */
+  profileCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: Spacing.md,
+  },
+  profileAvatarCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  profileAvatarImage: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+  },
+  profileAvatarText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: Typography.weights.bold,
+  },
+  profileNameText: {
+    fontSize: Typography.sizes.headline,
+    fontWeight: Typography.weights.bold,
+  },
+  profileHandleText: {
+    fontSize: Typography.sizes.caption,
+  },
+  accountDivider: {
+    height: 1,
+    marginHorizontal: Spacing.md,
+  },
+  accountActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    paddingBottom: Spacing.md,
+  },
+  profileActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    gap: 4,
+  },
+  profileActionBtnText: {
+    fontSize: 11,
+    fontWeight: Typography.weights.bold,
+  },
   authStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -641,7 +898,7 @@ const styles = StyleSheet.create({
   authStatusLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.sm,
+    gap: Spacing.md,
     flex: 1,
   },
   logoutBtn: {
@@ -736,6 +993,15 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.bold,
   },
 
+  promoBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: Radius.xs,
+  },
+  promoBadgeText: {
+    fontSize: 10,
+    fontWeight: Typography.weights.bold,
+  },
   footer: {
     alignItems: 'center',
     marginTop: Spacing.lg,
