@@ -125,32 +125,42 @@ export const useUserStore = create<UserState>((set, get) => ({
   },
 
   signUpWithEmail: async (email, password, username) => {
-    const cleanUsername = username?.trim() || email.split('@')[0];
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          username: cleanUsername,
-          display_name: cleanUsername,
+    try {
+      const cleanUsername = username?.trim() || email.split('@')[0];
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            username: cleanUsername,
+            display_name: cleanUsername,
+          },
         },
-      },
-    });
+      });
 
-    if (!error && data.session) {
-      set({ session: data.session, user: data.user });
-      if (data.user?.id) syncUserDataWithCloud(data.user.id);
+      if (!error && data.session) {
+        set({ session: data.session, user: data.user });
+        if (data.user?.id) syncUserDataWithCloud(data.user.id);
+      }
+      return { error };
+    } catch (err: any) {
+      console.error('Sign up error:', err);
+      return { error: { message: err?.message || 'Sign up failed. Please check your network connection.' } };
     }
-    return { error };
   },
 
   signInWithEmail: async (email, password) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (!error && data.session) {
-      set({ session: data.session, user: data.user });
-      if (data.user?.id) syncUserDataWithCloud(data.user.id);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (!error && data.session) {
+        set({ session: data.session, user: data.user });
+        if (data.user?.id) syncUserDataWithCloud(data.user.id);
+      }
+      return { error };
+    } catch (err: any) {
+      console.error('Sign in error:', err);
+      return { error: { message: err?.message || 'Sign in failed. Please check your network connection.' } };
     }
-    return { error };
   },
 
   signInWithGoogle: async () => {

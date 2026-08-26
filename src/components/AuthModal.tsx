@@ -46,12 +46,17 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
   const handleGoogleSignIn = async () => {
     triggerHaptic();
     setIsSubmitting(true);
-    const { error } = await signInWithGoogle();
-    setIsSubmitting(false);
-    if (error) {
-      Alert.alert('Google Sign In Error', error.message || 'Failed to authenticate with Google.');
-    } else {
-      onClose();
+    try {
+      const { error } = await signInWithGoogle();
+      if (error) {
+        Alert.alert('Google Sign In Error', error.message || 'Failed to authenticate with Google.');
+      } else {
+        onClose();
+      }
+    } catch (err: any) {
+      Alert.alert('Sign In Error', err?.message || 'Failed to complete Google Sign In.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -73,23 +78,27 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
 
     triggerHaptic();
     setIsSubmitting(true);
-    if (authMode === 'signup') {
-      const { error } = await signUpWithEmail(email.trim(), password.trim(), username.trim());
-      setIsSubmitting(false);
-      if (error) {
-        Alert.alert('Registration Failed', error.message);
+    try {
+      if (authMode === 'signup') {
+        const { error } = await signUpWithEmail(email.trim(), password.trim(), username.trim());
+        if (error) {
+          Alert.alert('Registration Failed', error.message || 'Could not create account.');
+        } else {
+          Alert.alert('Success', 'Account created successfully! Welcome to Yomite.');
+          onClose();
+        }
       } else {
-        Alert.alert('Success', 'Account created successfully! Welcome to Yomite.');
-        onClose();
+        const { error } = await signInWithEmail(email.trim(), password.trim());
+        if (error) {
+          Alert.alert('Sign In Failed', error.message || 'Invalid credentials or connection error.');
+        } else {
+          onClose();
+        }
       }
-    } else {
-      const { error } = await signInWithEmail(email.trim(), password.trim());
+    } catch (err: any) {
+      Alert.alert('Authentication Error', err?.message || 'An unexpected error occurred. Please try again.');
+    } finally {
       setIsSubmitting(false);
-      if (error) {
-        Alert.alert('Sign In Failed', error.message);
-      } else {
-        onClose();
-      }
     }
   };
 
