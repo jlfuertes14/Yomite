@@ -14,7 +14,7 @@
       "destination": "/api/cover?path=:path*"
     },
     {
-      "source": "/((?!api/|_expo|assets|public|favicon|.*\\..*).*)",
+      "source": "/:path*",
       "destination": "/index.html"
     }
   ]
