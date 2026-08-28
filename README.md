@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/images/mascot.png" width="110" alt="Yomite Mascot" style="border-radius: 24px; margin-bottom: 12px;" />
+
 # 📖 Yomite (読手)
 ### Modern, Ultra-Fast Universal Manga Reader for Web, Android & iOS
 
@@ -22,41 +24,21 @@
 
 ## 📱 Screenshots & Previews
 
-<!-- SCREENSHOT PLACEHOLDERS: Replace the placeholder URLs with actual screenshots/GIFs of your Yomite instance -->
-
 <div align="center">
 
-### 🖥️ Desktop Web Experience
-```
-+-------------------------------------------------------------------------------+
-|                                                                               |
-|   [ PLACEHOLDER: Desktop Web Preview - Discover Page & Hero Carousel ]        |
-|   Add your screenshot here: docs/screenshots/desktop-discover.png             |
-|                                                                               |
-+-------------------------------------------------------------------------------+
-```
-*(Replace with: `![Yomite Web Preview](docs/screenshots/desktop-discover.png)`)*
+### 🌟 Core Experience & Feature Showcase
+
+| 📖 Immersive Reader Engine | 📚 Cloud Library & Collections |
+| :---: | :---: |
+| <img src="assets/images/reader_image.png" width="440" alt="Universal Reader Engine" /> | <img src="assets/images/cloud_libary.png" width="440" alt="Cloud Library & Collections" /> |
+| *Continuous Webtoon, Single & Double Page spread modes* | *Organized reading categories with cross-device sync* |
 
 <br />
 
-### 📱 Mobile Web & App View (iOS & Android)
-
-| 🔍 Discover & Search | 📖 Immersive Reader | 📚 Library & Offline |
-| :---: | :---: | :---: |
-| <img src="https://via.placeholder.com/320x640/18181b/f43f5e?text=Discover+Screen" width="240" alt="Discover Mobile" /> | <img src="https://via.placeholder.com/320x640/18181b/f43f5e?text=Reader+Screen" width="240" alt="Reader Mobile" /> | <img src="https://via.placeholder.com/320x640/18181b/f43f5e?text=Library+Screen" width="240" alt="Library Mobile" /> |
-| *Hero banner & trending spotlight* | *Webtoon & Single-Page mode* | *Cloud synced with offline downloads* |
-
-<br />
-
-### 🚀 Get Manga App Showcase Landing Page
-```
-+-------------------------------------------------------------------------------+
-|                                                                               |
-|   [ PLACEHOLDER: Get App 3D Stacked Carousel & APK Download Landing ]         |
-|   Add your screenshot here: docs/screenshots/download-page.png                |
-|                                                                               |
-+-------------------------------------------------------------------------------+
-```
+| 📥 Offline Download Vault | 🌐 Global Language Translations |
+| :---: | :---: |
+| <img src="assets/images/offline_vault.png" width="440" alt="Offline Download Vault" /> | <img src="assets/images/language_options.png" width="440" alt="Global Language Translations" /> |
+| *Zero-login background downloads & cache management* | *Multi-language chapter feeds & scanlation groups* |
 
 </div>
 
