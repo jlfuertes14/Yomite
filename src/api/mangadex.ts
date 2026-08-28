@@ -285,6 +285,19 @@ export async function isAuthenticated(): Promise<boolean> {
 
 // ─── Cover Art Helpers ────────────────────────────────────────────
 
+export function getMangaDexCoversBase(): string {
+  if (Platform.OS !== 'web') {
+    return 'https://uploads.mangadex.org/covers';
+  }
+  // In Web: on hosted environments (e.g. Vercel), route through reverse proxy to bypass MangaDex anti-hotlink placeholder
+  if (typeof window !== 'undefined' && window.location?.hostname) {
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      return '/api/mangadex-covers';
+    }
+  }
+  return 'https://uploads.mangadex.org/covers';
+}
+
 export function getCoverUrl(
   mangaId: string,
   coverFileName: string | null,
@@ -292,7 +305,8 @@ export function getCoverUrl(
 ): string | null {
   if (!coverFileName) return null;
   const suffix = size === 'original' ? '' : `.${size}.jpg`;
-  return `${COVERS_BASE}/${mangaId}/${coverFileName}${suffix}`;
+  const base = getMangaDexCoversBase();
+  return `${base}/${mangaId}/${coverFileName}${suffix}`;
 }
 
 export function extractCoverFileName(manga: Manga): string | null {

@@ -16,6 +16,9 @@ export default function Root({ children }: PropsWithChildren) {
           content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover"
         />
 
+        {/* Prevent MangaDex hotlinking blockers from intercepting cover & chapter images */}
+        <meta name="referrer" content="no-referrer" />
+
         <title>Yomite — Modern Manga Reader</title>
         <meta
           name="description"
@@ -26,10 +29,11 @@ export default function Root({ children }: PropsWithChildren) {
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="Yomite" />
 
-        {/* Favicons */}
-        <link rel="icon" type="image/png" href="/favicon.png" />
-        <link rel="shortcut icon" href="/favicon.png" />
-        <link rel="apple-touch-icon" href="/favicon.png" />
+        {/* Official Yomite Favicons & Touch Icons with Cache Buster */}
+        <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png?v=1.2" />
+        <link rel="icon" type="image/x-icon" href="/favicon.ico?v=1.2" />
+        <link rel="shortcut icon" href="/favicon.png?v=1.2" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=1.2" />
 
         {/* Disable body scrolling on web for native-like ScrollViews */}
         <ScrollViewStyleReset />
