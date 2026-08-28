@@ -23,6 +23,7 @@ import { useHistoryStore } from '../../src/store/historyStore';
 import { getMangaChapters } from '../../src/api/mangadex';
 import { MangaCard, CARD_GAP } from '../../src/components/MangaCard';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
+import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 import type { LibraryCategory } from '../../src/types';
 
 type VectorIcon = React.ComponentProps<typeof Ionicons>['name'];
@@ -36,6 +37,7 @@ const CATEGORIES: { key: LibraryCategory; label: string; icon: VectorIcon }[] = 
 ];
 
 export default function LibraryScreen() {
+  useDocumentTitle('Library');
   const router = useRouter();
   const colors = useThemeColors();
   const [drawerVisible, setDrawerVisible] = useState(false);

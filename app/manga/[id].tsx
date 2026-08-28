@@ -49,6 +49,7 @@ import { ZoomableImage } from '../../src/components/ZoomableImage';
 import { triggerHaptic } from '../../src/utils/haptics';
 import { formatChapterDate } from '../../src/utils/date';
 import { getLanguageInfo } from '../../src/utils/language';
+import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 import type { Manga, Chapter, LibraryCategory } from '../../src/types';
 
 export default function MangaDetailScreen() {
@@ -57,6 +58,7 @@ export default function MangaDetailScreen() {
   const colors = useThemeColors();
 
   const [manga, setManga] = useState<Manga | null>(null);
+  useDocumentTitle(manga ? getMangaTitle(manga) : 'Manga Details');
   const [stats, setStats] = useState<MangaStatistics | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [selectedLanguage, setSelectedLanguage] = useState<string>('en');

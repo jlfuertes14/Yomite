@@ -35,8 +35,10 @@ import { triggerHaptic } from '../src/utils/haptics';
 import { AuthModal } from '../src/components/AuthModal';
 import { ConfirmationModal } from '../src/components/ConfirmationModal';
 import { AnimatedCard } from '../src/components/AnimatedCard';
+import { useDocumentTitle } from '../src/utils/useDocumentTitle';
 
 export default function ProfileScreen() {
+  useDocumentTitle('User Profile');
   const colors = useThemeColors();
   const router = useRouter();
 

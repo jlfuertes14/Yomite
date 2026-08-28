@@ -25,6 +25,7 @@ import { downloadChapter, removeDownloadedChapter } from '../../src/services/dow
 import { getMangaDetails, extractCoverFileName, getCoverUrl } from '../../src/api/mangadex';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
+import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 import type { HistoryEntry } from '../../src/types';
 import { triggerHaptic } from '../../src/utils/haptics';
 
@@ -189,6 +190,7 @@ function HistoryRowItem({
 }
 
 export default function HistoryScreen() {
+  useDocumentTitle('History');
   const router = useRouter();
   const colors = useThemeColors();
   const [drawerVisible, setDrawerVisible] = useState(false);

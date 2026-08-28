@@ -25,6 +25,7 @@ import { useReaderStore } from '../../src/store/readerStore';
 import { useHistoryStore } from '../../src/store/historyStore';
 import { useLibraryStore } from '../../src/store/libraryStore';
 import { useDownloadStore } from '../../src/store/downloadStore';
+import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 import {
   getChapterPages,
   getMangaChapters,
@@ -246,6 +247,7 @@ export default function ReaderScreen() {
 
   const [mangaTitle, setMangaTitle] = useState('Manga');
   const [chapterTitle, setChapterTitle] = useState(`Chapter`);
+  useDocumentTitle(`${mangaTitle} • ${chapterTitle}`);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [chapterList, setChapterList] = useState<Chapter[]>([]);
   const [scanlationGroup, setScanlationGroup] = useState<string>('Scanlation Team');

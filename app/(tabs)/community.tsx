@@ -36,6 +36,7 @@ import { AnimatedPressable } from '../../src/components/AnimatedPressable';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
 import { AuthModal } from '../../src/components/AuthModal';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
+import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 
 const CATEGORIES = [
   'All',
@@ -43,10 +44,11 @@ const CATEGORIES = [
   'Art & Design',
   'Scanlation',
   'Anime & Adaptations',
-  'Recommendations',
+  'Chapter Release',
 ];
 
 export default function CommunityScreen() {
+  useDocumentTitle('Community');
   const colors = useThemeColors();
   const [drawerVisible, setDrawerVisible] = useState(false);
   const user = useUserStore((s) => s.user);

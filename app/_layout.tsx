@@ -14,6 +14,7 @@ import { Colors } from '../constants/Colors';
 import { requestStoragePermissionOnLaunch } from '../src/services/storagePermission';
 import { useUserStore } from '../src/store/userStore';
 import { CacheManager } from '../src/utils/cacheManager';
+import { useDocumentTitle } from '../src/utils/useDocumentTitle';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -29,6 +30,7 @@ const YomiteDarkTheme = {
 };
 
 export default function RootLayout() {
+  useDocumentTitle();
   const [fontsLoaded] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
   });

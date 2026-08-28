@@ -24,6 +24,7 @@ import { useRouter } from 'expo-router';
 import { Colors, Spacing, Radius, Typography } from '../constants/Colors';
 import { useThemeColors } from '../src/hooks/useThemeColor';
 import { triggerHaptic } from '../src/utils/haptics';
+import { useDocumentTitle } from '../src/utils/useDocumentTitle';
 
 // App Specifications & Release Metadata
 const APP_RELEASE = {
@@ -95,6 +96,7 @@ function BentoAppearCard({ index, isDesktop, style, children }: BentoAppearCardP
 }
 
 export default function AppDownloadScreen() {
+  useDocumentTitle('Get App');
   const colors = useThemeColors();
   const router = useRouter();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();

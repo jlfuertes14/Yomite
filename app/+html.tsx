@@ -7,7 +7,7 @@ import { type PropsWithChildren } from 'react';
  */
 export default function Root({ children }: PropsWithChildren) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
@@ -19,7 +19,7 @@ export default function Root({ children }: PropsWithChildren) {
         {/* Prevent MangaDex hotlinking blockers from intercepting cover & chapter images */}
         <meta name="referrer" content="no-referrer" />
 
-        <title>Yomite — Modern Manga Reader</title>
+        <title>Yomite — Modern Manga Reader with Cloud Sync &amp; Offline Vault</title>
         <meta
           name="description"
           content="Discover, track, and read manga with Yomite. Fast, clean, and modern universal manga reader for Web, Android and iOS."
@@ -55,7 +55,7 @@ export default function Root({ children }: PropsWithChildren) {
           }}
         />
       </head>
-      <body>{children}</body>
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }

@@ -52,6 +52,7 @@ import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { useUserStore, getUserDisplayName, getUserHandle, getUserAvatarUrl } from '../../src/store/userStore';
 import { syncUserDataWithCloud } from '../../src/services/cloudSync';
+import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 import type { Manga, SearchFilters } from '../../src/types';
 import { formatChapterDate } from '../../src/utils/date';
 
@@ -717,6 +718,7 @@ const WebHeader: React.FC<WebHeaderProps> = ({
 };
 
 export default function DiscoverScreen() {
+  useDocumentTitle();
   const router = useRouter();
   const colors = useThemeColors();
   const { isOffline } = useNetworkStatus();

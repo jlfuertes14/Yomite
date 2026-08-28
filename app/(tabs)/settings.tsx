@@ -34,6 +34,7 @@ import { triggerHaptic } from '../../src/utils/haptics';
 import { AuthModal } from '../../src/components/AuthModal';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
 import { syncUserDataWithCloud } from '../../src/services/cloudSync';
+import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 
 type VectorIcon = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -68,6 +69,7 @@ function CustomSwitch({
 }
 
 export default function SettingsScreen() {
+  useDocumentTitle('Settings');
   const router = useRouter();
   const colors = useThemeColors();
   const accentColor = useThemeStore((s) => s.accentColor);
