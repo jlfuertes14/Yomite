@@ -921,7 +921,7 @@ export default function ReaderScreen() {
 
       {/* Controls Overlay (Mobile Only) */}
       {Platform.OS !== 'web' && controlsVisible && (
-        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+        <View style={[StyleSheet.absoluteFill, { pointerEvents: 'box-none' }]}>
           {/* Top Bar */}
           <View style={styles.topBar}>
             <Pressable
@@ -1334,10 +1334,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: Radius.full,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
+    boxShadow: '0 6px 12px rgba(0, 0, 0, 0.5)',
     elevation: 10,
     zIndex: 999,
     cursor: 'pointer' as any,

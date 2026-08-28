@@ -204,10 +204,7 @@ const styles = StyleSheet.create({
   cardPreviewWrapper: {
     borderRadius: Radius.lg,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
+    boxShadow: '0 6px 10px rgba(0, 0, 0, 0.4)',
     elevation: 8,
   },
   cardGradient: {

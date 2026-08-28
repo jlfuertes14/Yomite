@@ -19,19 +19,26 @@ export function getBaseDownloadDirectory(): string {
  * Returns a human-friendly display path for the active storage directory
  */
 export function getDisplayDownloadDirectory(): string {
-  const dir = getBaseDownloadDirectory();
-  if (dir.includes('primary%3A')) {
-    const folderName = dir.split('primary%3A').pop()?.replace(/\/$/, '') || '';
-    return `/storage/emulated/0/${decodeURIComponent(folderName)}`;
+  const customDir = useDownloadStore.getState().downloadDirectory;
+  if (customDir && customDir.trim()) {
+    if (customDir.includes('primary%3A')) {
+      const folderName = customDir.split('primary%3A').pop()?.replace(/\/$/, '') || '';
+      return `/storage/emulated/0/${decodeURIComponent(folderName)}`;
+    }
+    return customDir.endsWith('/') ? customDir : `${customDir}/`;
   }
-  return dir;
+  if (Platform.OS === 'web') {
+    return 'Browser IndexedDB / Cache (downloads/yomite/)';
+  }
+  const docDir = (FileSystem as any).documentDirectory || '';
+  return `${docDir}downloads/`;
 }
 
 /**
- * Opens native Android System File Manager directory picker (StorageAccessFramework SAF)
- * Allows the user to browse, select, or create any folder on internal/external storage.
+ * Opens native directory picker across Android (SAF) and Web (File System Access API / HTML5 Directory input)
  */
-export async function pickAndroidStorageDirectory(): Promise<string | null> {
+export async function pickStorageDirectory(): Promise<string | null> {
+  // 1. Android Native SAF Picker
   if (Platform.OS === 'android' && (FileSystem as any).StorageAccessFramework) {
     try {
       const permissions = await (FileSystem as any).StorageAccessFramework.requestDirectoryPermissionsAsync();
@@ -45,8 +52,68 @@ export async function pickAndroidStorageDirectory(): Promise<string | null> {
       console.warn('SAF storage directory picker failed or was cancelled:', err);
     }
   }
+
+  // 2. Web File System Access API / Directory Selector
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    if ('showDirectoryPicker' in window) {
+      try {
+        const dirHandle = await (window as any).showDirectoryPicker({
+          id: 'yomite_manga_vault',
+          mode: 'readwrite',
+        });
+        if (dirHandle && dirHandle.name) {
+          const formattedPath = `downloads/${dirHandle.name}`;
+          useDownloadStore.getState().setCustomStorageDirectory(formattedPath);
+          return formattedPath;
+        }
+      } catch (err: any) {
+        if (err.name !== 'AbortError') {
+          console.warn('Web directory picker error:', err);
+        }
+      }
+    } else if (typeof document !== 'undefined') {
+      return new Promise((resolve) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.setAttribute('webkitdirectory', '');
+        input.setAttribute('directory', '');
+        input.style.display = 'none';
+
+        input.onchange = (e: any) => {
+          const files = e.target.files;
+          if (files && files.length > 0) {
+            const folderName = files[0].webkitRelativePath?.split('/')[0] || 'downloads/custom';
+            const formatted = `downloads/${folderName}`;
+            useDownloadStore.getState().setCustomStorageDirectory(formatted);
+            resolve(formatted);
+          } else {
+            resolve(null);
+          }
+          if (document.body.contains(input)) {
+            document.body.removeChild(input);
+          }
+        };
+
+        input.oncancel = () => {
+          resolve(null);
+          if (document.body.contains(input)) {
+            document.body.removeChild(input);
+          }
+        };
+
+        document.body.appendChild(input);
+        input.click();
+      });
+    }
+  }
+
   return null;
 }
+
+export const pickAndroidStorageDirectory = pickStorageDirectory;
+
+const activeAbortControllers = new Map<string, AbortController>();
+const pausedChapterIds = new Set<string>();
 
 /**
  * Download a full chapter locally page by page
@@ -61,6 +128,12 @@ export async function downloadChapter(params: {
 }): Promise<void> {
   const { chapterId, mangaId, mangaTitle, chapterNum, chapterTitle, coverUrl } = params;
   const store = useDownloadStore.getState();
+
+  // Reset pause tracking and create AbortController for this download
+  pausedChapterIds.delete(chapterId);
+  const controller = new AbortController();
+  activeAbortControllers.set(chapterId, controller);
+  const signal = controller.signal;
 
   try {
     // 1. Skip if chapter is already downloaded to prevent duplicates
@@ -87,10 +160,22 @@ export async function downloadChapter(params: {
       throw new Error('No page URLs returned for this chapter.');
     }
 
+    // Check if user paused while fetching chapter page URLs
+    if (signal.aborted || pausedChapterIds.has(chapterId) || store.chapters[chapterId]?.status === 'paused') {
+      console.log(`[DownloadService] Chapter ${chapterId} was paused before downloading pages.`);
+      return;
+    }
+
+    // 4. On Web platform: use browser CacheStorage / Blob caching
+    if (Platform.OS === 'web') {
+      await downloadChapterWeb(params, pages, signal);
+      return;
+    }
+
     let baseDir = getBaseDownloadDirectory();
     const isSaf = baseDir.startsWith('content://');
 
-    // 4. Try SAF download if user configured a SAF content:// URI
+    // 5. Try SAF download if user configured a SAF content:// URI (Android only)
     if (isSaf && (FileSystem as any).StorageAccessFramework) {
       try {
         await downloadChapterSaf(params, pages, baseDir);
@@ -105,11 +190,96 @@ export async function downloadChapter(params: {
       }
     }
 
-    // 5. Standard FileSystem download (file://...)
-    await downloadChapterStandard(params, pages, baseDir);
+    // 6. Standard FileSystem download (file://...)
+    await downloadChapterStandard(params, pages, baseDir, signal);
   } catch (error: any) {
+    if (signal.aborted || pausedChapterIds.has(chapterId) || error?.name === 'AbortError') {
+      console.log(`[DownloadService] Download cancelled/paused for chapter ${chapterId}`);
+      return;
+    }
     console.error(`Failed to download chapter ${chapterId}:`, error);
     useDownloadStore.getState().setFailed(chapterId, error?.message || 'Download failed');
+  } finally {
+    activeAbortControllers.delete(chapterId);
+  }
+}
+
+/**
+ * Web browser download implementation using CacheStorage and Blob URLs
+ */
+async function downloadChapterWeb(
+  params: any,
+  pages: string[],
+  signal: AbortSignal
+): Promise<void> {
+  const { chapterId } = params;
+  const store = useDownloadStore.getState();
+  const existing = store.chapters[chapterId];
+  const localPages: string[] = existing?.localPages ? [...existing.localPages] : [];
+  let totalSizeBytes = existing?.sizeBytes || 0;
+  const startIndex = localPages.length;
+
+  let cache: Cache | null = null;
+  if (typeof caches !== 'undefined') {
+    try {
+      cache = await caches.open('yomite-manga-chapters-v1');
+    } catch (_err) {}
+  }
+
+  for (let i = startIndex; i < pages.length; i++) {
+    // Check if user paused the download or signal aborted
+    if (signal.aborted || pausedChapterIds.has(chapterId) || useDownloadStore.getState().chapters[chapterId]?.status === 'paused') {
+      console.log(`[DownloadService] Chapter ${chapterId} paused on web at page ${i}/${pages.length}`);
+      return;
+    }
+
+    const pageUrl = pages[i];
+    let finalPageUri = pageUrl;
+
+    try {
+      const response = await fetch(pageUrl, { mode: 'cors', signal });
+      if (response.ok) {
+        const blob = await response.blob();
+        const blobSize = blob.size || 350000;
+        totalSizeBytes += blobSize;
+
+        if (cache) {
+          try {
+            await cache.put(
+              pageUrl,
+              new Response(blob.slice(0), {
+                headers: {
+                  'Content-Type': blob.type || 'image/jpeg',
+                  'Cache-Control': 'public, max-age=31536000',
+                },
+              })
+            );
+          } catch (_cErr) {}
+        }
+        finalPageUri = pageUrl;
+      } else {
+        totalSizeBytes += 300000;
+      }
+    } catch (fetchErr: any) {
+      if (signal.aborted || pausedChapterIds.has(chapterId) || fetchErr?.name === 'AbortError') {
+        console.log(`[DownloadService] Fetch aborted on pause for chapter ${chapterId}`);
+        return;
+      }
+      totalSizeBytes += 300000;
+      finalPageUri = pageUrl;
+    }
+
+    if (signal.aborted || pausedChapterIds.has(chapterId) || useDownloadStore.getState().chapters[chapterId]?.status === 'paused') {
+      console.log(`[DownloadService] Chapter ${chapterId} paused immediately after fetch.`);
+      return;
+    }
+
+    localPages.push(finalPageUri);
+    useDownloadStore.getState().updateProgress(chapterId, localPages.length, pages.length, [...localPages], totalSizeBytes);
+  }
+
+  if (!signal.aborted && !pausedChapterIds.has(chapterId) && useDownloadStore.getState().chapters[chapterId]?.status !== 'paused') {
+    useDownloadStore.getState().setCompleted(chapterId, localPages, totalSizeBytes);
   }
 }
 
@@ -119,16 +289,26 @@ export async function downloadChapter(params: {
 async function downloadChapterStandard(
   params: any,
   pages: string[],
-  baseDir: string
+  baseDir: string,
+  signal?: AbortSignal
 ): Promise<void> {
   const { chapterId, mangaId, mangaTitle, chapterNum, chapterTitle } = params;
   const chapterDir = `${baseDir}${mangaId}/${chapterId}/`;
   await FileSystem.makeDirectoryAsync(chapterDir, { intermediates: true });
 
-  const localPages: string[] = [];
-  let totalSizeBytes = 0;
+  const store = useDownloadStore.getState();
+  const existing = store.chapters[chapterId];
+  const localPages: string[] = existing?.localPages ? [...existing.localPages] : [];
+  let totalSizeBytes = existing?.sizeBytes || 0;
+  const startIndex = localPages.length;
 
-  for (let i = 0; i < pages.length; i++) {
+  for (let i = startIndex; i < pages.length; i++) {
+    // Check if user clicked pause
+    if (signal?.aborted || pausedChapterIds.has(chapterId) || useDownloadStore.getState().chapters[chapterId]?.status === 'paused') {
+      console.log(`[DownloadService] Chapter ${chapterId} paused at page ${i}/${pages.length}`);
+      return;
+    }
+
     const pageUrl = pages[i];
     const ext = pageUrl.split('.').pop()?.split('?')[0] || 'jpg';
     const localFilePath = `${chapterDir}page_${i + 1}.${ext}`;
@@ -143,25 +323,30 @@ async function downloadChapterStandard(
       }
     } catch (_err) {}
 
-    useDownloadStore.getState().updateProgress(chapterId, i + 1, pages.length, [...localPages], totalSizeBytes);
+    if (signal?.aborted || pausedChapterIds.has(chapterId) || useDownloadStore.getState().chapters[chapterId]?.status === 'paused') {
+      return;
+    }
+
+    useDownloadStore.getState().updateProgress(chapterId, localPages.length, pages.length, [...localPages], totalSizeBytes);
   }
 
-  const metaPath = `${chapterDir}meta.json`;
-  await FileSystem.writeAsStringAsync(
-    metaPath,
-    JSON.stringify({
-      chapterId,
-      mangaId,
-      mangaTitle,
-      chapterNum,
-      chapterTitle,
-      pagesCount: localPages.length,
-      downloadedAt: new Date().toISOString(),
-    })
-  );
-  localPages.push(metaPath);
-
-  useDownloadStore.getState().setCompleted(chapterId, localPages, totalSizeBytes);
+  if (!signal?.aborted && !pausedChapterIds.has(chapterId) && useDownloadStore.getState().chapters[chapterId]?.status !== 'paused') {
+    const metaPath = `${chapterDir}meta.json`;
+    await FileSystem.writeAsStringAsync(
+      metaPath,
+      JSON.stringify({
+        chapterId,
+        mangaId,
+        mangaTitle,
+        chapterNum,
+        chapterTitle,
+        pagesCount: localPages.length,
+        downloadedAt: new Date().toISOString(),
+      })
+    );
+    localPages.push(metaPath);
+    useDownloadStore.getState().setCompleted(chapterId, localPages, totalSizeBytes);
+  }
 }
 
 /**
@@ -250,10 +435,26 @@ async function downloadChapterSaf(
 export async function removeDownloadedChapter(chapterId: string, mangaId: string): Promise<void> {
   const store = useDownloadStore.getState();
   const chapterObj = store.chapters[chapterId];
-  const baseDir = getBaseDownloadDirectory();
-  const SAF = (FileSystem as any).StorageAccessFramework;
 
   try {
+    // On Web platform: remove cached pages from CacheStorage
+    if (Platform.OS === 'web') {
+      if (typeof caches !== 'undefined' && chapterObj && chapterObj.localPages) {
+        try {
+          const cache = await caches.open('yomite-manga-chapters-v1');
+          for (const pageUrl of chapterObj.localPages) {
+            if (pageUrl && pageUrl.startsWith('http')) {
+              await cache.delete(pageUrl);
+            }
+          }
+        } catch (_cErr) {}
+      }
+      return;
+    }
+
+    const baseDir = getBaseDownloadDirectory();
+    const SAF = (FileSystem as any).StorageAccessFramework;
+
     // 1. Delete all recorded page file URIs directly from disk / SAF
     if (chapterObj && chapterObj.localPages && chapterObj.localPages.length > 0) {
       for (const fileUri of chapterObj.localPages) {
@@ -295,6 +496,19 @@ export async function removeDownloadedChapter(chapterId: string, mangaId: string
     // Suppress non-fatal deletion warnings
   } finally {
     store.deleteDownload(chapterId);
+  }
+}
+
+/**
+ * Pause an active download for a chapter
+ */
+export function pauseDownloadChapter(chapterId: string): void {
+  pausedChapterIds.add(chapterId);
+  useDownloadStore.getState().setPaused(chapterId);
+  const controller = activeAbortControllers.get(chapterId);
+  if (controller) {
+    controller.abort();
+    activeAbortControllers.delete(chapterId);
   }
 }
 

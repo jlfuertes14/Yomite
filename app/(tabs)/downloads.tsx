@@ -19,7 +19,9 @@ import { useDownloadStore, DownloadedChapter } from '../../src/store/downloadSto
 import {
   removeDownloadedChapter,
   downloadChapter,
+  pauseDownloadChapter,
   getDisplayDownloadDirectory,
+  pickStorageDirectory,
   pickAndroidStorageDirectory,
 } from '../../src/services/downloadService';
 import { Spacing, Radius, Typography } from '../../constants/Colors';
@@ -77,7 +79,7 @@ export default function DownloadsScreen() {
   const filteredChapters = chapterList.filter((item) => {
     if (activeTab === 'completed') return item.status === 'completed';
     if (activeTab === 'in_progress')
-      return item.status === 'downloading' || item.status === 'pending' || item.status === 'error';
+      return item.status === 'downloading' || item.status === 'pending' || item.status === 'paused' || item.status === 'error';
     return true;
   });
 
@@ -100,7 +102,7 @@ export default function DownloadsScreen() {
       const group = map.get(ch.mangaId)!;
       group.chapters.push(ch);
       if (ch.status === 'completed') group.completedCount++;
-      if (ch.status === 'downloading' || ch.status === 'pending') group.downloadingCount++;
+      if (ch.status === 'downloading' || ch.status === 'pending' || ch.status === 'paused') group.downloadingCount++;
       group.totalSizeBytes += ch.sizeBytes || 0;
     });
 
@@ -149,8 +151,8 @@ export default function DownloadsScreen() {
 
   const clearSelection = () => setSelectedChapterIds(new Set());
 
-  const handlePickNativeFolder = async () => {
-    const selected = await pickAndroidStorageDirectory();
+  const handlePickFolder = async () => {
+    const selected = await pickStorageDirectory();
     if (selected) {
       setCustomPathInput(selected);
       setShowFolderModal(false);
@@ -252,6 +254,21 @@ export default function DownloadsScreen() {
     });
   };
 
+  const handlePauseItem = (item: DownloadedChapter) => {
+    pauseDownloadChapter(item.chapterId);
+  };
+
+  const handleResumeItem = (item: DownloadedChapter) => {
+    downloadChapter({
+      chapterId: item.chapterId,
+      mangaId: item.mangaId,
+      mangaTitle: item.mangaTitle,
+      chapterNum: item.chapterNum,
+      chapterTitle: item.chapterTitle,
+      coverUrl: item.coverUrl,
+    });
+  };
+
   const renderMangaGroup = ({ item: group, index }: { item: MangaDownloadGroup; index: number }) => {
     const isExpanded = expandedMangaIds.has(group.mangaId) || group.downloadingCount > 0;
     const sizeMB = (group.totalSizeBytes / (1024 * 1024)).toFixed(1);
@@ -326,6 +343,7 @@ export default function DownloadsScreen() {
               const isCompleted = ch.status === 'completed';
               const isError = ch.status === 'error';
               const isDownloading = ch.status === 'downloading';
+              const isPaused = ch.status === 'paused';
               const progressPercent = ch.totalFiles > 0 ? Math.round((ch.downloadedFiles / ch.totalFiles) * 100) : 0;
               const isSelected = selectedChapterIds.has(ch.chapterId);
 
@@ -368,6 +386,17 @@ export default function DownloadsScreen() {
                       </View>
                     )}
 
+                    {isPaused && (
+                      <View style={styles.progressRow}>
+                        <View style={[styles.progressBarTrack, { backgroundColor: colors.surfaceElevated }]}>
+                          <View style={[styles.progressBarFill, { backgroundColor: '#F59E0B', width: `${progressPercent}%` }]} />
+                        </View>
+                        <Text style={[styles.progressText, { color: '#F59E0B' }]}>
+                          Paused · {ch.downloadedFiles}/{ch.totalFiles} ({progressPercent}%)
+                        </Text>
+                      </View>
+                    )}
+
                     {isCompleted && (
                       <Text style={[styles.subMetaText, { color: colors.emerald }]}>
                         Saved Offline · {(ch.sizeBytes / (1024 * 1024)).toFixed(1)} MB
@@ -382,6 +411,28 @@ export default function DownloadsScreen() {
                   </View>
 
                   <View style={styles.subChapterActions}>
+                    {isDownloading && (
+                      <Pressable
+                        onPress={() => handlePauseItem(ch)}
+                        hitSlop={8}
+                        style={styles.iconBtn}
+                        accessibilityLabel="Pause chapter download"
+                      >
+                        <Ionicons name="pause-circle-outline" size={22} color={colors.accent} />
+                      </Pressable>
+                    )}
+
+                    {isPaused && (
+                      <Pressable
+                        onPress={() => handleResumeItem(ch)}
+                        hitSlop={8}
+                        style={styles.iconBtn}
+                        accessibilityLabel="Resume chapter download"
+                      >
+                        <Ionicons name="play-circle-outline" size={22} color="#F59E0B" />
+                      </Pressable>
+                    )}
+
                     {isError && (
                       <Pressable onPress={() => handleRetryItem(ch)} style={styles.iconBtn}>
                         <Ionicons name="refresh-outline" size={18} color={colors.accent} />
@@ -546,16 +597,12 @@ export default function DownloadsScreen() {
 
               <Text style={[styles.modalSubtext, { color: colors.textSecondary }]}>
                 {Platform.OS === 'web'
-                  ? 'Enter your custom local directory path for downloaded chapters below:'
+                  ? 'Select a folder via your browser file picker, choose a preset, or specify a custom subfolder path:'
                   : "Open Android's native File Manager to select or create a folder, or enter a custom path manually:"}
               </Text>
 
               <AnimatedPressable
-                onPress={() => {
-                  if (Platform.OS === 'android') {
-                    handlePickNativeFolder();
-                  }
-                }}
+                onPress={handlePickFolder}
                 style={[styles.pickFolderBtn, { backgroundColor: colors.accent }]}
               >
                 <Ionicons name="folder-open" size={18} color="#FFFFFF" />
@@ -566,7 +613,49 @@ export default function DownloadsScreen() {
                 </Text>
               </AnimatedPressable>
 
-              <View style={{ gap: 6, marginVertical: Spacing.sm }}>
+              {Platform.OS === 'web' && (
+                <View style={{ gap: 6 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textMuted }]}>Quick Presets:</Text>
+                  <View style={styles.presetsRow}>
+                    {[
+                      { label: 'Default Vault', path: '' },
+                      { label: 'downloads/yomite', path: 'downloads/yomite' },
+                      { label: 'downloads/manga', path: 'downloads/manga' },
+                    ].map((preset, idx) => {
+                      const isSelected = customPathInput === preset.path;
+                      return (
+                        <Pressable
+                          key={idx}
+                          onPress={() => setCustomPathInput(preset.path)}
+                          style={[
+                            styles.presetChip,
+                            {
+                              backgroundColor: isSelected ? colors.accentSubtle : colors.surfaceElevated,
+                              borderColor: isSelected ? colors.accent : colors.border,
+                            },
+                          ]}
+                        >
+                          <Ionicons
+                            name="folder-outline"
+                            size={12}
+                            color={isSelected ? colors.accent : colors.textSecondary}
+                          />
+                          <Text
+                            style={[
+                              styles.presetChipText,
+                              { color: isSelected ? colors.accent : colors.textSecondary },
+                            ]}
+                          >
+                            {preset.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+
+              <View style={{ gap: 6, marginVertical: Spacing.xs }}>
                 <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Custom Directory Path:</Text>
                 <TextInput
                   style={[
@@ -883,6 +972,24 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: Typography.sizes.footnote,
     fontWeight: Typography.weights.bold,
+  },
+  presetsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  presetChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: Radius.sm,
+    borderWidth: 1,
+  },
+  presetChipText: {
+    fontSize: Typography.sizes.caption,
+    fontWeight: Typography.weights.medium,
   },
   inputLabel: {
     fontSize: Typography.sizes.caption,

@@ -917,10 +917,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: Radius.xl,
     borderWidth: 1,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.5,
-    shadowRadius: 25,
+    boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
     elevation: 10,
   },
   createModalCard: {
@@ -932,10 +929,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: Radius.xl,
     borderWidth: 1,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.5,
-    shadowRadius: 25,
+    boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
     elevation: 10,
   },
   modalHeader: {

@@ -10,6 +10,7 @@ import {
   StyleProp,
   ViewStyle,
   Easing,
+  Platform,
 } from 'react-native';
 import { triggerHaptic } from '../utils/haptics';
 
@@ -43,13 +44,13 @@ export function AnimatedCard({
           toValue: 1,
           duration: 350,
           easing: Easing.bezier(0.23, 1, 0.32, 1),
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
         Animated.timing(slideAnim, {
           toValue: 0,
           duration: 350,
           easing: Easing.bezier(0.23, 1, 0.32, 1),
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
       ]).start();
     }, delay);
@@ -63,7 +64,7 @@ export function AnimatedCard({
       toValue: scaleTo,
       duration: 100,
       easing: Easing.bezier(0.23, 1, 0.32, 1),
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }).start();
 
     if (onPressIn) onPressIn(e);
@@ -74,7 +75,7 @@ export function AnimatedCard({
       toValue: 1,
       friction: 4,
       tension: 40,
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }).start();
 
     if (onPressOut) onPressOut(e);

@@ -13,6 +13,7 @@ import { ThemeProvider, DarkTheme } from 'expo-router/react-navigation';
 import { Colors } from '../constants/Colors';
 import { requestStoragePermissionOnLaunch } from '../src/services/storagePermission';
 import { useUserStore } from '../src/store/userStore';
+import { CacheManager } from '../src/utils/cacheManager';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -35,6 +36,7 @@ export default function RootLayout() {
   useEffect(() => {
     // Set native Android window background to dark, request storage permissions & initialize auth sync on launch
     SystemUI.setBackgroundColorAsync('#09090B').catch(() => {});
+    CacheManager.cleanLegacyStorageCache();
     requestStoragePermissionOnLaunch();
     useUserStore.getState().initializeAuth();
   }, []);

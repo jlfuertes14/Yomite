@@ -150,6 +150,10 @@ const WebHeader: React.FC<WebHeaderProps> = ({
   onResetToDiscover,
   onOpenAuth,
 }) => {
+  const { width: windowWidth } = useWindowDimensions();
+  const isMobile = windowWidth < 640;
+  const isTablet = windowWidth >= 640 && windowWidth < 1024;
+
   const isHeroActive = !isShowingSearch && activeNavId !== 'popular';
   const isTransparentAtTop = isHeroActive && !isScrolled;
 
@@ -185,319 +189,376 @@ const WebHeader: React.FC<WebHeaderProps> = ({
   const headerTextColor = isTransparentAtTop ? '#FAFAFA' : colors.text;
 
   return (
-    <View
-      ref={webHeaderContainerRef}
-      pointerEvents="auto"
-      style={[
-        styles.webHeroTopContainer,
-        {
-          position: Platform.OS === 'web' ? ('sticky' as any) : 'relative',
-          top: 0,
-          left: 0,
-          right: 0,
-          zIndex: 1000,
-          marginBottom: isHeroActive ? -68 : 0,
-          backgroundColor: isTransparentAtTop ? 'transparent' : colors.surface,
-          borderBottomWidth: 1,
-          borderBottomColor: isTransparentAtTop ? 'transparent' : colors.border,
-          ...(Platform.OS === 'web'
-            ? ({
-                transition:
-                  'background-color 0.25s cubic-bezier(0.23, 1, 0.32, 1), border-color 0.25s cubic-bezier(0.23, 1, 0.32, 1), margin-bottom 0.2s ease',
-              } as any)
-            : {}),
-        },
-      ]}
-    >
-      <View style={[styles.webHeaderRow, styles.webCenteredContent]}>
-        {/* Left Group: Menu + Mascot Logo + Brand Title */}
-        <View style={styles.webHeaderLeft}>
-          <Pressable
-            onPress={handleToggleMenu}
-            style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1 }]}
-            hitSlop={8}
-          >
-            <Ionicons name="menu" size={26} color={headerTextColor} />
-          </Pressable>
+    <>
+      {/* Full-screen Dark Dim Spotlight Backdrop when search expander is active */}
+      {Platform.OS === 'web' && isWebDropdownVisible && (
+        <Pressable
+          onPress={() => {
+            setIsWebDropdownVisible(false);
+            if (searchQuery.trim().length === 0) {
+              contractSearchBar();
+            }
+          }}
+          style={styles.webSearchDimBackdrop}
+        />
+      )}
 
-          <Pressable
-            onPress={handleBrandClick}
-            style={({ pressed }) => [
-              styles.webBrandGroup,
-              { opacity: pressed ? 0.7 : 1, cursor: 'pointer' as any },
-            ]}
-            hitSlop={8}
-          >
-            <Image
-              source={require('../../assets/images/mascot.png')}
-              style={styles.webHeaderMascot}
-              contentFit="contain"
-            />
-            <Text style={[styles.webBrandTitle, { color: headerTextColor }]}>Yomite</Text>
-          </Pressable>
-        </View>
+      <View
+        ref={webHeaderContainerRef}
+        style={[
+          styles.webHeroTopContainer,
+          {
+            pointerEvents: 'auto',
+            position: Platform.OS === 'web' ? ('sticky' as any) : 'relative',
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 1000,
+            marginBottom: isHeroActive ? -68 : 0,
+            backgroundColor: isTransparentAtTop ? 'transparent' : colors.surface,
+            borderBottomWidth: 1,
+            borderBottomColor: isTransparentAtTop ? 'transparent' : colors.border,
+            ...(Platform.OS === 'web'
+              ? ({
+                  transition:
+                    'background-color 0.25s cubic-bezier(0.23, 1, 0.32, 1), border-color 0.25s cubic-bezier(0.23, 1, 0.32, 1), margin-bottom 0.2s ease',
+                } as any)
+              : {}),
+          },
+        ]}
+      >
+        <View
+          style={[
+            styles.webHeaderRow,
+            styles.webCenteredContent,
+            isMobile && { paddingHorizontal: 12, gap: 8 },
+          ]}
+        >
+          {/* Left Group: Menu + Mascot Logo + Brand Title */}
+          <View style={[styles.webHeaderLeft, isMobile && { gap: 8 }]}>
+            <Pressable
+              onPress={handleToggleMenu}
+              style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1 }]}
+              hitSlop={8}
+            >
+              <Ionicons name="menu" size={isMobile ? 24 : 26} color={headerTextColor} />
+            </Pressable>
 
-        {/* Right Group: Inline Search Bar Pill with Ctrl + K & Search Glass Icon */}
-        <View style={styles.webHeaderRight}>
-          <Animated.View
-            style={[
-              { position: 'relative', zIndex: 100 },
-              Platform.OS === 'web' && { width: searchBarWidthAnim },
-            ]}
-          >
-            <View
+            <Pressable
+              onPress={handleBrandClick}
+              style={({ pressed }) => [
+                styles.webBrandGroup,
+                { opacity: pressed ? 0.7 : 1, cursor: 'pointer' as any },
+                isMobile && { gap: 6 },
+              ]}
+              hitSlop={8}
+            >
+              <Image
+                source={require('../../assets/images/mascot.png')}
+                style={[styles.webHeaderMascot, isMobile && { width: 26, height: 26 }]}
+                contentFit="contain"
+              />
+              {(!isMobile || windowWidth >= 370) && (
+                <Text style={[styles.webBrandTitle, { color: headerTextColor }, isMobile && { fontSize: 18 }]}>
+                  Yomite
+                </Text>
+              )}
+            </Pressable>
+          </View>
+
+          {/* Right Group: Inline Search Bar Pill + Filter + (Get App) + Profile */}
+          <View style={[styles.webHeaderRight, isMobile && { gap: 6, flex: 1, justifyContent: 'flex-end' }]}>
+            <Animated.View
               style={[
-                styles.webSearchPill,
-                {
-                  borderColor: isSearchFocused
-                    ? (colors.accent || '#8B5CF6')
-                    : 'rgba(255, 255, 255, 0.14)',
-                  ...(Platform.OS === 'web'
-                    ? ({
-                        boxShadow: isSearchFocused
-                          ? `0 0 0 2px ${colors.accent || '#8B5CF6'}50`
-                          : 'none',
-                        transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
-                      } as any)
-                    : {}),
-                },
+                { position: 'relative', zIndex: 100 },
+                Platform.OS === 'web' &&
+                  (isMobile
+                    ? { flex: 1, minWidth: 90, maxWidth: isSearchFocused ? 280 : 160 }
+                    : { width: searchBarWidthAnim }),
               ]}
             >
-              <Ionicons
-                name="search-outline"
-                size={16}
-                color={isSearchFocused ? (colors.accent || '#8B5CF6') : 'rgba(255,255,255,0.55)'}
-                style={{ marginRight: 2 }}
-              />
-              <TextInput
-                ref={searchInputRef as any}
+              <View
                 style={[
-                  styles.webSearchInput,
-                  Platform.OS === 'web' && ({ outlineStyle: 'none', outlineWidth: 0, outline: 'none' } as any),
+                  styles.webSearchPill,
+                  isMobile && { height: 34, paddingHorizontal: 8, gap: 4 },
+                  {
+                    borderColor: isSearchFocused
+                      ? (colors.accent || '#8B5CF6')
+                      : 'rgba(255, 255, 255, 0.14)',
+                    ...(Platform.OS === 'web'
+                      ? ({
+                          boxShadow: isSearchFocused
+                            ? `0 0 0 2px ${colors.accent || '#8B5CF6'}50`
+                            : 'none',
+                          transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+                        } as any)
+                      : {}),
+                  },
                 ]}
-                placeholder="Search"
-                placeholderTextColor="rgba(255,255,255,0.45)"
-                value={searchQuery}
-                onChangeText={(text) => {
-                  setSearchQuery(text);
-                  setIsWebDropdownVisible(true);
-                  if (text.trim().length > 0) {
-                    onFocusHandler();
-                  }
-                }}
-                onFocus={onFocusHandler}
-                onBlur={onBlurHandler}
-                onSubmitEditing={handleSearchSubmit}
-                returnKeyType="search"
-                autoCorrect={false}
-              />
-              {searchQuery.length > 0 ? (
-                <Pressable
-                  onPress={() => {
-                    setSearchQuery('');
-                    contractSearchBar();
-                    setIsWebDropdownVisible(false);
+              >
+                <Ionicons
+                  name="search-outline"
+                  size={isMobile ? 15 : 16}
+                  color={isSearchFocused ? (colors.accent || '#8B5CF6') : 'rgba(255,255,255,0.55)'}
+                  style={{ marginRight: 2 }}
+                />
+                <TextInput
+                  ref={searchInputRef as any}
+                  style={[
+                    styles.webSearchInput,
+                    isMobile && { fontSize: 12 },
+                    Platform.OS === 'web' && ({ outlineStyle: 'none', outlineWidth: 0, outline: 'none' } as any),
+                  ]}
+                  placeholder={isMobile ? 'Search...' : 'Search'}
+                  placeholderTextColor="rgba(255,255,255,0.45)"
+                  value={searchQuery}
+                  onChangeText={(text) => {
+                    setSearchQuery(text);
+                    setIsWebDropdownVisible(true);
+                    if (text.trim().length > 0) {
+                      onFocusHandler();
+                    }
                   }}
-                  hitSlop={8}
+                  onFocus={onFocusHandler}
+                  onBlur={onBlurHandler}
+                  onSubmitEditing={handleSearchSubmit}
+                  returnKeyType="search"
+                  autoCorrect={false}
+                />
+                {searchQuery.length > 0 ? (
+                  <Pressable
+                    onPress={() => {
+                      setSearchQuery('');
+                      contractSearchBar();
+                      setIsWebDropdownVisible(false);
+                    }}
+                    hitSlop={8}
+                  >
+                    <Ionicons name="close-circle" size={16} color="rgba(255,255,255,0.6)" />
+                  </Pressable>
+                ) : !isMobile ? (
+                  <View style={styles.webSearchRightGroup}>
+                    <View style={styles.kbdBadge}>
+                      <Text style={styles.kbdText}>Ctrl</Text>
+                    </View>
+                    <View style={styles.kbdBadge}>
+                      <Text style={styles.kbdText}>K</Text>
+                    </View>
+                  </View>
+                ) : null}
+              </View>
+
+              {/* Web Live Search Modal / Dropdown Card Overlay (Matched & Aligned 100% with Search Bar) */}
+              {isWebDropdownVisible && (
+                <View
+                  style={[
+                    styles.webDropdownOverlayContainer,
+                    isMobile && {
+                      left: undefined,
+                      right: -48,
+                      width: Math.min(windowWidth - 24, 380),
+                      maxHeight: 380,
+                    },
+                  ]}
                 >
-                  <Ionicons name="close-circle" size={16} color="rgba(255,255,255,0.6)" />
-                </Pressable>
-              ) : (
-                <View style={styles.webSearchRightGroup}>
-                  <View style={styles.kbdBadge}>
-                    <Text style={styles.kbdText}>Ctrl</Text>
-                  </View>
-                  <View style={styles.kbdBadge}>
-                    <Text style={styles.kbdText}>K</Text>
-                  </View>
+                  {searchQuery.trim().length === 0 ? (
+                    /* Initial search query helper prompt when empty */
+                    <View style={styles.webDropdownEmptyPrompt}>
+                      <Text style={styles.webDropdownEmptyPromptText}>
+                        Enter a manga name or search query...
+                      </Text>
+                    </View>
+                  ) : (
+                    <>
+                      {/* Dropdown Header Row */}
+                      <View style={styles.webDropdownHeaderRow}>
+                        <Text style={styles.webDropdownHeaderTitle}>Manga</Text>
+                        <Pressable
+                          onPress={handleSearchSubmit}
+                          style={({ pressed }) => [{ opacity: pressed ? 0.6 : 1 }]}
+                        >
+                          <Ionicons name="arrow-forward" size={18} color="#FAFAFA" />
+                        </Pressable>
+                      </View>
+
+                      {/* Dropdown Live Results List */}
+                      {isSearching ? (
+                        <View style={styles.webDropdownLoading}>
+                          <ActivityIndicator size="small" color={colors.accent || '#8B5CF6'} />
+                        </View>
+                      ) : searchResults.length === 0 ? (
+                        <View style={styles.webDropdownEmpty}>
+                          <Ionicons name="search-outline" size={24} color="rgba(255, 255, 255, 0.4)" />
+                          <Text style={styles.webDropdownEmptyText}>No manga found</Text>
+                        </View>
+                      ) : (
+                        <ScrollView
+                          style={styles.webDropdownScroll}
+                          showsVerticalScrollIndicator={false}
+                          nestedScrollEnabled
+                        >
+                          <View style={styles.webDropdownList}>
+                            {searchResults.slice(0, 5).map((manga) => {
+                              const coverUrl = getMangaCover(manga);
+                              const title = getMangaTitle(manga);
+                              const stats = mangaStatsMap[manga.id];
+                              const status = manga.attributes.status;
+
+                              return (
+                                <Pressable
+                                  key={manga.id}
+                                  onPress={() => {
+                                    setIsWebDropdownVisible(false);
+                                    contractSearchBar();
+                                    navigateToManga(manga.id);
+                                  }}
+                                  style={({ pressed }) => [
+                                    styles.webDropdownCardRow,
+                                    {
+                                      opacity: pressed ? 0.75 : 1,
+                                      cursor: 'pointer' as any,
+                                    },
+                                  ]}
+                                >
+                                  {coverUrl ? (
+                                    <Image
+                                      source={{ uri: coverUrl }}
+                                      style={styles.webDropdownCover}
+                                      contentFit="cover"
+                                      transition={150}
+                                    />
+                                  ) : (
+                                    <View style={[styles.webDropdownCover, { justifyContent: 'center', alignItems: 'center' }]}>
+                                      <Ionicons name="book-outline" size={20} color="rgba(255,255,255,0.4)" />
+                                    </View>
+                                  )}
+
+                                  <View style={styles.webDropdownBody}>
+                                    <Text style={styles.webDropdownMangaTitle} numberOfLines={2}>
+                                      {title}
+                                    </Text>
+                                    <View style={styles.webDropdownMetaRow}>
+                                      {stats?.rating?.bayesian ? (
+                                        <View style={styles.webDropdownMetaItem}>
+                                          <Ionicons name="star" size={12} color="#F59E0B" />
+                                          <Text style={styles.webDropdownMetaText}>
+                                            {stats.rating.bayesian.toFixed(2)}
+                                          </Text>
+                                        </View>
+                                      ) : null}
+                                      {stats?.follows ? (
+                                        <View style={styles.webDropdownMetaItem}>
+                                          <Ionicons name="bookmark" size={12} color="rgba(255,255,255,0.6)" />
+                                          <Text style={styles.webDropdownMetaText}>
+                                            {formatCompactNumber(stats.follows)}
+                                          </Text>
+                                        </View>
+                                      ) : null}
+                                    </View>
+
+                                    {status && (
+                                      <View style={styles.webDropdownStatusPill}>
+                                        <View
+                                          style={[
+                                            styles.webStatusDot,
+                                            { backgroundColor: getMangaStatusColor(status) },
+                                          ]}
+                                        />
+                                        <Text style={styles.webStatusText}>
+                                          {status.charAt(0).toUpperCase() + status.slice(1)}
+                                        </Text>
+                                      </View>
+                                    )}
+                                  </View>
+                                </Pressable>
+                              );
+                            })}
+                          </View>
+                        </ScrollView>
+                      )}
+                    </>
+                  )}
                 </View>
               )}
-            </View>
+            </Animated.View>
 
-            {/* Web Live Search Modal / Dropdown Card Overlay (Matched & Aligned 100% with Search Bar) */}
-            {searchQuery.trim().length > 0 && isWebDropdownVisible && (
-              <View style={styles.webDropdownOverlayContainer}>
-                {/* Dropdown Header Row */}
-                <View style={styles.webDropdownHeaderRow}>
-                  <Text style={styles.webDropdownHeaderTitle}>Manga</Text>
-                  <Pressable
-                    onPress={handleSearchSubmit}
-                    style={({ pressed }) => [{ opacity: pressed ? 0.6 : 1 }]}
-                  >
-                    <Ionicons name="arrow-forward" size={18} color="#FAFAFA" />
-                  </Pressable>
-                </View>
-
-                {/* Dropdown Content List */}
-                {isSearching ? (
-                  <View style={styles.webDropdownLoading}>
-                    <ActivityIndicator color={colors.accent} size="small" />
-                  </View>
-                ) : searchResults.length === 0 ? (
-                  <View style={styles.webDropdownEmpty}>
-                    <Ionicons name="search-outline" size={28} color="rgba(255,255,255,0.4)" />
-                    <Text style={styles.webDropdownEmptyText}>No manga titles found</Text>
-                  </View>
-                ) : (
-                  <ScrollView
-                    style={styles.webDropdownScroll}
-                    nestedScrollEnabled
-                    showsVerticalScrollIndicator={false}
-                  >
-                    <View style={styles.webDropdownList}>
-                      {searchResults.slice(0, 6).map((manga) => {
-                        const stat = mangaStatsMap[manga.id];
-                        const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
-                        const statusStr = manga.attributes.status || 'unknown';
-                        const statusColor = getMangaStatusColor(statusStr);
-
-                        return (
-                          <Pressable
-                            key={manga.id}
-                            onPress={() => {
-                              setIsWebDropdownVisible(false);
-                              contractSearchBar();
-                              setSearchQuery('');
-                              setSearchResults([]);
-                              navigateToManga(manga.id);
-                            }}
-                            style={({ pressed }) => [
-                              styles.webDropdownCardRow,
-                              { opacity: pressed ? 0.8 : 1 },
-                            ]}
-                          >
-                            {/* Left Cover Image */}
-                            <Image
-                              source={{ uri: getMangaCover(manga) ?? undefined }}
-                              style={styles.webDropdownCover}
-                              contentFit="cover"
-                            />
-
-                            {/* Right Meta Body */}
-                            <View style={styles.webDropdownBody}>
-                              <Text style={styles.webDropdownMangaTitle} numberOfLines={1}>
-                                {getMangaTitle(manga)}
-                              </Text>
-
-                              {/* Stats Row */}
-                              <View style={styles.webDropdownMetaRow}>
-                                {ratingVal != null && (
-                                  <View style={styles.webDropdownMetaItem}>
-                                    <Ionicons name="star-outline" size={13} color="#F87171" />
-                                    <Text style={[styles.webDropdownMetaText, { color: '#F87171' }]}>
-                                      {ratingVal.toFixed(2)}
-                                    </Text>
-                                  </View>
-                                )}
-                                <View style={styles.webDropdownMetaItem}>
-                                  <Ionicons name="bookmark-outline" size={13} color="rgba(255,255,255,0.7)" />
-                                  <Text style={styles.webDropdownMetaText}>
-                                    {stat?.follows != null ? formatCompactNumber(stat.follows) : 'N/A'}
-                                  </Text>
-                                </View>
-                                <View style={styles.webDropdownMetaItem}>
-                                  <Ionicons name="eye-outline" size={13} color="rgba(255,255,255,0.7)" />
-                                  <Text style={styles.webDropdownMetaText}>N/A</Text>
-                                </View>
-                                <View style={styles.webDropdownMetaItem}>
-                                  <Ionicons name="chatbubble-outline" size={13} color="rgba(255,255,255,0.7)" />
-                                  <Text style={styles.webDropdownMetaText}>
-                                    {formatCompactNumber(typeof stat?.comments === 'number' ? stat.comments : (stat?.comments?.repliesCount ?? 0))}
-                                  </Text>
-                                </View>
-                              </View>
-
-                              {/* Status Pill */}
-                              <View style={styles.webDropdownStatusPill}>
-                                <View style={[styles.webStatusDot, { backgroundColor: statusColor }]} />
-                                <Text style={styles.webStatusText}>
-                                  {statusStr.charAt(0).toUpperCase() + statusStr.slice(1)}
-                                </Text>
-                              </View>
-                            </View>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  </ScrollView>
-                )}
-              </View>
-            )}
-          </Animated.View>
-
-          <Pressable
-            onPress={() => setAdvancedSearchVisible(true)}
-            style={({ pressed }) => [
-              styles.webFilterBtn,
-              {
-                backgroundColor: isTransparentAtTop ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0,0,0,0.06)',
-                opacity: pressed ? 0.6 : 1,
-              },
-            ]}
-            hitSlop={8}
-          >
-            <Ionicons name="options-outline" size={22} color={headerTextColor} />
-          </Pressable>
-
-          {/* Get Mobile App Web Pill */}
-          <Pressable
-            onPress={() => router.push('/download' as any)}
-            style={({ pressed }) => [
-              styles.webGetAppBtn,
-              {
-                backgroundColor: isTransparentAtTop ? 'rgba(255, 255, 255, 0.14)' : colors.accentSubtle,
-                borderColor: isTransparentAtTop ? 'rgba(255, 255, 255, 0.28)' : colors.accent,
-                opacity: pressed ? 0.8 : 1,
-              },
-            ]}
-          >
-            <Ionicons name="phone-portrait-outline" size={14} color={isTransparentAtTop ? '#FAFAFA' : colors.accent} />
-            <Text
-              style={[
-                styles.webGetAppBtnText,
-                { color: isTransparentAtTop ? '#FAFAFA' : colors.accent },
-              ]}
-            >
-              Get App
-            </Text>
-          </Pressable>
-
-          {/* Profile Icon Button & Floating Dropdown */}
-          <View style={styles.webProfileContainer}>
             <Pressable
-              onPress={() => {
-                if (!user) {
-                  onOpenAuth();
-                } else {
-                  setProfileDropdownVisible((prev) => !prev);
-                }
-              }}
+              onPress={() => setAdvancedSearchVisible(true)}
               style={({ pressed }) => [
-                styles.webProfileBtn,
+                styles.webFilterBtn,
+                isMobile && { width: 34, height: 34, flexShrink: 0 },
                 {
-                  borderColor: isTransparentAtTop ? 'rgba(255, 255, 255, 0.28)' : colors.border,
                   backgroundColor: isTransparentAtTop ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0,0,0,0.06)',
-                  opacity: pressed ? 0.7 : 1,
+                  opacity: pressed ? 0.6 : 1,
                 },
               ]}
               hitSlop={8}
             >
-              {user ? (
-                getUserAvatarUrl(user) ? (
-                  <Image
-                    source={{ uri: getUserAvatarUrl(user)! }}
-                    style={styles.webProfileAvatarImage}
-                    contentFit="cover"
-                  />
-                ) : (
-                  <Text style={[styles.webProfileAvatarText, { color: headerTextColor }]}>
-                    {getUserDisplayName(user).charAt(0).toUpperCase()}
-                  </Text>
-                )
-              ) : (
-                <Ionicons name="person-circle-outline" size={20} color={headerTextColor} />
-              )}
+              <Ionicons name="options-outline" size={isMobile ? 20 : 22} color={headerTextColor} />
             </Pressable>
+
+            {/* Get Mobile App Web Pill (Hidden on Mobile viewports where space is tight) */}
+            {!isMobile && (
+              <Pressable
+                onPress={() => router.push('/download' as any)}
+                style={({ pressed }) => [
+                  styles.webGetAppBtn,
+                  {
+                    backgroundColor: isTransparentAtTop ? 'rgba(255, 255, 255, 0.14)' : colors.accentSubtle,
+                    borderColor: isTransparentAtTop ? 'rgba(255, 255, 255, 0.28)' : colors.accent,
+                    opacity: pressed ? 0.8 : 1,
+                  },
+                ]}
+              >
+                <Ionicons name="download-outline" size={14} color={isTransparentAtTop ? '#FAFAFA' : colors.accent} />
+                <Text
+                  style={[
+                    styles.webGetAppBtnText,
+                    { color: isTransparentAtTop ? '#FAFAFA' : colors.accent },
+                  ]}
+                >
+                  Get App
+                </Text>
+              </Pressable>
+            )}
+
+            {/* Profile Icon Button & Floating Dropdown (Always visible and anchored with flexShrink: 0) */}
+            <View style={[styles.webProfileContainer, { flexShrink: 0 }]}>
+              <Pressable
+                onPress={() => {
+                  if (!user) {
+                    onOpenAuth();
+                  } else {
+                    setProfileDropdownVisible((prev) => !prev);
+                  }
+                }}
+                style={({ pressed }) => [
+                  styles.webProfileBtn,
+                  isMobile && { width: 34, height: 34, borderRadius: 17 },
+                  {
+                    borderColor: isTransparentAtTop ? 'rgba(255, 255, 255, 0.28)' : colors.border,
+                    backgroundColor: isTransparentAtTop ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0,0,0,0.06)',
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}
+                hitSlop={8}
+              >
+                {user ? (
+                  getUserAvatarUrl(user) ? (
+                    <Image
+                      source={{ uri: getUserAvatarUrl(user)! }}
+                      style={styles.webProfileAvatarImage}
+                      contentFit="cover"
+                    />
+                  ) : (
+                    <Text style={[styles.webProfileAvatarText, { color: headerTextColor }]}>
+                      {getUserDisplayName(user).charAt(0).toUpperCase()}
+                    </Text>
+                  )
+                ) : (
+                  <Ionicons name="person-circle-outline" size={isMobile ? 22 : 24} color={headerTextColor} />
+                )}
+              </Pressable>
 
             {/* Profile Dropdown Menu */}
             {profileDropdownVisible && user && (
@@ -651,7 +712,8 @@ const WebHeader: React.FC<WebHeaderProps> = ({
         </View>
       </View>
     </View>
-  );
+  </>
+);
 };
 
 export default function DiscoverScreen() {
@@ -724,7 +786,7 @@ export default function DiscoverScreen() {
     setMobileDrawerVisible(true);
   };
 
-  const [isWebDropdownVisible, setIsWebDropdownVisible] = useState(true);
+  const [isWebDropdownVisible, setIsWebDropdownVisible] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
 
   const webHeaderContainerRef = useRef<any>(null);
@@ -774,8 +836,10 @@ export default function DiscoverScreen() {
 
   const expandSearchBar = () => {
     if (Platform.OS === 'web') {
+      const isMob = windowWidth < 640;
+      const targetWidth = isMob ? Math.min(windowWidth - 140, 320) : 680;
       Animated.timing(searchBarWidthAnim, {
-        toValue: 680,
+        toValue: targetWidth,
         duration: 280,
         easing: Easing.bezier(0.23, 1, 0.32, 1),
         useNativeDriver: false,
@@ -785,8 +849,10 @@ export default function DiscoverScreen() {
 
   const contractSearchBar = () => {
     if (Platform.OS === 'web') {
+      const isMob = windowWidth < 640;
+      const targetWidth = isMob ? Math.min(160, windowWidth * 0.35) : 260;
       Animated.timing(searchBarWidthAnim, {
-        toValue: 260,
+        toValue: targetWidth,
         duration: 280,
         easing: Easing.bezier(0.23, 1, 0.32, 1),
         useNativeDriver: false,
@@ -1343,21 +1409,6 @@ export default function DiscoverScreen() {
             </>
           )}
 
-          {/* Active Filter Pill Badge */}
-          {activeFilters !== null && (
-            <View style={styles.activeFilterRow}>
-              <View style={[styles.activeFilterPill, { backgroundColor: colors.accentSubtle, borderColor: colors.accent }]}>
-                <Ionicons name="options" size={12} color={colors.accent} />
-                <Text style={[styles.activeFilterText, { color: colors.accent }]}>
-                  Advanced Filters Active
-                </Text>
-                <Pressable onPress={handleClearAdvancedSearch}>
-                  <Ionicons name="close" size={14} color={colors.accent} />
-                </Pressable>
-              </View>
-            </View>
-          )}
-
           {/* Compact Offline Notification Banner when device is offline */}
           {isOffline && <OfflineState compact />}
 
@@ -1380,6 +1431,51 @@ export default function DiscoverScreen() {
               {isShowingSearch ? (
                 /* ─── Search Results ─── */
                 <View style={[styles.section, Platform.OS === 'web' && styles.webCenteredContent]}>
+                  {/* Active Filter Pill Badge on top of Search Results */}
+                  {activeFilters !== null && (
+                    <View style={styles.searchResultsFilterRow}>
+                      <View
+                        style={[
+                          styles.activeFilterPill,
+                          {
+                            backgroundColor: colors.accentSubtle,
+                            borderColor: colors.accent,
+                          },
+                        ]}
+                      >
+                        <Pressable
+                          onPress={() => setAdvancedSearchVisible(true)}
+                          style={({ pressed }) => [
+                            styles.activeFilterPillBody,
+                            pressed && { opacity: 0.75 },
+                            Platform.OS === 'web' && { cursor: 'pointer' },
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityLabel="Edit Advanced Filters"
+                        >
+                          <Ionicons name="options" size={13} color={colors.accent} />
+                          <Text style={[styles.activeFilterText, { color: colors.accent }]}>
+                            Advanced Filters Active
+                          </Text>
+                        </Pressable>
+
+                        <Pressable
+                          onPress={handleClearAdvancedSearch}
+                          hitSlop={8}
+                          style={({ pressed }) => [
+                            styles.activeFilterCloseBtn,
+                            pressed && { opacity: 0.5 },
+                            Platform.OS === 'web' && { cursor: 'pointer' },
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityLabel="Clear filters"
+                        >
+                          <Ionicons name="close" size={14} color={colors.accent} />
+                        </Pressable>
+                      </View>
+                    </View>
+                  )}
+
                   <View style={styles.sectionHeader}>
                     <Text style={[styles.sectionTitle, { color: colors.text }]}>Search Results</Text>
                   </View>
@@ -1589,12 +1685,10 @@ export default function DiscoverScreen() {
                             style={[styles.heroBackdrop, Platform.OS === 'web' && { opacity: 0.55 }]}
                             contentFit="cover"
                             blurRadius={Platform.OS === 'web' ? 0 : 12}
-                            pointerEvents="none"
                           />
                         )}
                         {/* Subtle Dark Gradient Overlay for text contrast */}
                         <LinearGradient
-                          pointerEvents="none"
                           colors={
                             Platform.OS === 'web'
                               ? [
@@ -2001,15 +2095,33 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     marginBottom: Spacing.sm,
   },
+  searchResultsFilterRow: {
+    paddingHorizontal: Spacing.md,
+    marginBottom: Spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   activeFilterPill: {
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
-    gap: 6,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 4,
+    paddingLeft: Spacing.md,
+    paddingRight: Spacing.sm,
+    paddingVertical: 3,
     borderRadius: Radius.full,
     borderWidth: 1,
+    gap: 4,
+  },
+  activeFilterPillBody: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  activeFilterCloseBtn: {
+    padding: 3,
+    marginLeft: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   activeFilterText: {
     fontSize: Typography.sizes.footnote,
@@ -2041,6 +2153,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     opacity: 0.75,
+    pointerEvents: 'none',
   },
   heroBackdropGradient: {
     position: 'absolute',
@@ -2048,6 +2161,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+    pointerEvents: 'none',
   },
   heroContentRow: {
     flexDirection: 'row',
@@ -2181,6 +2295,21 @@ const styles = StyleSheet.create({
     position: 'relative',
     zIndex: 100,
   },
+  webSearchDimBackdrop: {
+    position: Platform.OS === 'web' ? ('fixed' as any) : 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.32)',
+    zIndex: 998,
+    ...(Platform.OS === 'web'
+      ? ({
+          backdropFilter: 'blur(1px)',
+          transition: 'background-color 0.2s ease, opacity 0.2s ease',
+        } as any)
+      : {}),
+  },
   webDropdownOverlayContainer: {
     position: 'absolute',
     top: 42,
@@ -2192,12 +2321,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 14,
     padding: 14,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.6,
-    shadowRadius: 20,
+    boxShadow: '0 12px 20px rgba(0, 0, 0, 0.6)',
     elevation: 25,
     zIndex: 9999,
+  },
+  webDropdownEmptyPrompt: {
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+  },
+  webDropdownEmptyPromptText: {
+    color: '#D4D4D8',
+    fontSize: 14,
+    fontWeight: Typography.weights.medium,
+    letterSpacing: 0.1,
   },
   webDropdownHeaderRow: {
     flexDirection: 'row',
@@ -2388,10 +2524,7 @@ const styles = StyleSheet.create({
     width: 250,
     borderRadius: Radius.lg,
     borderWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
+    boxShadow: '0 10px 20px rgba(0, 0, 0, 0.5)',
     elevation: 10,
     zIndex: 9999,
     overflow: 'hidden',

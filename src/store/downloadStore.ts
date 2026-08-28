@@ -41,25 +41,32 @@ export const useDownloadStore = create<DownloadStore>()(
       downloadDirectory: null,
 
       startDownload: (item) => {
-        set((state) => ({
-          chapters: {
-            ...state.chapters,
-            [item.chapterId]: {
-              ...item,
-              localPages: [],
-              downloadedFiles: 0,
-              status: 'downloading',
-              downloadedAt: new Date().toISOString(),
-              sizeBytes: 0,
+        set((state) => {
+          const existing = state.chapters[item.chapterId];
+          const isResuming = existing && (existing.status === 'paused' || existing.status === 'error');
+          return {
+            chapters: {
+              ...state.chapters,
+              [item.chapterId]: {
+                ...existing,
+                ...item,
+                localPages: isResuming ? existing.localPages || [] : [],
+                downloadedFiles: isResuming ? existing.downloadedFiles || 0 : 0,
+                status: 'downloading',
+                downloadedAt: existing?.downloadedAt || new Date().toISOString(),
+                sizeBytes: isResuming ? existing.sizeBytes || 0 : 0,
+              },
             },
-          },
-        }));
+          };
+        });
       },
 
       updateProgress: (chapterId, downloadedFiles, totalFiles, localPages, addedBytes = 0) => {
         set((state) => {
           const existing = state.chapters[chapterId];
           if (!existing) return state;
+          // Guard: if user paused the download, do not overwrite status back to 'downloading'
+          if (existing.status === 'paused') return state;
           return {
             chapters: {
               ...state.chapters,
@@ -80,6 +87,8 @@ export const useDownloadStore = create<DownloadStore>()(
         set((state) => {
           const existing = state.chapters[chapterId];
           if (!existing) return state;
+          // Guard: if user paused the download, do not overwrite status to 'completed'
+          if (existing.status === 'paused') return state;
           return {
             chapters: {
               ...state.chapters,

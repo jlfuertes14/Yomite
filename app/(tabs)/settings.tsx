@@ -704,7 +704,7 @@ export default function SettingsScreen() {
                   { opacity: pressed ? 0.7 : 1 },
                 ]}
               >
-                <Ionicons name="phone-portrait-outline" size={20} color={colors.accent} />
+                <Ionicons name="cloud-download-outline" size={20} color={colors.accent} />
                 <View style={{ flex: 1 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <Text style={[styles.optionLabel, { color: colors.text }]}>
@@ -954,10 +954,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.25)',
     elevation: 3,
   },
   customHexRow: {

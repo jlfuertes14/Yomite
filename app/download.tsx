@@ -4,7 +4,7 @@
  * Features: Realistic Device Mockup, Interactive Demo Tabs, Direct APK Download,
  * QR Code Sideloading, SHA-256 Checksum, and Step-by-Step Installation Guides.
  */
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,8 @@ import {
   Platform,
   useWindowDimensions,
   Linking,
+  Animated,
+  Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -28,39 +30,100 @@ const APP_RELEASE = {
   version: 'v1.2.0',
   buildNumber: '104',
   releaseDate: 'August 2026',
-  fileSize: '28.4 MB',
+  fileSize: '118.86 MB',
   minAndroid: 'Android 8.0 (Oreo) or higher',
   minIos: 'iOS 15.0+ (via Web PWA)',
   sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-  apkDownloadUrl: 'https://github.com/Yomite/manga-app/releases/latest/download/yomite-v1.2.0-release.apk',
+  apkDownloadUrl: 'https://expo.dev/accounts/chiro14/projects/yomite/builds/dadb5395-cdcf-4bed-b288-b27bb3c5d878',
 };
 
 type DemoTab = 'reader' | 'offline' | 'languages' | 'library';
 
+interface BentoAppearCardProps {
+  index: number;
+  isDesktop: boolean;
+  style?: any;
+  children: React.ReactNode;
+}
+
+function BentoAppearCard({ index, isDesktop, style, children }: BentoAppearCardProps) {
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(24)).current;
+  const [hovered, setHovered] = useState(false);
+
+  useEffect(() => {
+    const delay = 80 + index * 70; // Emil Stagger: 70ms step with natural cubic bezier
+    const timer = setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 460,
+          easing: Easing.bezier(0.23, 1, 0.32, 1),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 460,
+          easing: Easing.bezier(0.23, 1, 0.32, 1),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]).start();
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [index]);
+
+  return (
+    <Animated.View
+      style={[
+        styles.featureCard,
+        isDesktop && styles.featureCardDesktop,
+        {
+          opacity: fadeAnim,
+          transform: [{ translateY: slideAnim }],
+        },
+        Platform.OS === 'web' && hovered && styles.featureCardHovered,
+        style,
+      ]}
+      // @ts-ignore
+      onMouseEnter={() => setHovered(true)}
+      // @ts-ignore
+      onMouseLeave={() => setHovered(false)}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
 export default function AppDownloadScreen() {
   const colors = useThemeColors();
   const router = useRouter();
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const isDesktop = windowWidth >= 900;
   const isTablet = windowWidth >= 640 && windowWidth < 900;
+  const isMobile = windowWidth < 640;
+  const phoneStageScale = isDesktop ? 1 : Math.min(1, Math.max(0.70, (windowWidth - 32) / 400));
 
   const [activeTab, setActiveTab] = useState<DemoTab>('reader');
-  const [deviceType, setDeviceType] = useState<'iphone' | 'android'>('iphone');
+  const [hoveredPhoneTab, setHoveredPhoneTab] = useState<DemoTab | null>(null);
+  const [hoveredPill, setHoveredPill] = useState<DemoTab | null>(null);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const transitionTimerRef = useRef<any>(null);
   const [copiedSha, setCopiedSha] = useState(false);
-  const [activeGuideTab, setActiveGuideTab] = useState<'android' | 'ios'>('android');
-  const [attachedMediaUrl, setAttachedMediaUrl] = useState<string | null>(null);
 
-  const handleCopySha = async () => {
+  // Interactive Demo State
+  const [featureReaderMode, setFeatureReaderMode] = useState<'webtoon' | 'rtl' | 'spread'>('webtoon');
+  const [featureLang, setFeatureLang] = useState('en');
+  const [activeGuideTab, setActiveGuideTab] = useState<'android' | 'ios'>('android');
+
+  const handleSelectTab = (tab: DemoTab) => {
+    if (tab === activeTab) return;
     triggerHaptic();
-    try {
-      if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
-        await navigator.clipboard.writeText(APP_RELEASE.sha256);
-      }
-    } catch {
-      // fallback
-    }
-    setCopiedSha(true);
-    setTimeout(() => setCopiedSha(false), 2500);
+    setIsTransitioning(true);
+    setActiveTab(tab);
+    if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
+    transitionTimerRef.current = setTimeout(() => {
+      setIsTransitioning(false);
+    }, 450);
   };
 
   const handleDownloadApk = () => {
@@ -72,10 +135,46 @@ export default function AppDownloadScreen() {
     }
   };
 
+  const handleCopySha = () => {
+    triggerHaptic();
+    if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(APP_RELEASE.sha256);
+      setCopiedSha(true);
+      setTimeout(() => setCopiedSha(false), 2000);
+    }
+  };
+
+const MOCK_PREVIEW_IMAGES: Record<DemoTab, any> = {
+  reader: require('../assets/images/reader_image.png'),
+  offline: require('../assets/images/offline_vault.png'),
+  languages: require('../assets/images/language_options.png'),
+  library: require('../assets/images/cloud_libary.png'),
+};
+
+  const renderMockScreenContent = (tabId: DemoTab) => {
+    const imageSource = MOCK_PREVIEW_IMAGES[tabId];
+    return (
+      <View style={styles.mockScreenImageContainer}>
+        <Image
+          source={imageSource}
+          style={styles.mockScreenImage}
+          contentFit="cover"
+          transition={250}
+        />
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
       {/* Top Navbar */}
-      <View style={[styles.navbar, { borderBottomColor: colors.borderSubtle, backgroundColor: colors.background }]}>
+      <View
+        style={[
+          styles.navbar,
+          { borderBottomColor: colors.borderSubtle, backgroundColor: colors.background },
+          isMobile && { paddingHorizontal: 12, height: 58 },
+        ]}
+      >
         <View style={styles.navLeft}>
           <Pressable
             onPress={() => router.push('/(tabs)' as any)}
@@ -83,27 +182,32 @@ export default function AppDownloadScreen() {
           >
             <Image
               source={require('../assets/images/mascot.png')}
-              style={styles.logoMascot}
+              style={[styles.logoMascot, isMobile && { width: 28, height: 28 }]}
               contentFit="cover"
             />
-            <Text style={[styles.logoText, { color: colors.text }]}>Yomite</Text>
-            <View style={[styles.versionPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-              <Text style={[styles.versionPillText, { color: colors.accent }]}>MOBILE</Text>
-            </View>
+            <Text style={[styles.logoText, { color: colors.text }, isMobile && { fontSize: 18 }]}>Yomite</Text>
+            {!isMobile && (
+              <View style={[styles.versionPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                <Text style={[styles.versionPillText, { color: colors.accent }]}>MOBILE</Text>
+              </View>
+            )}
           </Pressable>
         </View>
 
-        <View style={styles.navRight}>
+        <View style={[styles.navRight, isMobile && { gap: 8 }]}>
           <Pressable
             onPress={() => router.push('/(tabs)' as any)}
             style={({ pressed }) => [
               styles.navLinkBtn,
               { borderColor: colors.border, backgroundColor: colors.surfaceElevated },
+              isMobile && { paddingHorizontal: 10, paddingVertical: 6 },
               pressed && { opacity: 0.8 },
             ]}
           >
-            <Ionicons name="arrow-back" size={15} color={colors.text} />
-            <Text style={[styles.navLinkText, { color: colors.text }]}>Web App</Text>
+            <Ionicons name="arrow-back" size={14} color={colors.text} />
+            <Text style={[styles.navLinkText, { color: colors.text }, isMobile && { fontSize: 12 }]}>
+              {isMobile ? 'Back' : 'Web App'}
+            </Text>
           </Pressable>
 
           <Pressable
@@ -111,11 +215,14 @@ export default function AppDownloadScreen() {
             style={({ pressed }) => [
               styles.navPrimaryBtn,
               { backgroundColor: colors.accent },
+              isMobile && { paddingHorizontal: 12, paddingVertical: 7 },
               pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] },
             ]}
           >
-            <Ionicons name="download-outline" size={16} color="#FFFFFF" />
-            <Text style={styles.navPrimaryBtnText}>Download APK</Text>
+            <Ionicons name="download-outline" size={15} color="#FFFFFF" />
+            <Text style={[styles.navPrimaryBtnText, isMobile && { fontSize: 12 }]}>
+              {isMobile ? 'APK' : 'Download APK'}
+            </Text>
           </Pressable>
         </View>
       </View>
@@ -126,42 +233,43 @@ export default function AppDownloadScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* UNIFIED HERO SECTION: LEFT TEXT & CTA / RIGHT STANDALONE PHONE */}
-        <View style={[styles.unifiedHeroSection, isDesktop && styles.unifiedHeroDesktop]}>
+        <View style={[styles.unifiedHeroSection, isDesktop && [styles.unifiedHeroDesktop, { minHeight: Math.max(windowHeight - 72, 850) }]]}>
           {/* LEFT COLUMN: HERO CONTENT & CTA */}
           <View style={[styles.heroLeftCol, isDesktop && styles.heroLeftColDesktop]}>
-            <View style={styles.heroBadgeRow}>
-              <View style={[styles.liveReleaseBadge, { backgroundColor: colors.accentSubtle, borderColor: colors.accent }]}>
+            <View style={[styles.heroBadgeRow, isMobile && { gap: 6, flexWrap: 'wrap' }]}>
+              <View style={[styles.liveReleaseBadge, { backgroundColor: colors.accentSubtle, borderColor: colors.accent }, isMobile && { paddingHorizontal: 8, paddingVertical: 4 }]}>
                 <View style={[styles.pulseDot, { backgroundColor: colors.accent }]} />
-                <Text style={[styles.liveReleaseBadgeText, { color: colors.accent }]}>
-                  {APP_RELEASE.version} OFFICIAL RELEASE
+                <Text style={[styles.liveReleaseBadgeText, { color: colors.accent }, isMobile && { fontSize: 11 }]}>
+                  {APP_RELEASE.version} {isMobile ? 'RELEASE' : 'OFFICIAL RELEASE'}
                 </Text>
               </View>
-              <View style={[styles.osTag, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-                <Ionicons name="logo-android" size={13} color="#22C55E" />
-                <Text style={[styles.osTagText, { color: colors.textSecondary }]}>Android APK</Text>
+              <View style={[styles.osTag, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }, isMobile && { paddingHorizontal: 8, paddingVertical: 4 }]}>
+                <Ionicons name="logo-android" size={12} color="#22C55E" />
+                <Text style={[styles.osTagText, { color: colors.textSecondary }, isMobile && { fontSize: 11 }]}>Android</Text>
               </View>
-              <View style={[styles.osTag, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-                <Ionicons name="logo-apple" size={13} color={colors.text} />
-                <Text style={[styles.osTagText, { color: colors.textSecondary }]}>iOS PWA</Text>
+              <View style={[styles.osTag, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }, isMobile && { paddingHorizontal: 8, paddingVertical: 4 }]}>
+                <Ionicons name="logo-apple" size={12} color={colors.text} />
+                <Text style={[styles.osTagText, { color: colors.textSecondary }, isMobile && { fontSize: 11 }]}>iOS PWA</Text>
               </View>
             </View>
 
-            <Text style={[styles.heroHeadline, { color: colors.text }]}>
+            <Text style={[styles.heroHeadline, { color: colors.text }, isMobile && { fontSize: 30, lineHeight: 36 }]}>
               The Ultimate Manga Reader.{'\n'}
               <Text style={{ color: colors.accent }}>Pure, Offline, Free.</Text>
             </Text>
 
-            <Text style={[styles.heroSubheadline, { color: colors.textSecondary }]}>
+            <Text style={[styles.heroSubheadline, { color: colors.textSecondary }, isMobile && { fontSize: 14, lineHeight: 20 }]}>
               Experience lightning-fast 60fps reading, 1-click full chapter downloads, 30+ translation languages, and real-time cloud sync across your devices. No paywalls, no popups.
             </Text>
 
             {/* Quick CTA Actions */}
-            <View style={styles.heroCtaRow}>
+            <View style={[styles.heroCtaRow, isMobile && { flexDirection: 'column', gap: 10, width: '100%' }]}>
               <Pressable
                 onPress={handleDownloadApk}
                 style={({ pressed }) => [
                   styles.primaryDownloadBtn,
                   { backgroundColor: colors.accent },
+                  isMobile && { width: '100%', justifyContent: 'center' },
                   pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] },
                 ]}
               >
@@ -177,21 +285,23 @@ export default function AppDownloadScreen() {
                 <Ionicons name="arrow-down-circle" size={22} color="#FFFFFF" style={{ marginLeft: 8 }} />
               </Pressable>
 
-              <Pressable
-                onPress={() => {
-                  triggerHaptic();
-                  const qrElem = document.getElementById('qr-section');
-                  if (qrElem) qrElem.scrollIntoView({ behavior: 'smooth' });
-                }}
-                style={({ pressed }) => [
-                  styles.secondaryQrBtn,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
-                  pressed && { opacity: 0.8 },
-                ]}
-              >
-                <Ionicons name="qr-code-outline" size={20} color={colors.text} />
-                <Text style={[styles.secondaryQrBtnText, { color: colors.text }]}>Scan QR from Phone</Text>
-              </Pressable>
+              {!isMobile && (
+                <Pressable
+                  onPress={() => {
+                    triggerHaptic();
+                    const qrElem = document.getElementById('qr-section');
+                    if (qrElem) qrElem.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  style={({ pressed }) => [
+                    styles.secondaryQrBtn,
+                    { backgroundColor: colors.surface, borderColor: colors.border },
+                    pressed && { opacity: 0.8 },
+                  ]}
+                >
+                  <Ionicons name="qr-code-outline" size={20} color={colors.text} />
+                  <Text style={[styles.secondaryQrBtnText, { color: colors.text }]}>Scan QR from Phone</Text>
+                </Pressable>
+              )}
             </View>
 
             {/* Interactive Feature Demo Pills on the Left */}
@@ -199,7 +309,7 @@ export default function AppDownloadScreen() {
               <Text style={[styles.heroSlideSelectorLabel, { color: colors.textMuted }]}>
                 CLICK TO PREVIEW APP SCREENS
               </Text>
-              <View style={styles.slideSwitcherRow}>
+              <View style={[styles.slideSwitcherRow, isMobile && { flexWrap: 'wrap', gap: 8 }]}>
                 {[
                   { id: 'reader' as const, num: '01', title: '60fps Reader', icon: 'book-outline' as const },
                   { id: 'offline' as const, num: '02', title: 'Offline Vault', icon: 'download-outline' as const },
@@ -207,30 +317,47 @@ export default function AppDownloadScreen() {
                   { id: 'library' as const, num: '04', title: 'Cloud Library', icon: 'sync-outline' as const },
                 ].map((slide) => {
                   const isSelected = activeTab === slide.id;
+                  const isHovered = hoveredPill === slide.id;
                   return (
                     <Pressable
                       key={slide.id}
                       onPress={() => {
-                        triggerHaptic();
-                        setActiveTab(slide.id);
+                        handleSelectTab(slide.id);
                       }}
+                      onHoverIn={() => setHoveredPill(slide.id)}
+                      onHoverOut={() => setHoveredPill(null)}
                       style={[
                         styles.slideIndicatorPill,
+                        isMobile && { flex: 1, minWidth: '45%' },
                         {
-                          backgroundColor: isSelected ? colors.surfaceElevated : 'transparent',
-                          borderColor: isSelected ? colors.accent : colors.borderSubtle,
+                          backgroundColor: isSelected
+                            ? colors.surfaceElevated
+                            : isHovered
+                            ? 'rgba(244, 63, 94, 0.08)'
+                            : 'transparent',
+                          borderColor: isSelected
+                            ? colors.accent
+                            : isHovered
+                            ? colors.accent
+                            : colors.borderSubtle,
+                          transform: isHovered && !isSelected ? [{ translateY: -2 }, { scale: 1.04 }] : [{ scale: 1 }],
+                        },
+                        Platform.OS === 'web' && {
+                          // @ts-ignore
+                          transition: 'all 0.25s cubic-bezier(0.23, 1, 0.32, 1)',
+                          cursor: 'pointer',
                         },
                       ]}
                     >
-                      <View style={[styles.slideDot, { backgroundColor: isSelected ? colors.accent : colors.border }]} />
-                      <Text style={[styles.slideNumberText, { color: isSelected ? colors.accent : colors.textMuted }]}>
+                      <View style={[styles.slideDot, { backgroundColor: isSelected || isHovered ? colors.accent : colors.border }]} />
+                      <Text style={[styles.slideNumberText, { color: isSelected || isHovered ? colors.accent : colors.textMuted }]}>
                         {slide.num}
                       </Text>
                       <Text
                         style={[
                           styles.slideTitleText,
                           {
-                            color: isSelected ? colors.text : colors.textSecondary,
+                            color: isSelected || isHovered ? colors.text : colors.textSecondary,
                             fontWeight: isSelected ? Typography.weights.bold : Typography.weights.medium,
                           },
                         ]}
@@ -242,6 +369,59 @@ export default function AppDownloadScreen() {
                 })}
               </View>
             </View>
+
+            {/* Trust Matrix & Feature Highlights in Hero */}
+            <View style={[styles.heroTrustGrid, isMobile && { flexDirection: 'column', gap: 8 }]}>
+              <View style={[styles.heroTrustCard, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, isMobile && { width: '100%' }]}>
+                <View style={[styles.heroTrustIconWrap, { backgroundColor: 'rgba(244, 63, 94, 0.12)' }]}>
+                  <Ionicons name="shield-checkmark" size={16} color="#F43F5E" />
+                </View>
+                <View style={styles.heroTrustContent}>
+                  <Text style={[styles.heroTrustTitle, { color: colors.text }]}>100% Free Forever</Text>
+                  <Text style={[styles.heroTrustSub, { color: colors.textSecondary }]}>Zero ads & popups</Text>
+                </View>
+              </View>
+
+              <View style={[styles.heroTrustCard, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, isMobile && { width: '100%' }]}>
+                <View style={[styles.heroTrustIconWrap, { backgroundColor: 'rgba(16, 185, 129, 0.12)' }]}>
+                  <Ionicons name="flash" size={16} color="#10B981" />
+                </View>
+                <View style={styles.heroTrustContent}>
+                  <Text style={[styles.heroTrustTitle, { color: colors.text }]}>Instant Startup</Text>
+                  <Text style={[styles.heroTrustSub, { color: colors.textSecondary }]}>Sub-second boot & cache</Text>
+                </View>
+              </View>
+
+              <View style={[styles.heroTrustCard, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, isMobile && { width: '100%' }]}>
+                <View style={[styles.heroTrustIconWrap, { backgroundColor: 'rgba(59, 130, 246, 0.12)' }]}>
+                  <Ionicons name="sync" size={16} color="#3B82F6" />
+                </View>
+                <View style={styles.heroTrustContent}>
+                  <Text style={[styles.heroTrustTitle, { color: colors.text }]}>Universal Sync</Text>
+                  <Text style={[styles.heroTrustSub, { color: colors.textSecondary }]}>Seamless Mobile ↔ Web</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Architecture & Compatibility Badges Shelf */}
+            <View style={[styles.heroArchRow, isMobile && { flexWrap: 'wrap', gap: 6 }]}>
+              <View style={[styles.heroArchBadge, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}>
+                <Ionicons name="hardware-chip-outline" size={12} color={colors.textSecondary} />
+                <Text style={[styles.heroArchText, { color: colors.textSecondary }]}>ARM64 / x86_64</Text>
+              </View>
+              <View style={[styles.heroArchBadge, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}>
+                <Ionicons name="phone-portrait-outline" size={12} color={colors.textSecondary} />
+                <Text style={[styles.heroArchText, { color: colors.textSecondary }]}>Android 8.0 - 15+</Text>
+              </View>
+              <View style={[styles.heroArchBadge, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}>
+                <Ionicons name="tablet-landscape-outline" size={12} color={colors.textSecondary} />
+                <Text style={[styles.heroArchText, { color: colors.textSecondary }]}>Tablets & Foldables</Text>
+              </View>
+              <View style={[styles.heroArchBadge, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}>
+                <Ionicons name="checkmark-done" size={12} color="#10B981" />
+                <Text style={[styles.heroArchText, { color: '#10B981' }]}>Clean APK (0 Trackers)</Text>
+              </View>
+            </View>
           </View>
 
           {/* RIGHT COLUMN: STANDALONE PHONE SHOWCASE */}
@@ -249,382 +429,476 @@ export default function AppDownloadScreen() {
             {/* Ambient Glow Backdrop */}
             <View style={styles.ambientGlow} />
 
-            {/* Floating Device Type Pill Switcher */}
-            <View style={styles.floatingDeviceToggleWrap}>
-              <View style={[styles.floatingDeviceToggle, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-                <Pressable
-                  onPress={() => {
-                    triggerHaptic();
-                    setDeviceType('iphone');
-                  }}
-                  style={[
-                    styles.deviceTogglePill,
-                    deviceType === 'iphone' && { backgroundColor: colors.surface, borderColor: colors.border },
-                  ]}
-                >
-                  <Ionicons name="logo-apple" size={14} color={deviceType === 'iphone' ? colors.text : colors.textMuted} />
-                  <Text style={[styles.deviceTogglePillText, { color: deviceType === 'iphone' ? colors.text : colors.textMuted }]}>
-                    iPhone 16 Pro
-                  </Text>
-                </Pressable>
+            {/* 3D Stacked Coverflow Stage with Interactive Hover & Tap Controls */}
+            <View
+              style={[
+                styles.phoneCarouselStage,
+                isDesktop && styles.phoneCarouselStageDesktop,
+                !isDesktop && {
+                  transform: [{ scale: phoneStageScale }],
+                  marginVertical: isMobile ? -Math.round((1 - phoneStageScale) * 260) : 0,
+                },
+              ]}
+            >
+              {/* 4 Stacked Phones in 3D Space */}
+              {(['reader', 'offline', 'languages', 'library'] as DemoTab[]).map((tabId, i) => {
+                const tabs: DemoTab[] = ['reader', 'offline', 'languages', 'library'];
+                const activeIdx = tabs.indexOf(activeTab);
+                const diff = (i - activeIdx + 4) % 4;
+                const isCenter = diff === 0;
+                const isRight = diff === 1;
+                const isBack = diff === 2;
+                const isLeft = diff === 3;
+                const isHovered = !isTransitioning && hoveredPhoneTab === tabId && !isCenter;
 
-                <Pressable
-                  onPress={() => {
-                    triggerHaptic();
-                    setDeviceType('android');
-                  }}
-                  style={[
-                    styles.deviceTogglePill,
-                    deviceType === 'android' && { backgroundColor: colors.surface, borderColor: colors.border },
-                  ]}
-                >
-                  <Ionicons name="logo-android" size={14} color={deviceType === 'android' ? '#22C55E' : colors.textMuted} />
-                  <Text style={[styles.deviceTogglePillText, { color: deviceType === 'android' ? colors.text : colors.textMuted }]}>
-                    Galaxy Ultra
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
+                // 3D Transforms based on position in stack & hover state
+                let transformStyle: any;
+                let zIndex = 1;
+                let opacity = 1;
+                let borderColor = isHovered ? '#F43F5E' : '#27272A';
 
-            {/* Standalone Phone Stage with Left/Right Carousel Controls */}
-            <View style={styles.phoneCarouselStage}>
-              {/* Left Nav Arrow Button */}
-              <Pressable
-                onPress={() => {
-                  triggerHaptic();
-                  const tabs: DemoTab[] = ['reader', 'offline', 'languages', 'library'];
-                  const currentIndex = tabs.indexOf(activeTab);
-                  const prevIndex = (currentIndex - 1 + tabs.length) % tabs.length;
-                  setActiveTab(tabs[prevIndex]);
-                }}
-                style={({ pressed }) => [
-                  styles.navArrowBtn,
-                  styles.navArrowLeft,
-                  { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
-                  pressed && { opacity: 0.7, transform: [{ scale: 0.94 }] },
-                ]}
-                accessibilityLabel="Previous feature demo"
-              >
-                <Ionicons name="chevron-back" size={20} color={colors.text} />
-              </Pressable>
+                if (isCenter) {
+                  transformStyle = [{ translateX: 0 }, { translateY: 0 }, { scale: 1 }, { rotate: '0deg' }];
+                  zIndex = 10;
+                  opacity = 1;
+                  borderColor = '#27272A';
+                } else if (isRight) {
+                  transformStyle = isHovered
+                    ? [
+                        { translateX: isDesktop ? 138 : isMobile ? 54 : 74 },
+                        { translateY: isDesktop ? 10 : 4 },
+                        { scale: isDesktop ? 0.90 : 0.85 },
+                        { rotate: '8deg' },
+                      ]
+                    : [
+                        { translateX: isDesktop ? 125 : isMobile ? 48 : 65 },
+                        { translateY: isDesktop ? 22 : 12 },
+                        { scale: isDesktop ? 0.86 : 0.82 },
+                        { rotate: '11deg' },
+                      ];
+                  zIndex = isHovered ? 8 : 6;
+                  opacity = isHovered ? 1 : 0.85;
+                } else if (isLeft) {
+                  transformStyle = isHovered
+                    ? [
+                        { translateX: isDesktop ? -138 : isMobile ? -54 : -74 },
+                        { translateY: isDesktop ? 10 : 4 },
+                        { scale: isDesktop ? 0.90 : 0.85 },
+                        { rotate: '-8deg' },
+                      ]
+                    : [
+                        { translateX: isDesktop ? -125 : isMobile ? -48 : -65 },
+                        { translateY: isDesktop ? 22 : 12 },
+                        { scale: isDesktop ? 0.86 : 0.82 },
+                        { rotate: '-11deg' },
+                      ];
+                  zIndex = isHovered ? 8 : 6;
+                  opacity = isHovered ? 1 : 0.85;
+                } else {
+                  // isBack (diff === 2)
+                  transformStyle = isHovered
+                    ? [
+                        { translateX: 0 },
+                        { translateY: isDesktop ? -38 : -20 },
+                        { scale: isDesktop ? 0.82 : 0.78 },
+                        { rotate: '0deg' },
+                      ]
+                    : [
+                        { translateX: 0 },
+                        { translateY: isDesktop ? -26 : -14 },
+                        { scale: isDesktop ? 0.76 : 0.72 },
+                        { rotate: '0deg' },
+                      ];
+                  zIndex = isHovered ? 5 : 3;
+                  opacity = isHovered ? 0.95 : 0.65;
+                }
 
-              {/* Standalone Phone Frame */}
-              <View
-                style={[
-                  styles.standalonePhoneShell,
-                  deviceType === 'iphone' ? styles.iphoneShell : styles.androidShell,
-                ]}
-              >
-                {/* Tap Left / Right Overlay for intuitive swipe/slide navigation */}
-                <Pressable
-                  onPress={() => {
-                    triggerHaptic();
-                    const tabs: DemoTab[] = ['reader', 'offline', 'languages', 'library'];
-                    const currentIndex = tabs.indexOf(activeTab);
-                    const prevIndex = (currentIndex - 1 + tabs.length) % tabs.length;
-                    setActiveTab(tabs[prevIndex]);
-                  }}
-                  style={styles.phoneTapLeftHitbox}
-                />
-                <Pressable
-                  onPress={() => {
-                    triggerHaptic();
-                    const tabs: DemoTab[] = ['reader', 'offline', 'languages', 'library'];
-                    const currentIndex = tabs.indexOf(activeTab);
-                    const nextIndex = (currentIndex + 1) % tabs.length;
-                    setActiveTab(tabs[nextIndex]);
-                  }}
-                  style={styles.phoneTapRightHitbox}
-                />
-
-                {/* Dynamic Island / Punch Hole */}
-                {deviceType === 'iphone' ? (
-                  <View style={styles.dynamicIsland}>
-                    <View style={styles.dynamicIslandSensor} />
-                    <View style={styles.dynamicIslandCamera} />
-                  </View>
-                ) : (
-                  <View style={styles.androidCameraPunch} />
-                )}
-
-                {/* Realistic Status Bar */}
-                <View style={styles.mockupStatusBar}>
-                  <Text style={styles.mockupStatusTime}>9:41</Text>
-                  <View style={styles.mockupStatusIcons}>
-                    <Ionicons name="cellular" size={11} color="#FAFAFA" />
-                    <Ionicons name="wifi" size={11} color="#FAFAFA" />
-                    <Ionicons name="battery-full" size={13} color="#FAFAFA" />
-                  </View>
-                </View>
-
-                {/* Phone Screen Animated Content */}
-                <View style={styles.mockupScreenInner}>
-                  {attachedMediaUrl ? (
-                    <Image source={{ uri: attachedMediaUrl }} style={styles.mockupMediaImage} contentFit="cover" />
-                  ) : activeTab === 'reader' ? (
-                    /* ─── 1. 60FPS ULTRA-SMOOTH READER DEMO ─── */
-                    <View style={styles.mockScreenReader}>
-                      {/* Top Reader HUD */}
-                      <View style={styles.mockReaderHeader}>
-                        <Ionicons name="arrow-back" size={18} color="#FAFAFA" />
-                        <View style={{ alignItems: 'center' }}>
-                          <Text style={styles.mockReaderTitle}>Jujutsu Kaisen</Text>
-                          <Text style={styles.mockReaderSubTitle}>Chapter 268 • Page 14</Text>
-                        </View>
-                        <Ionicons name="options-outline" size={18} color="#FAFAFA" />
-                      </View>
-
-                      {/* Animated Manga Webtoon Strip */}
-                      <View style={styles.mockReaderArtStrip}>
-                        <View style={styles.mockMangaPanelTop}>
-                          <View style={styles.mockActionBadge}>
-                            <Ionicons name="flash" size={12} color="#F43F5E" />
-                            <Text style={styles.mockActionBadgeText}>60fps Hardware Accelerated</Text>
-                          </View>
-                          <View style={styles.mockPanelLines}>
-                            <View style={[styles.mockPanelLine, { width: '85%' }]} />
-                            <View style={[styles.mockPanelLine, { width: '65%' }]} />
-                          </View>
-                        </View>
-
-                        <View style={styles.mockMangaPanelBottom}>
-                          <View style={styles.mockDialogueBubble}>
-                            <Text style={styles.mockDialogueText}>"This is where the real domain expansion begins..."</Text>
-                          </View>
-                          <View style={styles.mockGesturePill}>
-                            <Ionicons name="hand-left-outline" size={12} color="#A1A1AA" />
-                            <Text style={styles.mockGesturePillText}>Double Tap to Zoom</Text>
-                          </View>
-                        </View>
-                      </View>
-
-                      {/* Bottom Reader Navigation HUD */}
-                      <View style={styles.mockReaderFooter}>
-                        <View style={styles.mockReaderFooterRow}>
-                          <Text style={styles.mockReaderFooterPage}>14 / 24</Text>
-                          <View style={styles.mockPillBadge}>
-                            <Text style={styles.mockPillBadgeText}>Webtoon Strip</Text>
-                          </View>
-                        </View>
-                        <View style={styles.mockReaderProgress}>
-                          <View style={[styles.mockReaderProgressBar, { width: '58%' }]} />
-                        </View>
-                      </View>
+                return (
+                  <Pressable
+                    key={tabId}
+                    disabled={isCenter || isTransitioning}
+                    onPress={() => {
+                      handleSelectTab(tabId);
+                    }}
+                    onHoverIn={() => {
+                      if (!isTransitioning && !isCenter) {
+                        setHoveredPhoneTab(tabId);
+                      }
+                    }}
+                    onHoverOut={() => {
+                      setHoveredPhoneTab(null);
+                    }}
+                    style={[
+                      styles.standalonePhoneShell,
+                      styles.iphoneShell,
+                      {
+                        zIndex,
+                        opacity,
+                        borderColor,
+                        transform: transformStyle,
+                      },
+                      isHovered && {
+                        boxShadow: '0 0 36px rgba(244, 63, 94, 0.5)',
+                      },
+                      Platform.OS === 'web' && {
+                        // @ts-ignore
+                        transition: 'all 0.35s cubic-bezier(0.23, 1, 0.32, 1)',
+                        cursor: isCenter ? 'default' : 'pointer',
+                      },
+                    ]}
+                  >
+                    {/* iPhone 16 Dynamic Island Notch */}
+                    <View style={styles.dynamicIsland}>
+                      <View style={styles.dynamicIslandSensor} />
+                      <View style={styles.dynamicIslandCamera} />
                     </View>
-                  ) : activeTab === 'offline' ? (
-                    /* ─── 2. OFFLINE CHAPTER VAULT DEMO ─── */
-                    <View style={styles.mockScreenOffline}>
-                      <View style={styles.mockScreenHeaderSimple}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <Text style={styles.mockScreenHeading}>Offline Vault</Text>
-                          <View style={styles.mockStorageBadge}>
-                            <Ionicons name="cloud-done" size={12} color="#10B981" />
-                            <Text style={styles.mockStorageBadgeText}>2.4 GB</Text>
-                          </View>
-                        </View>
-                        <Text style={styles.mockScreenSub}>Downloaded for airplane & subway reading</Text>
-                      </View>
 
-                      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-                        {/* Active Downloading Item with Animated Progress */}
-                        <View style={[styles.mockDownloadCard, styles.mockDownloadCardActive]}>
-                          <View style={styles.mockDownloadCardHeader}>
-                            <View style={styles.mockActivePulseDot} />
-                            <Text style={styles.mockDownloadCardTitle} numberOfLines={1}>Solo Leveling: Ragnarok</Text>
-                            <Text style={styles.mockDownloadPercent}>84%</Text>
-                          </View>
-                          <Text style={styles.mockDownloadCardSub}>Downloading Ch. 15 of 20 • 24.8 MB/s</Text>
-                          <View style={styles.mockDownloadProgressBar}>
-                            <View style={[styles.mockDownloadProgressFill, { width: '84%' }]} />
-                          </View>
-                        </View>
-
-                        {/* Completed Downloads */}
-                        {[
-                          { title: 'Chainsaw Man', ch: 'Ch. 175 - 180 (6 chapters)', size: '142 MB', date: 'Downloaded 2h ago' },
-                          { title: 'One Piece', ch: 'Ch. 1120 - 1124 (5 chapters)', size: '110 MB', date: 'Downloaded yesterday' },
-                          { title: 'Frieren: Beyond Journey', ch: 'Ch. 130 - 132 (3 chapters)', size: '68 MB', date: 'Downloaded 3d ago' },
-                        ].map((item, i) => (
-                          <View key={i} style={styles.mockDownloadCard}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                              <Ionicons name="checkmark-circle" size={18} color="#10B981" />
-                              <View style={{ flex: 1 }}>
-                                <Text style={styles.mockDownloadCardTitle}>{item.title}</Text>
-                                <Text style={styles.mockDownloadCardSub}>{item.ch}</Text>
-                              </View>
-                              <Text style={styles.mockDownloadCardSize}>{item.size}</Text>
-                            </View>
-                          </View>
-                        ))}
-                      </ScrollView>
+                    {/* Phone Screen Mock Content */}
+                    <View style={styles.mockupScreenInner}>
+                      {renderMockScreenContent(tabId)}
                     </View>
-                  ) : activeTab === 'languages' ? (
-                    /* ─── 3. 30+ MULTI-LANGUAGE TRANSLATIONS DEMO ─── */
-                    <View style={styles.mockScreenLanguages}>
-                      <View style={styles.mockScreenHeaderSimple}>
-                        <Text style={styles.mockScreenHeading}>Chapter Translations</Text>
-                        <Text style={styles.mockScreenSub}>Select translation team & language:</Text>
-                      </View>
-                      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-                        {[
-                          { flag: 'https://flagcdn.com/w40/us.png', name: 'English', code: 'EN', active: true, count: '268 Ch.' },
-                          { flag: 'https://flagcdn.com/w40/id.png', name: 'Indonesian', code: 'ID', active: false, count: '268 Ch.' },
-                          { flag: 'https://flagcdn.com/w40/mx.png', name: 'Spanish (LATAM)', code: 'ES-LA', active: false, count: '265 Ch.' },
-                          { flag: 'https://flagcdn.com/w40/br.png', name: 'Portuguese (BR)', code: 'PT-BR', active: false, count: '260 Ch.' },
-                          { flag: 'https://flagcdn.com/w40/fr.png', name: 'French', code: 'FR', active: false, count: '258 Ch.' },
-                          { flag: 'https://flagcdn.com/w40/jp.png', name: 'Japanese (Raw)', code: 'JA', active: false, count: '268 Ch.' },
-                          { flag: 'https://flagcdn.com/w40/de.png', name: 'German', code: 'DE', active: false, count: '240 Ch.' },
-                        ].map((lang, idx) => (
-                          <View
-                            key={idx}
-                            style={[
-                              styles.mockLangRow,
-                              lang.active && { backgroundColor: 'rgba(244,63,94,0.18)', borderColor: '#F43F5E' },
-                            ]}
-                          >
-                            <Image source={{ uri: lang.flag }} style={styles.mockLangFlag} contentFit="cover" />
-                            <View style={{ flex: 1 }}>
-                              <Text style={[styles.mockLangName, lang.active && { color: '#F43F5E', fontWeight: 'bold' }]}>
-                                {lang.name}
-                              </Text>
-                              <Text style={styles.mockLangCount}>{lang.count}</Text>
-                            </View>
-                            <View style={styles.mockLangCode}>
-                              <Text style={styles.mockLangCodeText}>{lang.code}</Text>
-                            </View>
-                            {lang.active && <Ionicons name="checkmark-circle" size={16} color="#F43F5E" style={{ marginLeft: 4 }} />}
-                          </View>
-                        ))}
-                      </ScrollView>
-                    </View>
-                  ) : (
-                    /* ─── 4. SMART CLOUD LIBRARY & BOOKMARKS DEMO ─── */
-                    <View style={styles.mockScreenLibrary}>
-                      <View style={styles.mockScreenHeaderSimple}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <Text style={styles.mockScreenHeading}>My Library</Text>
-                          <View style={styles.mockSyncBadgePill}>
-                            <View style={styles.mockSyncGreenDot} />
-                            <Text style={styles.mockSyncBadgePillText}>Cloud Synced</Text>
-                          </View>
-                        </View>
-                        <View style={styles.mockCategoryPills}>
-                          <View style={[styles.mockCatPill, styles.mockCatPillActive]}>
-                            <Text style={styles.mockCatPillActiveText}>Reading (18)</Text>
-                          </View>
-                          <View style={styles.mockCatPill}>
-                            <Text style={styles.mockCatPillText}>Plan to Read</Text>
-                          </View>
-                          <View style={styles.mockCatPill}>
-                            <Text style={styles.mockCatPillText}>Completed</Text>
-                          </View>
+
+                    {/* Bottom Home Indicator */}
+                    <View style={styles.homeIndicator} />
+
+                    {/* Click-to-bring-to-front Overlay on Side/Back Phones */}
+                    {!isCenter && (
+                      <View style={styles.stackedPhoneDimOverlay}>
+                        <View
+                          style={[
+                            styles.stackedPhoneBadge,
+                            {
+                              backgroundColor: isHovered ? colors.surface : colors.surfaceElevated,
+                              borderColor: isHovered ? colors.accent : colors.border,
+                            },
+                          ]}
+                        >
+                          <Ionicons
+                            name={
+                              tabId === 'reader'
+                                ? 'book-outline'
+                                : tabId === 'offline'
+                                ? 'download-outline'
+                                : tabId === 'languages'
+                                ? 'globe-outline'
+                                : 'sync-outline'
+                            }
+                            size={12}
+                            color={colors.accent}
+                          />
+                          <Text style={[styles.stackedPhoneBadgeText, { color: colors.text }]}>
+                            {tabId === 'reader'
+                              ? '60fps Reader'
+                              : tabId === 'offline'
+                              ? 'Offline Vault'
+                              : tabId === 'languages'
+                              ? '30+ Languages'
+                              : 'Cloud Library'}
+                          </Text>
                         </View>
                       </View>
-
-                      <View style={styles.mockLibraryGrid}>
-                        {[
-                          { title: 'Frieren', progress: 'Ch. 132', unread: 3, accent: '#F43F5E' },
-                          { title: 'Berserk', progress: 'Ch. 376', unread: 0, accent: '#6366F1' },
-                          { title: 'Blue Lock', progress: 'Ch. 270', unread: 1, accent: '#10B981' },
-                          { title: 'Dandadan', progress: 'Ch. 165', unread: 4, accent: '#F59E0B' },
-                          { title: 'Chainsaw Man', progress: 'Ch. 175', unread: 0, accent: '#EC4899' },
-                          { title: 'Solo Leveling', progress: 'Ch. 200', unread: 0, accent: '#3B82F6' },
-                        ].map((card, i) => (
-                          <View key={i} style={styles.mockLibraryCard}>
-                            <View style={[styles.mockLibraryCardCover, { borderColor: card.unread > 0 ? card.accent : '#27272A' }]}>
-                              <Ionicons name="book" size={20} color={card.accent} />
-                              {card.unread > 0 && (
-                                <View style={[styles.mockUnreadBadge, { backgroundColor: card.accent }]}>
-                                  <Text style={styles.mockUnreadBadgeText}>+{card.unread}</Text>
-                                </View>
-                              )}
-                            </View>
-                            <Text style={styles.mockLibraryCardTitle} numberOfLines={1}>{card.title}</Text>
-                            <Text style={styles.mockLibraryCardProgress}>{card.progress}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    </View>
-                  )}
-                </View>
-
-                {/* Bottom Home Indicator */}
-                <View style={styles.homeIndicator} />
-              </View>
-
-              {/* Right Nav Arrow Button */}
-              <Pressable
-                onPress={() => {
-                  triggerHaptic();
-                  const tabs: DemoTab[] = ['reader', 'offline', 'languages', 'library'];
-                  const currentIndex = tabs.indexOf(activeTab);
-                  const nextIndex = (currentIndex + 1) % tabs.length;
-                  setActiveTab(tabs[nextIndex]);
-                }}
-                style={({ pressed }) => [
-                  styles.navArrowBtn,
-                  styles.navArrowRight,
-                  { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
-                  pressed && { opacity: 0.7, transform: [{ scale: 0.94 }] },
-                ]}
-                accessibilityLabel="Next feature demo"
-              >
-                <Ionicons name="chevron-forward" size={20} color={colors.text} />
-              </Pressable>
+                    )}
+                  </Pressable>
+                );
+              })}
             </View>
           </View>
         </View>
 
-        {/* FEATURE MATRIX (4 Asymmetric High-Craft Cards) */}
-        <View style={styles.featuresSection}>
-          <Text style={[styles.featuresPretitle, { color: colors.accent }]}>ENGINEERED FOR MANGA LOVERS</Text>
-          <Text style={[styles.featuresTitle, { color: colors.text }]}>Why Yomite Mobile is Different</Text>
+        {/* FEATURE MATRIX (Bento 2x2 High-Craft Interactive Showcase) */}
+        <View id="features-section" style={styles.featuresSection}>
+          <View style={styles.featuresHeaderRow}>
+            <View>
+              <Text style={[styles.featuresPretitle, { color: colors.accent }]}>ENGINEERED FOR MANGA PURISTS</Text>
+              <Text style={[styles.featuresTitle, { color: colors.text }]}>Why Yomite Mobile is Different</Text>
+            </View>
+            <View style={[styles.bentoMatrixBadge, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+              <View style={[styles.pulseDotGreen, { backgroundColor: '#10B981' }]} />
+              <Text style={[styles.bentoMatrixBadgeText, { color: colors.textSecondary }]}>NATIVE ARCHITECTURE</Text>
+            </View>
+          </View>
 
           <View style={[styles.featureGrid, isDesktop && styles.featureGridDesktop]}>
-            <View style={[styles.featureCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <View style={[styles.featureIconWrap, { backgroundColor: colors.surfaceElevated }]}>
-                <Ionicons name="hardware-chip-outline" size={24} color={colors.accent} />
+            {/* ── CARD 1: 60FPS GPU ENGINE ── */}
+            <BentoAppearCard index={0} isDesktop={isDesktop} style={{ backgroundColor: colors.surface, borderColor: colors.border }}>
+              <View style={styles.featureCardTopRow}>
+                <View style={[styles.featureIconWrap, { backgroundColor: 'rgba(244, 63, 94, 0.12)' }]}>
+                  <Ionicons name="hardware-chip-outline" size={22} color="#F43F5E" />
+                </View>
+                <View style={[styles.featureMetricPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                  <View style={[styles.pulseDotGreen, { backgroundColor: '#10B981' }]} />
+                  <Text style={[styles.featureMetricPillText, { color: '#10B981' }]}>60.0 FPS • 16.6ms</Text>
+                </View>
               </View>
+
               <Text style={[styles.featureCardTitle, { color: colors.text }]}>60fps GPU-Accelerated Engine</Text>
               <Text style={[styles.featureCardDesc, { color: colors.textSecondary }]}>
-                Smooth continuous long-strip webtoon scrolling, authentic right-to-left manga page-turn physics, and dual-page landscape mode.
+                Smooth continuous long-strip webtoon scrolling, authentic right-to-left manga page-turn physics, and dual-page landscape mode with zero stutter.
               </Text>
-            </View>
 
-            <View style={[styles.featureCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <View style={[styles.featureIconWrap, { backgroundColor: colors.surfaceElevated }]}>
-                <Ionicons name="airplane-outline" size={24} color="#10B981" />
+              {/* Mini Interactive Demo Widget */}
+              <View style={[styles.miniWidgetBox, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}>
+                <View style={styles.miniWidgetHeader}>
+                  <Text style={[styles.miniWidgetLabel, { color: colors.textMuted }]}>READER ENGINE PREVIEW</Text>
+                  <Text style={[styles.miniWidgetStatus, { color: '#F43F5E' }]}>GPU ACTIVE</Text>
+                </View>
+
+                <View style={styles.miniModeSwitchRow}>
+                  {[
+                    { id: 'webtoon' as const, label: 'Webtoon', icon: 'reorder-two-outline' as const },
+                    { id: 'rtl' as const, label: 'RTL Manga', icon: 'arrow-back-outline' as const },
+                    { id: 'spread' as const, label: 'Dual Spread', icon: 'book-outline' as const },
+                  ].map((mode) => {
+                    const isActive = featureReaderMode === mode.id;
+                    return (
+                      <Pressable
+                        key={mode.id}
+                        onPress={() => {
+                          triggerHaptic();
+                          setFeatureReaderMode(mode.id);
+                        }}
+                        style={[
+                          styles.miniModePill,
+                          {
+                            backgroundColor: isActive ? '#F43F5E20' : colors.surface,
+                            borderColor: isActive ? '#F43F5E' : colors.border,
+                          },
+                        ]}
+                      >
+                        <Ionicons name={mode.icon} size={12} color={isActive ? '#F43F5E' : colors.textMuted} />
+                        <Text style={[styles.miniModePillText, { color: isActive ? colors.text : colors.textSecondary }]}>
+                          {mode.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <View style={styles.fpsSimCanvas}>
+                  <View style={styles.fpsSimBarGroup}>
+                    {[45, 60, 58, 60, 60, 59, 60, 60, 60, 59, 60, 60, 60, 60, 60].map((val, i) => (
+                      <View
+                        key={i}
+                        style={[
+                          styles.fpsSimBar,
+                          {
+                            height: (val / 60) * 18,
+                            backgroundColor: val >= 58 ? '#10B981' : '#F59E0B',
+                          },
+                        ]}
+                      />
+                    ))}
+                  </View>
+                  <Text style={[styles.fpsSimNote, { color: colors.textMuted }]}>
+                    Zero frame drops during rapid multi-touch drag & pinch zoom
+                  </Text>
+                </View>
               </View>
+            </BentoAppearCard>
+
+            {/* ── CARD 2: TRUE OFFLINE CHAPTER VAULT ── */}
+            <BentoAppearCard index={1} isDesktop={isDesktop} style={{ backgroundColor: colors.surface, borderColor: colors.border }}>
+              <View style={styles.featureCardTopRow}>
+                <View style={[styles.featureIconWrap, { backgroundColor: 'rgba(16, 185, 129, 0.12)' }]}>
+                  <Ionicons name="airplane-outline" size={22} color="#10B981" />
+                </View>
+                <View style={[styles.featureMetricPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                  <Ionicons name="shield-checkmark" size={12} color="#10B981" />
+                  <Text style={[styles.featureMetricPillText, { color: '#10B981' }]}>100% Offline Disk</Text>
+                </View>
+              </View>
+
               <Text style={[styles.featureCardTitle, { color: colors.text }]}>True Offline Chapter Vault</Text>
               <Text style={[styles.featureCardDesc, { color: colors.textSecondary }]}>
-                Batch-download entire story arcs in one tap. Encrypted local storage lets you read uninterrupted on flights, subways, and off-grid trips.
+                Batch-download entire story arcs in one tap. Encrypted local disk storage lets you read uninterrupted on flights, subways, and off-grid trips.
               </Text>
-            </View>
 
-            <View style={[styles.featureCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <View style={[styles.featureIconWrap, { backgroundColor: colors.surfaceElevated }]}>
-                <Ionicons name="language-outline" size={24} color="#3B82F6" />
+              {/* Mini Interactive Demo Widget */}
+              <View style={[styles.miniWidgetBox, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}>
+                <View style={styles.miniWidgetHeader}>
+                  <Text style={[styles.miniWidgetLabel, { color: colors.textMuted }]}>ACTIVE DOWNLOAD QUEUE</Text>
+                  <Text style={[styles.miniWidgetStatus, { color: '#10B981' }]}>24.8 MB/s</Text>
+                </View>
+
+                <View style={styles.vaultProgressBox}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.vaultMangaTitle, { color: colors.text }]} numberOfLines={1}>
+                      Solo Leveling: Ragnarok
+                    </Text>
+                    <Text style={[styles.vaultPercentText, { color: '#10B981' }]}>84%</Text>
+                  </View>
+                  <Text style={[styles.vaultChapterSub, { color: colors.textMuted }]}>
+                    Ch. 1 - 20 (Batch Arc) • 24.8 MB/s
+                  </Text>
+                  <View style={[styles.vaultProgressBarBg, { backgroundColor: colors.surface }]}>
+                    <View style={[styles.vaultProgressBarFill, { width: '84%', backgroundColor: '#10B981' }]} />
+                  </View>
+                </View>
+
+                <View style={styles.vaultTagsRow}>
+                  <View style={[styles.vaultTagPill, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
+                    <Ionicons name="airplane" size={11} color="#10B981" />
+                    <Text style={[styles.vaultTagPillText, { color: colors.textSecondary }]}>Airplane Ready</Text>
+                  </View>
+                  <View style={[styles.vaultTagPill, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
+                    <Ionicons name="lock-closed" size={11} color="#10B981" />
+                    <Text style={[styles.vaultTagPillText, { color: colors.textSecondary }]}>Encrypted Disk</Text>
+                  </View>
+                  <View style={[styles.vaultTagPill, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
+                    <Ionicons name="flash" size={11} color="#10B981" />
+                    <Text style={[styles.vaultTagPillText, { color: colors.textSecondary }]}>Zero Buffering</Text>
+                  </View>
+                </View>
               </View>
-              <Text style={[styles.featureCardTitle, { color: colors.text }]}>30+ Worldwide Translations</Text>
+            </BentoAppearCard>
+
+            {/* ── CARD 3: 30+ TRANSLATIONS ── */}
+            <BentoAppearCard index={2} isDesktop={isDesktop} style={{ backgroundColor: colors.surface, borderColor: colors.border }}>
+              <View style={styles.featureCardTopRow}>
+                <View style={[styles.featureIconWrap, { backgroundColor: 'rgba(59, 130, 246, 0.12)' }]}>
+                  <Ionicons name="language-outline" size={22} color="#3B82F6" />
+                </View>
+                <View style={[styles.featureMetricPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                  <Ionicons name="globe-outline" size={12} color="#3B82F6" />
+                  <Text style={[styles.featureMetricPillText, { color: '#3B82F6' }]}>30+ Languages</Text>
+                </View>
+              </View>
+
+              <Text style={[styles.featureCardTitle, { color: colors.text }]}>Global Community Translations</Text>
               <Text style={[styles.featureCardDesc, { color: colors.textSecondary }]}>
-                Instant access to English, Spanish, Indonesian, Portuguese, French, Japanese, and global scanlation releases straight from MangaDex.
+                Instant access to official and community scanlation groups across 30+ languages directly from MangaDex with zero ads and zero paywalls.
               </Text>
-            </View>
 
-            <View style={[styles.featureCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <View style={[styles.featureIconWrap, { backgroundColor: colors.surfaceElevated }]}>
-                <Ionicons name="sync-outline" size={24} color="#F59E0B" />
+              {/* Mini Interactive Demo Widget */}
+              <View style={[styles.miniWidgetBox, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}>
+                <View style={styles.miniWidgetHeader}>
+                  <Text style={[styles.miniWidgetLabel, { color: colors.textMuted }]}>TAP TO SWITCH SCANLATION LANGUAGE</Text>
+                  <Text style={[styles.miniWidgetStatus, { color: '#3B82F6' }]}>MANGADEX API</Text>
+                </View>
+
+                <View style={styles.miniLangGrid}>
+                  {[
+                    { code: 'en', name: 'English', countryCode: 'us' },
+                    { code: 'es', name: 'Español', countryCode: 'es' },
+                    { code: 'id', name: 'Indonesia', countryCode: 'id' },
+                    { code: 'ja', name: '日本語', countryCode: 'jp' },
+                    { code: 'pt-br', name: 'Português', countryCode: 'br' },
+                    { code: 'fr', name: 'Français', countryCode: 'fr' },
+                  ].map((lang) => {
+                    const isSelected = featureLang === lang.code;
+                    const flagUrl = `https://flagcdn.com/w40/${lang.countryCode}.png`;
+                    return (
+                      <Pressable
+                        key={lang.code}
+                        onPress={() => {
+                          triggerHaptic();
+                          setFeatureLang(lang.code);
+                        }}
+                        style={[
+                          styles.miniLangPill,
+                          {
+                            backgroundColor: isSelected ? '#3B82F620' : colors.surface,
+                            borderColor: isSelected ? '#3B82F6' : colors.border,
+                          },
+                        ]}
+                      >
+                        <Image
+                          source={{ uri: flagUrl }}
+                          style={styles.miniLangFlagImg}
+                          contentFit="cover"
+                        />
+                        <Text style={[styles.miniLangText, { color: isSelected ? colors.text : colors.textSecondary }]}>
+                          {lang.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <View style={styles.miniLangFooter}>
+                  <Ionicons name="checkmark-circle" size={13} color="#3B82F6" />
+                  <Text style={[styles.miniLangFooterText, { color: colors.textMuted }]}>
+                    Filtered to <Text style={{ color: colors.text, fontWeight: 'bold' }}>{featureLang.toUpperCase()}</Text> chapters • Instant chapter releases
+                  </Text>
+                </View>
               </View>
+            </BentoAppearCard>
+
+            {/* ── CARD 4: REALTIME CLOUD SYNC ── */}
+            <BentoAppearCard index={3} isDesktop={isDesktop} style={{ backgroundColor: colors.surface, borderColor: colors.border }}>
+              <View style={styles.featureCardTopRow}>
+                <View style={[styles.featureIconWrap, { backgroundColor: 'rgba(245, 158, 11, 0.12)' }]}>
+                  <Ionicons name="sync-outline" size={22} color="#F59E0B" />
+                </View>
+                <View style={[styles.featureMetricPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                  <View style={[styles.pulseDotGreen, { backgroundColor: '#F59E0B' }]} />
+                  <Text style={[styles.featureMetricPillText, { color: '#F59E0B' }]}>Supabase Realtime</Text>
+                </View>
+              </View>
+
               <Text style={[styles.featureCardTitle, { color: colors.text }]}>Realtime Cloud Library Sync</Text>
               <Text style={[styles.featureCardDesc, { color: colors.textSecondary }]}>
-                Pick up on your phone exactly where you left off on desktop. Bookmarks, history, and unread chapter badges sync in milliseconds.
+                Pick up on your phone exactly where you left off on desktop. Bookmarks, history, and unread chapter badges sync seamlessly in under 50ms.
               </Text>
-            </View>
+
+              {/* Mini Interactive Demo Widget */}
+              <View style={[styles.miniWidgetBox, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}>
+                <View style={styles.miniWidgetHeader}>
+                  <Text style={[styles.miniWidgetLabel, { color: colors.textMuted }]}>DEVICE CLOUD TOPOLOGY</Text>
+                  <Text style={[styles.miniWidgetStatus, { color: '#F59E0B' }]}>CONNECTED</Text>
+                </View>
+
+                {/* Device sync connection graph */}
+                <View style={styles.syncTopologyRow}>
+                  <View style={[styles.syncDeviceBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    <Ionicons name="phone-portrait-outline" size={16} color={colors.text} />
+                    <Text style={[styles.syncDeviceName, { color: colors.text }]}>Android APK</Text>
+                    <Text style={[styles.syncDeviceSub, { color: '#10B981' }]}>Page 14</Text>
+                  </View>
+
+                  <View style={styles.syncConnectorWrap}>
+                    <View style={[styles.syncConnectorLine, { backgroundColor: '#F59E0B' }]} />
+                    <View style={[styles.syncPulsePill, { backgroundColor: '#F59E0B20', borderColor: '#F59E0B' }]}>
+                      <Ionicons name="flash" size={10} color="#F59E0B" />
+                      <Text style={styles.syncPulseText}>12ms</Text>
+                    </View>
+                  </View>
+
+                  <View style={[styles.syncDeviceBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    <Ionicons name="laptop-outline" size={16} color={colors.text} />
+                    <Text style={[styles.syncDeviceName, { color: colors.text }]}>Desktop Web</Text>
+                    <Text style={[styles.syncDeviceSub, { color: '#10B981' }]}>Synced</Text>
+                  </View>
+                </View>
+
+                <View style={styles.syncItemPillRow}>
+                  <View style={[styles.syncItemPill, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
+                    <Ionicons name="bookmark" size={11} color="#F59E0B" />
+                    <Text style={[styles.syncItemPillText, { color: colors.textSecondary }]}>Library (18)</Text>
+                  </View>
+                  <View style={[styles.syncItemPill, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
+                    <Ionicons name="time" size={11} color="#F59E0B" />
+                    <Text style={[styles.syncItemPillText, { color: colors.textSecondary }]}>History (42)</Text>
+                  </View>
+                  <View style={[styles.syncItemPill, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
+                    <Ionicons name="notifications" size={11} color="#F59E0B" />
+                    <Text style={[styles.syncItemPillText, { color: colors.textSecondary }]}>Unread Badges</Text>
+                  </View>
+                </View>
+              </View>
+            </BentoAppearCard>
           </View>
         </View>
 
         {/* DIRECT APK DOWNLOAD & SPECS SECTION */}
-        <View id="qr-section" style={[styles.specsSection, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View
+          id="qr-section"
+          style={[
+            styles.specsSection,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+            isMobile && { width: '95%', padding: 16 },
+          ]}
+        >
           <View style={[styles.specsGrid, isDesktop && styles.specsGridDesktop]}>
             {/* Left: Release Card */}
             <View style={styles.specsColLeft}>
@@ -685,7 +959,7 @@ export default function AppDownloadScreen() {
                 ]}
               >
                 <Ionicons name="arrow-down-circle" size={22} color="#FFFFFF" />
-                <Text style={styles.directDownloadBtnBigText}>
+                <Text style={[styles.directDownloadBtnBigText, isMobile && { fontSize: 15 }]}>
                   Download {APP_RELEASE.version} APK ({APP_RELEASE.fileSize})
                 </Text>
               </Pressable>
@@ -720,9 +994,30 @@ export default function AppDownloadScreen() {
         </View>
 
         {/* INSTALLATION GUIDE ACCORDION */}
-        <View style={[styles.guideSection, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View
+          style={[
+            styles.guideSection,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+            isMobile && { width: '95%', padding: 16 },
+          ]}
+        >
           <Text style={[styles.guidePretitle, { color: colors.accent }]}>STEP-BY-STEP INSTRUCTIONS</Text>
           <Text style={[styles.guideTitle, { color: colors.text }]}>How to Install Yomite</Text>
+
+          {/* 100% Virus-Free Security Trust Banner */}
+          <View style={[styles.virusFreeBanner, { backgroundColor: '#10B98114', borderColor: '#10B98144' }]}>
+            <View style={styles.virusFreeIconWrap}>
+              <Ionicons name="shield-checkmark" size={22} color="#10B981" />
+            </View>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={styles.virusFreeBannerTitle}>
+                100% Virus-Free, Clean & Verified Build
+              </Text>
+              <Text style={[styles.virusFreeBannerDesc, { color: colors.textSecondary }]}>
+                Compiled directly on Expo Cloud Infrastructure. Yomite is 100% open source, ad-free, and contains zero malware, viruses, or intrusive background trackers. Sideload safely with total peace of mind.
+              </Text>
+            </View>
+          </View>
 
           {/* OS Switcher Tabs */}
           <View style={styles.guideTabsRow}>
@@ -771,9 +1066,9 @@ export default function AppDownloadScreen() {
                   <Text style={[styles.stepNumberText, { color: colors.accent }]}>1</Text>
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.stepCardTitle, { color: colors.text }]}>Download the APK</Text>
+                  <Text style={[styles.stepCardTitle, { color: colors.text }]}>Open the Download Link</Text>
                   <Text style={[styles.stepCardDesc, { color: colors.textSecondary }]}>
-                    Tap the Download button or scan the QR code to save <Text style={{ fontWeight: 'bold' }}>yomite-v1.2.0-release.apk</Text> to your downloads folder.
+                    Click <Text style={{ fontWeight: 'bold', color: colors.text }}>"Download Direct APK"</Text> or scan the QR code above to open the official Yomite build page on Expo.
                   </Text>
                 </View>
               </View>
@@ -783,9 +1078,9 @@ export default function AppDownloadScreen() {
                   <Text style={[styles.stepNumberText, { color: colors.accent }]}>2</Text>
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.stepCardTitle, { color: colors.text }]}>Allow Unknown Apps in Android</Text>
+                  <Text style={[styles.stepCardTitle, { color: colors.text }]}>Click "Install" on Expo</Text>
                   <Text style={[styles.stepCardDesc, { color: colors.textSecondary }]}>
-                    When prompted by Chrome/Browser, tap <Text style={{ fontWeight: 'bold' }}>Settings → Allow from this source</Text>. This enables standard standalone sideloading.
+                    On the Expo project build page, tap the blue <Text style={{ fontWeight: 'bold', color: colors.text }}>"Install"</Text> button. Your browser will start downloading the compiled APK file.
                   </Text>
                 </View>
               </View>
@@ -795,9 +1090,21 @@ export default function AppDownloadScreen() {
                   <Text style={[styles.stepNumberText, { color: colors.accent }]}>3</Text>
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.stepCardTitle, { color: colors.text }]}>Open & Enjoy Offline Manga</Text>
+                  <Text style={[styles.stepCardTitle, { color: colors.text }]}>Check Chrome / Browser Downloads</Text>
                   <Text style={[styles.stepCardDesc, { color: colors.textSecondary }]}>
-                    Tap <Text style={{ fontWeight: 'bold' }}>Install</Text>. Once complete, launch Yomite and log in with your Supabase account to sync your library instantly.
+                    Open your browser downloads list (in Chrome, tap <Text style={{ fontWeight: 'bold', color: colors.text }}>⋮ Menu → Downloads</Text>). Look for the downloaded file named <Text style={{ fontWeight: 'bold', color: colors.accent }}>application-....apk</Text>.
+                  </Text>
+                </View>
+              </View>
+
+              <View style={[styles.stepCard, { borderColor: colors.borderSubtle }]}>
+                <View style={[styles.stepNumberBadge, { backgroundColor: colors.surfaceElevated }]}>
+                  <Text style={[styles.stepNumberText, { color: colors.accent }]}>4</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.stepCardTitle, { color: colors.text }]}>Install & Launch Yomite</Text>
+                  <Text style={[styles.stepCardDesc, { color: colors.textSecondary }]}>
+                    Tap the <Text style={{ fontWeight: 'bold', color: colors.text }}>application-....apk</Text> file and press <Text style={{ fontWeight: 'bold', color: colors.text }}>Install</Text>. (If prompted by Android, enable <Text style={{ fontWeight: 'bold', color: colors.text }}>"Allow from this source"</Text>). Open Yomite and enjoy your manga offline!
                   </Text>
                 </View>
               </View>
@@ -956,22 +1263,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.lg,
     paddingBottom: Spacing.xl,
-    maxWidth: 1220,
+    maxWidth: 1280,
     alignSelf: 'center',
     width: '100%',
     gap: Spacing.lg,
+    position: 'relative',
   },
   unifiedHeroDesktop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: Spacing.xl,
-    paddingBottom: Spacing['2xl'],
-    gap: Spacing.xl,
+    minHeight: 850,
+    paddingTop: Spacing['3xl'],
+    paddingBottom: 90,
+    gap: Spacing['3xl'],
+    marginBottom: 80,
   },
   heroLeftCol: {
-    flex: 1.15,
-    maxWidth: 640,
+    flex: 1.2,
+    maxWidth: 660,
   },
   heroLeftColDesktop: {
     paddingRight: Spacing.sm,
@@ -1022,43 +1332,40 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.semibold,
   },
   heroHeadline: {
-    fontSize: Platform.OS === 'web' ? 50 : 32,
+    fontSize: Platform.OS === 'web' ? 56 : 34,
     fontWeight: Typography.weights.bold,
-    lineHeight: Platform.OS === 'web' ? 56 : 38,
-    letterSpacing: -1.2,
+    lineHeight: Platform.OS === 'web' ? 62 : 40,
+    letterSpacing: -1.4,
     marginTop: Spacing.xs,
-    marginBottom: Spacing.xs,
+    marginBottom: Spacing.sm,
   },
   heroSubheadline: {
-    fontSize: Platform.OS === 'web' ? 18 : 15,
-    lineHeight: Platform.OS === 'web' ? 28 : 22,
-    maxWidth: 580,
-    marginBottom: Spacing.md,
+    fontSize: Platform.OS === 'web' ? 18.5 : 15,
+    lineHeight: Platform.OS === 'web' ? 29 : 22,
+    maxWidth: 620,
+    marginBottom: Spacing.lg,
   },
   heroCtaRow: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
     gap: Spacing.md,
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.lg,
   },
   primaryDownloadBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 22,
-    paddingVertical: 14,
+    paddingHorizontal: 24,
+    paddingVertical: 15,
     borderRadius: Radius.lg,
     gap: 12,
-    shadowColor: '#F43F5E',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 14,
+    boxShadow: '0 6px 14px rgba(244, 63, 94, 0.35)',
     elevation: 8,
   },
   primaryDownloadIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
@@ -1081,7 +1388,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingVertical: 15,
     borderRadius: Radius.lg,
     borderWidth: 1,
   },
@@ -1098,17 +1405,94 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.bold,
     letterSpacing: 1.2,
   },
+  heroTrustGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+  },
+  heroTrustCard: {
+    flex: 1,
+    minWidth: 160,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+  },
+  heroTrustIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: Radius.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  heroTrustContent: {
+    flex: 1,
+    gap: 2,
+  },
+  heroTrustTitle: {
+    fontSize: 12,
+    fontWeight: Typography.weights.bold,
+  },
+  heroTrustSub: {
+    fontSize: 10,
+    lineHeight: 13,
+  },
+  heroArchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: Spacing.sm,
+  },
+  heroArchBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: Radius.sm,
+    borderWidth: 1,
+  },
+  heroArchText: {
+    fontSize: 11,
+    fontWeight: Typography.weights.medium,
+  },
   ambientGlow: {
     position: 'absolute',
-    top: '15%',
+    top: '10%',
     alignSelf: 'center',
-    width: 380,
-    height: 380,
-    borderRadius: 190,
-    backgroundColor: 'rgba(244,63,94,0.15)',
-    opacity: 0.85,
-    transform: [{ scale: 1.25 }],
+    width: 480,
+    height: 480,
+    borderRadius: 240,
+    backgroundColor: 'rgba(244,63,94,0.18)',
+    opacity: 0.9,
+    transform: [{ scale: 1.3 }],
     pointerEvents: 'none',
+  },
+  heroScrollDownBtn: {
+    position: 'absolute',
+    bottom: 24,
+    left: '50%',
+    transform: [{ translateX: -70 }],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.25)',
+    elevation: 4,
+    zIndex: 20,
+  },
+  heroScrollDownText: {
+    fontSize: 11,
+    fontWeight: Typography.weights.semibold,
+    letterSpacing: 0.4,
   },
   floatingDeviceToggleWrap: {
     alignItems: 'center',
@@ -1121,10 +1505,7 @@ const styles = StyleSheet.create({
     padding: 3,
     borderRadius: Radius.full,
     borderWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
+    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.25)',
     elevation: 4,
   },
   deviceTogglePill: {
@@ -1142,74 +1523,68 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.bold,
   },
 
-  /* Carousel Stage & Floating Nav Arrows */
+  /* 3D Stacked Carousel Stage */
   phoneCarouselStage: {
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
-    width: '100%',
-    gap: Spacing.md,
-    paddingVertical: 0,
-  },
-  navArrowBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 6,
-    zIndex: 20,
-  },
-  navArrowLeft: {},
-  navArrowRight: {},
-
-  /* Standalone Phone Shell */
-  standalonePhoneShell: {
-    width: 315,
+    width: 320,
     height: 610,
+  },
+  phoneCarouselStageDesktop: {
+    width: 520,
+    height: 620,
+  },
+
+  /* 3D Stacked Phone Shells */
+  standalonePhoneShell: {
+    width: 290,
+    height: 580,
     backgroundColor: '#09090B',
-    borderColor: '#3F3F46',
+    borderColor: '#27272A',
     borderWidth: 7,
-    borderRadius: 46,
-    position: 'relative',
+    borderRadius: 48,
+    position: 'absolute',
     overflow: 'hidden',
-    shadowColor: '#F43F5E',
-    shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.3,
-    shadowRadius: 36,
-    elevation: 24,
+    boxShadow: '0 18px 30px rgba(0, 0, 0, 0.55)',
+    elevation: 20,
   },
   iphoneShell: {
-    borderRadius: 50,
+    borderRadius: 48,
     borderColor: '#27272A',
   },
   androidShell: {
     borderRadius: 36,
     borderColor: '#3F3F46',
   },
-  phoneTapLeftHitbox: {
+  stackedPhoneDimOverlay: {
     position: 'absolute',
-    top: 50,
+    top: 0,
     left: 0,
-    width: '50%',
-    bottom: 30,
-    zIndex: 12,
-    opacity: 0,
-  },
-  phoneTapRightHitbox: {
-    position: 'absolute',
-    top: 50,
     right: 0,
-    width: '50%',
-    bottom: 30,
-    zIndex: 12,
-    opacity: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.28)',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingBottom: 30,
+    borderRadius: 44,
+    zIndex: 15,
+  },
+  stackedPhoneBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.4)',
+    elevation: 6,
+  },
+  stackedPhoneBadgeText: {
+    fontSize: 11,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: 0.3,
   },
 
   /* Notch & Dynamic Island */
@@ -1253,6 +1628,10 @@ const styles = StyleSheet.create({
 
   /* Status Bar */
   mockupStatusBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1260,6 +1639,7 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     height: 38,
     zIndex: 15,
+    pointerEvents: 'none',
   },
   mockupStatusTime: {
     color: '#FAFAFA',
@@ -1273,15 +1653,22 @@ const styles = StyleSheet.create({
   },
   mockupScreenInner: {
     flex: 1,
-    backgroundColor: '#121215',
-    paddingHorizontal: 12,
-    paddingTop: 6,
-    paddingBottom: 22,
+    backgroundColor: '#0D0D10',
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+    overflow: 'hidden',
   },
-  mockupMediaImage: {
+  mockScreenImageContainer: {
+    flex: 1,
     width: '100%',
     height: '100%',
-    borderRadius: Radius.md,
+    backgroundColor: '#0D0D10',
+    overflow: 'hidden',
+  },
+  mockScreenImage: {
+    width: '100%',
+    height: '100%',
   },
   homeIndicator: {
     position: 'absolute',
@@ -1504,6 +1891,13 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: '#10B981',
   },
+  mockDownloadPauseBtn: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   mockDownloadCardSize: {
     color: '#71717A',
     fontSize: 9,
@@ -1672,64 +2066,355 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.semibold,
   },
 
-  /* Feature Grid */
+  /* Feature Grid (Bento 2x2 Showcase) */
   featuresSection: {
-    maxWidth: 980,
+    maxWidth: 1160,
     alignSelf: 'center',
     width: '92%',
-    marginBottom: Spacing['3xl'],
+    marginTop: 80,
+    paddingTop: Spacing['3xl'],
+    marginBottom: Spacing['4xl'],
   },
-  featuresPretitle: {
-    fontSize: 11,
-    fontWeight: Typography.weights.bold,
-    letterSpacing: 1.2,
-    marginBottom: 4,
-  },
-  featuresTitle: {
-    fontSize: Typography.sizes.title2,
-    fontWeight: Typography.weights.bold,
+  featuresHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: Spacing.md,
     marginBottom: Spacing.xl,
   },
+  featuresPretitle: {
+    fontSize: 13,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: 1.5,
+    marginBottom: 6,
+  },
+  featuresTitle: {
+    fontSize: 32,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: -0.5,
+  },
+  bentoMatrixBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+  },
+  bentoMatrixBadgeText: {
+    fontSize: 12.5,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: 0.8,
+  },
+  pulseDotGreen: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+  },
   featureGrid: {
-    gap: Spacing.md,
+    gap: Spacing.xl,
   },
   featureGridDesktop: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    justifyContent: 'space-between',
   },
   featureCard: {
-    flex: 1,
-    minWidth: 260,
-    borderRadius: Radius.lg,
+    borderRadius: Radius.xl,
     borderWidth: 1,
-    padding: Spacing.lg,
-    gap: Spacing.sm,
+    padding: Spacing.xl + 4,
+    gap: Spacing.sm + 2,
+    width: '100%',
+  },
+  featureCardDesktop: {
+    width: '48.8%',
+  },
+  featureCardHovered: {
+    borderColor: 'rgba(255, 255, 255, 0.24)',
+    boxShadow: '0 8px 18px rgba(0, 0, 0, 0.35)',
+    elevation: 6,
+  },
+  featureCardTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
   },
   featureIconWrap: {
-    width: 44,
-    height: 44,
+    width: 48,
+    height: 48,
     borderRadius: Radius.md,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 4,
+  },
+  featureMetricPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 5,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+  },
+  featureMetricPillText: {
+    fontSize: 12,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: 0.4,
   },
   featureCardTitle: {
-    fontSize: Typography.sizes.headline,
+    fontSize: 21,
     fontWeight: Typography.weights.bold,
+    letterSpacing: -0.2,
   },
   featureCardDesc: {
-    fontSize: Typography.sizes.body,
-    lineHeight: 20,
+    fontSize: 15.5,
+    lineHeight: 23,
+    marginBottom: Spacing.xs,
+  },
+
+  /* Mini Widget Boxes */
+  miniWidgetBox: {
+    marginTop: Spacing.sm,
+    padding: Spacing.md + 4,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    gap: Spacing.sm + 2,
+  },
+  miniWidgetHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  miniWidgetLabel: {
+    fontSize: 12,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: 0.8,
+  },
+  miniWidgetStatus: {
+    fontSize: 12,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: 0.6,
+  },
+  miniModeSwitchRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  miniModePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: Radius.sm,
+    borderWidth: 1,
+  },
+  miniModePillText: {
+    fontSize: 13,
+    fontWeight: Typography.weights.semibold,
+  },
+  fpsSimCanvas: {
+    gap: 8,
+    marginTop: 4,
+  },
+  fpsSimBarGroup: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 4,
+    height: 24,
+  },
+  fpsSimBar: {
+    flex: 1,
+    borderRadius: 2,
+  },
+  fpsSimNote: {
+    fontSize: 12.5,
+    lineHeight: 18,
+  },
+
+  miniVaultPauseBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: Radius.xs,
+    borderWidth: 1,
+  },
+  miniVaultPauseText: {
+    fontSize: 11,
+    fontWeight: Typography.weights.bold,
+  },
+
+  /* Vault Widget */
+  vaultProgressBox: {
+    gap: 6,
+  },
+  vaultMangaTitle: {
+    fontSize: 14.5,
+    fontWeight: Typography.weights.bold,
+    flex: 1,
+  },
+  vaultPercentText: {
+    fontSize: 14.5,
+    fontWeight: Typography.weights.bold,
+  },
+  vaultChapterSub: {
+    fontSize: 12.5,
+    lineHeight: 17,
+  },
+  vaultProgressBarBg: {
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginTop: 4,
+  },
+  vaultProgressBarFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  vaultTagsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+    marginTop: 4,
+  },
+  vaultTagPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: Radius.sm,
+    borderWidth: 1,
+  },
+  vaultTagPillText: {
+    fontSize: 12,
+    fontWeight: Typography.weights.medium,
+  },
+
+  /* Languages Widget */
+  miniLangGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  miniLangPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: Radius.sm,
+    borderWidth: 1,
+  },
+  miniLangFlag: {
+    fontSize: 14,
+  },
+  miniLangFlagImg: {
+    width: 20,
+    height: 14,
+    borderRadius: 2,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  miniLangText: {
+    fontSize: 13,
+    fontWeight: Typography.weights.semibold,
+  },
+  miniLangFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+  },
+  miniLangFooterText: {
+    fontSize: 12.5,
+  },
+
+  /* Cloud Sync Widget */
+  syncTopologyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingVertical: 6,
+  },
+  syncDeviceBox: {
+    flex: 1,
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    gap: 3,
+  },
+  syncDeviceName: {
+    fontSize: 13.5,
+    fontWeight: Typography.weights.bold,
+  },
+  syncDeviceSub: {
+    fontSize: 11.5,
+    fontWeight: Typography.weights.semibold,
+  },
+  syncConnectorWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    width: 70,
+  },
+  syncConnectorLine: {
+    position: 'absolute',
+    height: 1.5,
+    left: 0,
+    right: 0,
+    top: '50%',
+    opacity: 0.4,
+  },
+  syncPulsePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    zIndex: 2,
+  },
+  syncPulseText: {
+    fontSize: 11,
+    fontWeight: Typography.weights.bold,
+    color: '#F59E0B',
+  },
+  syncItemPillRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+    marginTop: 4,
+  },
+  syncItemPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: Radius.sm,
+    borderWidth: 1,
+  },
+  syncItemPillText: {
+    fontSize: 12.5,
+    fontWeight: Typography.weights.medium,
   },
 
   /* Specs Section */
   specsSection: {
-    maxWidth: 980,
+    maxWidth: 1100,
     alignSelf: 'center',
     width: '92%',
     borderRadius: Radius.xl,
     borderWidth: 1,
-    padding: Spacing.xl,
+    padding: Spacing.xl + 4,
     marginBottom: Spacing['3xl'],
   },
   specsGrid: {
@@ -1747,50 +2432,52 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     alignSelf: 'flex-start',
     gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
     borderRadius: Radius.full,
     borderWidth: 1,
     marginBottom: Spacing.md,
   },
   releaseHeaderBadgeText: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: Typography.weights.bold,
   },
   specsTitle: {
-    fontSize: Typography.sizes.title1,
+    fontSize: 32,
     fontWeight: Typography.weights.bold,
-    marginBottom: 4,
+    marginBottom: 6,
+    letterSpacing: -0.5,
   },
   specsSubtitle: {
-    fontSize: Typography.sizes.body,
+    fontSize: 17,
+    lineHeight: 25,
     marginBottom: Spacing.lg,
   },
   specsTable: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingVertical: Spacing.sm,
-    marginBottom: Spacing.md,
+    paddingVertical: Spacing.md,
+    marginBottom: Spacing.lg,
   },
   specsTableRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 6,
+    paddingVertical: 8,
   },
   specsTableLabel: {
-    fontSize: Typography.sizes.footnote,
+    fontSize: 15.5,
   },
   specsTableValue: {
-    fontSize: Typography.sizes.footnote,
+    fontSize: 15.5,
     fontWeight: Typography.weights.semibold,
   },
   shaCard: {
-    padding: 12,
+    padding: 14,
     borderRadius: Radius.md,
     borderWidth: 1,
     marginBottom: Spacing.lg,
-    gap: 6,
+    gap: 8,
   },
   shaHeader: {
     flexDirection: 'row',
@@ -1798,69 +2485,68 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   shaLabel: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: Typography.weights.bold,
     letterSpacing: 0.8,
   },
   shaCopyBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 5,
   },
   shaCopyBtnText: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: Typography.weights.bold,
   },
   shaValue: {
-    fontSize: 11,
+    fontSize: 13,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    letterSpacing: 0.2,
   },
   directDownloadBtnBig: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
-    paddingVertical: 14,
+    paddingVertical: 16,
     borderRadius: Radius.lg,
   },
   directDownloadBtnBigText: {
     color: '#FFFFFF',
-    fontSize: Typography.sizes.body,
+    fontSize: 18,
     fontWeight: Typography.weights.bold,
   },
 
   specsColRight: {
     flex: 1,
-    padding: Spacing.xl,
+    padding: Spacing.xl + 4,
     borderRadius: Radius.lg,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
   qrTitle: {
-    fontSize: Typography.sizes.headline,
+    fontSize: 21,
     fontWeight: Typography.weights.bold,
-    marginBottom: 4,
+    marginBottom: 6,
   },
   qrSub: {
-    fontSize: Typography.sizes.footnote,
+    fontSize: 15,
+    lineHeight: 21,
     textAlign: 'center',
     marginBottom: Spacing.lg,
   },
   qrCodeFrame: {
-    padding: 12,
+    padding: 14,
     backgroundColor: '#FFFFFF',
     borderRadius: Radius.lg,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
+    boxShadow: '0 6px 12px rgba(0, 0, 0, 0.25)',
     elevation: 6,
     marginBottom: Spacing.md,
   },
   qrImage: {
-    width: 170,
-    height: 170,
+    width: 190,
+    height: 190,
   },
   qrInfoBadge: {
     flexDirection: 'row',
@@ -1868,30 +2554,57 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   qrInfoBadgeText: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: Typography.weights.medium,
   },
 
   /* Guide Section */
   guideSection: {
-    maxWidth: 980,
+    maxWidth: 1100,
     alignSelf: 'center',
     width: '92%',
     borderRadius: Radius.xl,
     borderWidth: 1,
-    padding: Spacing.xl,
+    padding: Spacing.xl + 4,
     marginBottom: Spacing['3xl'],
   },
   guidePretitle: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: Typography.weights.bold,
-    letterSpacing: 1.2,
-    marginBottom: 4,
+    letterSpacing: 1.5,
+    marginBottom: 6,
   },
   guideTitle: {
-    fontSize: Typography.sizes.title2,
+    fontSize: 28,
     fontWeight: Typography.weights.bold,
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.md,
+    letterSpacing: -0.4,
+  },
+  virusFreeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    padding: Spacing.md + 4,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    marginBottom: Spacing.xl,
+  },
+  virusFreeIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#10B98120',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  virusFreeBannerTitle: {
+    color: '#10B981',
+    fontSize: 18.5,
+    fontWeight: Typography.weights.bold,
+  },
+  virusFreeBannerDesc: {
+    fontSize: 15.5,
+    lineHeight: 22,
   },
   guideTabsRow: {
     flexDirection: 'row',
@@ -1903,81 +2616,83 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderRadius: Radius.md,
   },
   guideTabBtnText: {
-    fontSize: Typography.sizes.footnote,
+    fontSize: 15,
     fontWeight: Typography.weights.bold,
   },
   stepsContainer: {
-    gap: Spacing.md,
+    gap: Spacing.lg,
   },
   stepCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: Spacing.md,
-    paddingVertical: Spacing.md,
+    gap: Spacing.md + 2,
+    paddingVertical: Spacing.md + 2,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   stepNumberBadge: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
   },
   stepNumberText: {
-    fontSize: Typography.sizes.headline,
+    fontSize: 19,
     fontWeight: Typography.weights.bold,
   },
   stepCardTitle: {
-    fontSize: Typography.sizes.body,
+    fontSize: 19,
     fontWeight: Typography.weights.bold,
-    marginBottom: 2,
+    marginBottom: 4,
   },
   stepCardDesc: {
-    fontSize: Typography.sizes.footnote,
-    lineHeight: 18,
+    fontSize: 15.5,
+    lineHeight: 23,
   },
 
   /* Footer */
   footer: {
-    maxWidth: 980,
+    maxWidth: 1100,
     alignSelf: 'center',
     width: '92%',
-    paddingTop: Spacing['2xl'],
+    paddingTop: Spacing['3xl'],
+    paddingBottom: Spacing['3xl'],
     borderTopWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
-    gap: Spacing.sm,
+    gap: Spacing.md,
   },
   footerBrand: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
   footerMascot: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
+    width: 28,
+    height: 28,
+    borderRadius: 8,
   },
   footerBrandText: {
-    fontSize: Typography.sizes.body,
+    fontSize: 18,
     fontWeight: Typography.weights.bold,
   },
   footerCopy: {
-    fontSize: Typography.sizes.caption,
+    fontSize: 14,
+    lineHeight: 21,
     textAlign: 'center',
   },
   footerLinks: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md,
-    marginTop: 4,
+    gap: Spacing.lg,
+    marginTop: 6,
   },
   footerLinkText: {
-    fontSize: Typography.sizes.footnote,
+    fontSize: 15,
     fontWeight: Typography.weights.semibold,
   },
 });

@@ -11,6 +11,7 @@ import {
   Easing,
   StyleProp,
   ViewStyle,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -40,13 +41,13 @@ export function OfflineState({ onRetry, style, compact = false }: OfflineStatePr
             toValue: 1.15,
             duration: 1200,
             easing: Easing.bezier(0.4, 0, 0.6, 1),
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== 'web',
           }),
           Animated.timing(opacityAnim, {
             toValue: 1,
             duration: 1200,
             easing: Easing.bezier(0.4, 0, 0.6, 1),
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== 'web',
           }),
         ]),
         Animated.parallel([
@@ -54,13 +55,13 @@ export function OfflineState({ onRetry, style, compact = false }: OfflineStatePr
             toValue: 1,
             duration: 1200,
             easing: Easing.bezier(0.4, 0, 0.6, 1),
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== 'web',
           }),
           Animated.timing(opacityAnim, {
             toValue: 0.7,
             duration: 1200,
             easing: Easing.bezier(0.4, 0, 0.6, 1),
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== 'web',
           }),
         ]),
       ])

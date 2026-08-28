@@ -707,10 +707,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 3,
+    boxShadow: '0 2px 3px rgba(0, 0, 0, 0.3)',
     elevation: 3,
   },
   avatarActionRow: {

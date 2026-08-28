@@ -37,7 +37,7 @@ import {
 import { useLibraryStore } from '../../src/store/libraryStore';
 import { useHistoryStore } from '../../src/store/historyStore';
 import { useDownloadStore } from '../../src/store/downloadStore';
-import { downloadChapter, removeDownloadedChapter } from '../../src/services/downloadService';
+import { downloadChapter, removeDownloadedChapter, pauseDownloadChapter } from '../../src/services/downloadService';
 import { AnimatedPressable } from '../../src/components/AnimatedPressable';
 import { AnimatedCard } from '../../src/components/AnimatedCard';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
@@ -781,6 +781,7 @@ export default function MangaDetailScreen() {
             const chapterTitle = chapter.attributes.title;
             const dlItem = downloadMap[chapter.id];
             const isDownloading = dlItem?.status === 'downloading';
+            const isPaused = dlItem?.status === 'paused';
             const isDownloaded = dlItem?.status === 'completed';
             const isRead = isChapterRead(chapter.id);
             const isCurrentReading = lastProgress?.chapterId === chapter.id;
@@ -803,7 +804,11 @@ export default function MangaDetailScreen() {
                 });
                 return;
               }
-              if (isDownloading) return;
+
+              if (isDownloading) {
+                pauseDownloadChapter(chapter.id);
+                return;
+              }
 
               downloadChapter({
                 chapterId: chapter.id,
@@ -875,9 +880,23 @@ export default function MangaDetailScreen() {
                     onPress={handleDownload}
                     hitSlop={8}
                     style={({ pressed }) => [{ opacity: pressed ? 0.6 : 1, padding: 4 }]}
+                    accessibilityLabel={
+                      isDownloading
+                        ? 'Pause downloading chapter'
+                        : isPaused
+                        ? 'Resume downloading chapter'
+                        : isDownloaded
+                        ? 'Chapter downloaded'
+                        : 'Download chapter'
+                    }
                   >
                     {isDownloading ? (
-                      <ActivityIndicator size="small" color={colors.accent} />
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <ActivityIndicator size="small" color={colors.accent} />
+                        <Ionicons name="pause-circle" size={16} color={colors.accent} />
+                      </View>
+                    ) : isPaused ? (
+                      <Ionicons name="play-circle" size={20} color="#F59E0B" />
                     ) : isDownloaded ? (
                       <Ionicons name="checkmark-circle" size={20} color={colors.emerald} />
                     ) : (
@@ -1007,11 +1026,23 @@ export default function MangaDetailScreen() {
       <Modal
         visible={downloadModalVisible}
         transparent
-        animationType="slide"
+        animationType={Platform.OS === 'web' ? 'fade' : 'slide'}
         onRequestClose={() => setDownloadModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Pressable
+            style={styles.modalBackdropPressable}
+            onPress={() => setDownloadModalVisible(false)}
+          />
+          <View
+            style={[
+              styles.modalContent,
+              {
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              },
+            ]}
+          >
             {/* Modal Header */}
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <View style={{ flex: 1 }}>
@@ -1021,14 +1052,28 @@ export default function MangaDetailScreen() {
                 </Text>
               </View>
 
-              <Pressable onPress={() => setDownloadModalVisible(false)} style={styles.closeBtn}>
+              <Pressable
+                onPress={() => setDownloadModalVisible(false)}
+                style={({ pressed }) => [
+                  styles.closeBtn,
+                  pressed && { opacity: 0.7 },
+                  Platform.OS === 'web' && { cursor: 'pointer' },
+                ]}
+              >
                 <Ionicons name="close" size={22} color={colors.textMuted} />
               </Pressable>
             </View>
 
             {/* Quick Actions Row */}
-            <View style={[styles.modalQuickActions, { borderBottomColor: colors.border }]}>
-              <Pressable onPress={handleSelectAllDownloads} style={styles.quickActionBtn}>
+            <View style={[styles.modalQuickActions, { borderBottomColor: colors.border, backgroundColor: colors.surfaceElevated }]}>
+              <Pressable
+                onPress={handleSelectAllDownloads}
+                style={({ pressed }) => [
+                  styles.quickActionBtn,
+                  pressed && { opacity: 0.75 },
+                  Platform.OS === 'web' && { cursor: 'pointer' },
+                ]}
+              >
                 <Ionicons
                   name={selectedDownloadIds.size === chapters.length ? 'checkmark-circle' : 'ellipse-outline'}
                   size={18}
@@ -1061,15 +1106,16 @@ export default function MangaDetailScreen() {
                     style={({ pressed }) => [
                       styles.downloadRow,
                       {
-                        backgroundColor: isSelected ? 'rgba(244, 63, 94, 0.12)' : colors.surfaceElevated,
+                        backgroundColor: isSelected ? `${colors.accent}15` : colors.surfaceElevated,
                         borderColor: isSelected ? colors.accent : colors.border,
                         opacity: pressed ? 0.8 : 1,
                       },
+                      Platform.OS === 'web' && { cursor: 'pointer' },
                     ]}
                   >
                     <Ionicons
                       name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
-                      size={22}
+                      size={20}
                       color={isSelected ? colors.accent : colors.textMuted}
                     />
 
@@ -1097,7 +1143,7 @@ export default function MangaDetailScreen() {
             />
 
             {/* Bottom Download Trigger CTA */}
-            <View style={[styles.modalFooter, { borderTopColor: colors.border }]}>
+            <View style={[styles.modalFooter, { borderTopColor: colors.border, backgroundColor: colors.surface }]}>
               <Pressable
                 onPress={handleStartBatchDownload}
                 disabled={selectedDownloadIds.size === 0}
@@ -1107,6 +1153,7 @@ export default function MangaDetailScreen() {
                     backgroundColor: colors.accent,
                     opacity: selectedDownloadIds.size > 0 ? (pressed ? 0.8 : 1) : 0.4,
                   },
+                  Platform.OS === 'web' && selectedDownloadIds.size > 0 && { cursor: 'pointer' },
                 ]}
               >
                 <Ionicons name="download" size={18} color="#FFFFFF" />
@@ -1397,10 +1444,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.lg,
     borderWidth: 1,
     padding: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.45,
-    shadowRadius: 16,
+    boxShadow: '0 8px 16px rgba(0, 0, 0, 0.45)',
     elevation: 20,
     zIndex: 9999,
   },
@@ -1524,15 +1568,26 @@ const styles = StyleSheet.create({
   /* Modal Styling */
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.72)',
+    justifyContent: Platform.OS === 'web' ? 'center' : 'flex-end',
+    alignItems: Platform.OS === 'web' ? 'center' : 'stretch',
+    padding: Platform.OS === 'web' ? Spacing.xl : 0,
+  },
+  modalBackdropPressable: {
+    ...StyleSheet.absoluteFill,
   },
   modalContent: {
-    maxHeight: '82%',
+    width: '100%',
+    maxWidth: Platform.OS === 'web' ? 580 : undefined,
+    maxHeight: Platform.OS === 'web' ? ('82vh' as any) : '82%',
+    borderRadius: Platform.OS === 'web' ? Radius.xl : undefined,
     borderTopLeftRadius: Radius.xl,
     borderTopRightRadius: Radius.xl,
+    borderWidth: Platform.OS === 'web' ? 1 : 0,
     borderTopWidth: 1,
     overflow: 'hidden',
+    boxShadow: '0 12px 28px rgba(0, 0, 0, 0.5)',
+    elevation: 12,
   },
   modalHeader: {
     flexDirection: 'row',

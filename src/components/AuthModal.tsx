@@ -126,7 +126,7 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
             {/* Header */}
             <View style={styles.headerRow}>
-              <View style={{ flex: 1 }}>
+              <View style={styles.headerTitleCol}>
                 <Text style={[styles.title, { color: colors.text }]}>
                   {authMode === 'signin' ? 'Welcome Back' : 'Create Account'}
                 </Text>
@@ -137,30 +137,6 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
               <Pressable onPress={onClose} style={styles.closeBtn} hitSlop={8}>
                 <Ionicons name="close" size={20} color={colors.textMuted} />
               </Pressable>
-            </View>
-
-            {/* Official Google Sign In Button */}
-            <Pressable
-              onPress={handleGoogleSignIn}
-              disabled={isSubmitting}
-              style={({ pressed }) => [
-                styles.googleButton,
-                { opacity: pressed || isSubmitting ? 0.8 : 1 },
-              ]}
-            >
-              <GoogleLogoIcon size={20} />
-              <Text style={styles.googleButtonText}>
-                {authMode === 'signin' ? 'Sign in with Google' : 'Sign up with Google'}
-              </Text>
-            </Pressable>
-
-            {/* Divider */}
-            <View style={styles.dividerRow}>
-              <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
-              <Text style={[styles.dividerText, { color: colors.textMuted }]}>
-                OR WITH EMAIL
-              </Text>
-              <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
             </View>
 
             {/* Segmented Auth Mode Switcher */}
@@ -280,6 +256,30 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
                 )}
               </Pressable>
             </View>
+
+            {/* Divider */}
+            <View style={styles.dividerRow}>
+              <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
+              <Text style={[styles.dividerText, { color: colors.textMuted }]}>
+                OR CONTINUE WITH
+              </Text>
+              <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
+            </View>
+
+            {/* Official Google Sign In Button (Bottom) */}
+            <Pressable
+              onPress={handleGoogleSignIn}
+              disabled={isSubmitting}
+              style={({ pressed }) => [
+                styles.googleButton,
+                { opacity: pressed || isSubmitting ? 0.85 : 1 },
+              ]}
+            >
+              <GoogleLogoIcon size={20} />
+              <Text style={styles.googleButtonText}>
+                {authMode === 'signin' ? 'Sign in with Google' : 'Sign up with Google'}
+              </Text>
+            </Pressable>
           </ScrollView>
         </View>
       </View>
@@ -306,8 +306,8 @@ const styles = StyleSheet.create({
     bottom: 0,
   },
   sheetContainer: {
-    borderTopLeftRadius: Radius.xl,
-    borderTopRightRadius: Radius.xl,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderWidth: 1,
     borderBottomWidth: 0,
     maxHeight: '90%',
@@ -315,18 +315,15 @@ const styles = StyleSheet.create({
   webSheetContainer: {
     width: '100%',
     maxWidth: 480,
-    borderRadius: Radius.lg,
+    borderRadius: 24,
     borderWidth: 1,
     borderBottomWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.5,
-    shadowRadius: 25,
-    elevation: 10,
+    boxShadow: '0 12px 28px rgba(0, 0, 0, 0.55)',
+    elevation: 12,
     overflow: 'hidden',
   },
   dragHandle: {
-    width: 36,
+    width: 40,
     height: 4,
     borderRadius: Radius.full,
     alignSelf: 'center',
@@ -334,47 +331,62 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   scrollContent: {
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.sm,
-    paddingBottom: Platform.OS === 'ios' ? 40 : Spacing.xl,
-    gap: Spacing.md,
+    paddingHorizontal: 24,
+    paddingTop: Spacing.md,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 28,
+    gap: 16,
   },
   headerRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: Spacing.sm,
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 2,
+    marginBottom: 4,
+  },
+  headerTitleCol: {
+    alignItems: 'center',
+    width: '100%',
+    paddingHorizontal: 36,
   },
   title: {
     fontSize: Typography.sizes.title2,
     fontWeight: Typography.weights.bold,
+    textAlign: 'center',
   },
   subtitle: {
     fontSize: Typography.sizes.footnote,
-    marginTop: 2,
+    marginTop: 3,
+    textAlign: 'center',
   },
   closeBtn: {
-    padding: 4,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
   },
   googleButton: {
-    height: 46,
+    height: 48,
     backgroundColor: '#FFFFFF',
-    borderRadius: Radius.md,
+    borderRadius: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: Spacing.sm,
-    marginTop: Spacing.xs,
   },
   googleButtonText: {
     color: '#1F1F23',
-    fontSize: Typography.sizes.body,
+    fontSize: 15,
     fontWeight: Typography.weights.semibold,
   },
   dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: Spacing.xs,
+    marginVertical: 2,
     gap: Spacing.md,
   },
   dividerLine: {
@@ -382,9 +394,9 @@ const styles = StyleSheet.create({
     height: 1,
   },
   dividerText: {
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: Typography.weights.bold,
-    letterSpacing: 1,
+    letterSpacing: 0.8,
   },
   tabContainer: {
     flexDirection: 'row',
@@ -392,8 +404,8 @@ const styles = StyleSheet.create({
   },
   tabBtn: {
     flex: 1,
-    height: 38,
-    borderRadius: Radius.md,
+    height: 40,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
@@ -404,11 +416,11 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.semibold,
   },
   formGroup: {
-    gap: Spacing.md,
+    gap: 12,
   },
   inputBox: {
-    height: 46,
-    borderRadius: Radius.md,
+    height: 48,
+    borderRadius: 14,
     borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
@@ -426,18 +438,18 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   eyeBtn: {
-    padding: 4,
+    padding: 6,
   },
   submitBtn: {
-    height: 46,
-    borderRadius: Radius.md,
+    height: 48,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: Spacing.xs,
+    marginTop: 4,
   },
   submitBtnText: {
     color: '#FFFFFF',
-    fontSize: Typography.sizes.body,
+    fontSize: 15,
     fontWeight: Typography.weights.bold,
   },
 });

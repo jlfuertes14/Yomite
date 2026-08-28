@@ -17,6 +17,7 @@
  *    Native runs natively so CORS does NOT apply to us.
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  */
+import { Platform } from 'react-native';
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CacheManager } from '../utils/cacheManager';
@@ -53,7 +54,8 @@ const api: AxiosInstance = axios.create({
   baseURL: API_BASE,
   timeout: 15000,
   headers: {
-    'User-Agent': APP_USER_AGENT,  // REQUIRED by MangaDex
+    // Web browsers forbid custom User-Agent in XHR/fetch; native platforms require it for MangaDex
+    ...(Platform.OS !== 'web' ? { 'User-Agent': APP_USER_AGENT } : {}),
   },
 });
 

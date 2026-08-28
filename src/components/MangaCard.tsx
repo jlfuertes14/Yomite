@@ -233,10 +233,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5,
     borderWidth: 1.5,
     borderColor: '#09090B',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.4,
-    shadowRadius: 2,
+    boxShadow: '0 1px 2px rgba(0, 0, 0, 0.4)',
     elevation: 3,
   },
   badgeText: {

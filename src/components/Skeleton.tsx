@@ -2,7 +2,7 @@
  * SkeletonLoader — Shimmer loading placeholder
  */
 import React, { useEffect, useRef } from 'react';
-import { View, StyleSheet, Animated, ViewStyle } from 'react-native';
+import { View, StyleSheet, Animated, ViewStyle, Platform } from 'react-native';
 import { Colors, Radius } from '../../constants/Colors';
 import { useThemeColors } from '../hooks/useThemeColor';
 
@@ -23,12 +23,12 @@ export function Skeleton({ width, height, borderRadius = Radius.md, style }: Ske
         Animated.timing(opacity, {
           toValue: 0.7,
           duration: 800,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
         Animated.timing(opacity, {
           toValue: 0.3,
           duration: 800,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
       ])
     );

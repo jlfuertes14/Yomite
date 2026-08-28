@@ -63,7 +63,7 @@ export function SidebarDrawer({
   const mainPages: NavigationItem[] = [
     { id: 'discover', label: 'Discover', icon: 'compass-outline', path: '/' },
     ...(Platform.OS === 'web'
-      ? [{ id: 'download', label: 'Get Mobile App', icon: 'phone-portrait-outline' as const, path: '/download' }]
+      ? [{ id: 'download', label: 'Get Mobile App', icon: 'cloud-download-outline' as const, path: '/download' }]
       : []),
     { id: 'library', label: 'Library', icon: 'library-outline', path: '/library' },
     { id: 'downloads', label: 'Downloads', icon: 'download-outline', path: '/downloads' },
@@ -147,6 +147,12 @@ export function SidebarDrawer({
     if (path === '/') {
       return pathname === '/' || pathname === '/(tabs)' || pathname === '/(tabs)/index' || pathname === '';
     }
+    if (path === '/download') {
+      return pathname === '/download';
+    }
+    if (path === '/profile') {
+      return pathname === '/profile';
+    }
     return pathname.includes(path);
   };
 
@@ -154,8 +160,8 @@ export function SidebarDrawer({
     onClose();
     if (path === '/') {
       router.push('/(tabs)' as any);
-    } else if (path === '/profile') {
-      router.push('/profile' as any);
+    } else if (path === '/profile' || path === '/download') {
+      router.push(path as any);
     } else {
       router.push(`/(tabs)${path}` as any);
     }
@@ -172,7 +178,16 @@ export function SidebarDrawer({
         <SafeAreaView style={[styles.drawerContent, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           {/* Drawer Header with Anime Mascot & Yomite */}
           <View style={styles.drawerHeader}>
-            <View style={styles.brandRow}>
+            <Pressable
+              onPress={() => handleNavigate('/')}
+              style={({ pressed }) => [
+                styles.brandRow,
+                pressed && { opacity: 0.75 },
+                Platform.OS === 'web' && { cursor: 'pointer' },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Navigate to Discover Home"
+            >
               <View style={[styles.mascotAvatar, { borderColor: colors.border }]}>
                 <Image
                   source={require('../../assets/images/mascot.png')}
@@ -184,7 +199,7 @@ export function SidebarDrawer({
                 <Text style={[styles.brandTitle, { color: colors.text }]}>Yomite</Text>
                 <Text style={[styles.brandSubtitle, { color: colors.textMuted }]}>Manga & Comic Reader</Text>
               </View>
-            </View>
+            </Pressable>
             <Pressable onPress={onClose} style={styles.closeBtn} hitSlop={8}>
               <Ionicons name="close" size={22} color={colors.textMuted} />
             </Pressable>

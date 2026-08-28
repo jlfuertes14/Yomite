@@ -10,6 +10,7 @@ import {
   StyleProp,
   ViewStyle,
   Easing,
+  Platform,
 } from 'react-native';
 import { triggerHaptic } from '../utils/haptics';
 
@@ -37,7 +38,7 @@ export function AnimatedPressable({
       toValue: scaleTo,
       duration: 120,
       easing: Easing.bezier(0.23, 1, 0.32, 1),
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }).start();
 
     if (onPressIn) onPressIn(e);
@@ -48,7 +49,7 @@ export function AnimatedPressable({
       toValue: 1,
       friction: 4,
       tension: 40,
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }).start();
 
     if (onPressOut) onPressOut(e);

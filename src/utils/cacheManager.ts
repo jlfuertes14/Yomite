@@ -5,58 +5,43 @@ interface CacheEntry<T> {
   expiry: number;
 }
 
+// Bounded High-Speed In-Memory Cache (RAM) with LRU eviction (max 150 items)
 const memoryCache = new Map<string, CacheEntry<any>>();
+const MAX_MEMORY_ENTRIES = 150;
 
 export const CacheManager = {
   /**
-   * Get cached entry from memory or AsyncStorage
+   * Get cached entry from memory
    */
   async get<T>(key: string): Promise<T | null> {
     const now = Date.now();
-
-    // 1. Check in-memory cache first for fastest zero-latency lookup
     const memItem = memoryCache.get(key);
     if (memItem) {
       if (memItem.expiry > now) {
+        // Refresh LRU order (delete & re-insert)
+        memoryCache.delete(key);
+        memoryCache.set(key, memItem);
         return memItem.data as T;
       }
       memoryCache.delete(key);
     }
-
-    // 2. Fall back to AsyncStorage
-    try {
-      const raw = await AsyncStorage.getItem(`yomite_cache_${key}`);
-      if (raw) {
-        const parsed: CacheEntry<T> = JSON.parse(raw);
-        if (parsed.expiry > now) {
-          // Restore to memory cache for subsequent fast reads
-          memoryCache.set(key, parsed);
-          return parsed.data;
-        } else {
-          await AsyncStorage.removeItem(`yomite_cache_${key}`);
-        }
-      }
-    } catch (e) {
-      // Ignore storage errors
-    }
-
     return null;
   },
 
   /**
-   * Set cached entry in memory and AsyncStorage
+   * Set cached entry in memory only (avoids bloating AsyncStorage SQLite database)
    */
   async set<T>(key: string, data: T, ttlMs: number): Promise<void> {
     const expiry = Date.now() + ttlMs;
     const entry: CacheEntry<T> = { data, expiry };
 
-    memoryCache.set(key, entry);
-
-    try {
-      await AsyncStorage.setItem(`yomite_cache_${key}`, JSON.stringify(entry));
-    } catch (e) {
-      // Ignore storage errors
+    // Evict oldest entry if limit reached
+    if (memoryCache.size >= MAX_MEMORY_ENTRIES) {
+      const firstKey = memoryCache.keys().next().value;
+      if (firstKey) memoryCache.delete(firstKey);
     }
+
+    memoryCache.set(key, entry);
   },
 
   /**
@@ -64,26 +49,33 @@ export const CacheManager = {
    */
   async remove(key: string): Promise<void> {
     memoryCache.delete(key);
-    try {
-      await AsyncStorage.removeItem(`yomite_cache_${key}`);
-    } catch (e) {
-      // Ignore storage errors
-    }
   },
 
   /**
-   * Clear all app caches
+   * Clear all memory caches
    */
   async clearAll(): Promise<void> {
     memoryCache.clear();
+  },
+
+  /**
+   * One-time / background purge of any legacy `yomite_cache_*` keys stored in AsyncStorage SQLite.
+   * Frees up SQLite database quota on user devices to prevent SQLITE_FULL (code 13).
+   */
+  async cleanLegacyStorageCache(): Promise<void> {
     try {
       const keys = await AsyncStorage.getAllKeys();
-      const cacheKeys = keys.filter((k) => k.startsWith('yomite_cache_'));
-      if (cacheKeys.length > 0) {
-        await AsyncStorage.multiRemove(cacheKeys);
+      const legacyKeys = keys.filter(
+        (k) => k.startsWith('yomite_cache_') || k.startsWith('manga_cache_')
+      );
+      if (legacyKeys.length > 0) {
+        await AsyncStorage.multiRemove(legacyKeys);
       }
     } catch (e) {
-      // Ignore storage errors
+      // Ignore if storage is locked
     }
   },
 };
+
+// Automatically trigger legacy cache purge on startup in background
+CacheManager.cleanLegacyStorageCache().catch(() => {});

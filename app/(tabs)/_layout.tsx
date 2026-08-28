@@ -39,8 +39,7 @@ function FloatingTabBar({ state, descriptors, navigation }: NavigationBarProps) 
 
   return (
     <View
-      pointerEvents="box-none"
-      style={[styles.tabBarFrame, { bottom: Math.max(insets.bottom, 12) + 8 }]}
+      style={[styles.tabBarFrame, { bottom: Math.max(insets.bottom, 12) + 8, pointerEvents: 'box-none' }]}
     >
       <View style={[styles.tabBarPill, { borderColor: colors.border }]}>
         <BlurView
@@ -49,8 +48,7 @@ function FloatingTabBar({ state, descriptors, navigation }: NavigationBarProps) 
           style={StyleSheet.absoluteFill}
         />
         <View
-          pointerEvents="none"
-          style={[styles.glassTint, { backgroundColor: `${colors.surface}99` }]}
+          style={[styles.glassTint, { backgroundColor: `${colors.surface}99`, pointerEvents: 'none' }]}
         />
         {state.routes.map((route, index) => {
           const tab = TABS.find((item) => item.name === route.name);
@@ -150,10 +148,7 @@ const styles = StyleSheet.create({
     height: '100%',
     overflow: 'hidden',
     paddingHorizontal: 6,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: -6 },
-    shadowOpacity: 0.2,
-    shadowRadius: 14,
+    boxShadow: '0 -6px 14px rgba(0, 0, 0, 0.2)',
     width: '94%',
   },
   glassTint: {
