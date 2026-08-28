@@ -1,6 +1,4 @@
-/**
- * User Store — Handles Supabase User Authentication, Session State, User Profile & Google Auth
- */
+import { Platform } from 'react-native';
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import type { Session, User } from '@supabase/supabase-js';
@@ -19,9 +17,11 @@ interface UserState {
   user: User | null;
   session: Session | null;
   isLoading: boolean;
+  authSuccessMessage: string | null;
+  clearAuthSuccessMessage: () => void;
   initializeAuth: () => Promise<void>;
   refreshUser: () => Promise<void>;
-  signUpWithEmail: (email: string, password: string, username?: string) => Promise<{ error: any }>;
+  signUpWithEmail: (email: string, password: string, username?: string) => Promise<{ error: any; user?: User | null; session?: Session | null }>;
   signInWithEmail: (email: string, password: string) => Promise<{ error: any }>;
   signInWithGoogle: () => Promise<{ error: any }>;
   updateProfile: (data: UserProfileData) => Promise<{ data?: User | null; error: any }>;
@@ -71,6 +71,8 @@ export const useUserStore = create<UserState>((set, get) => ({
   user: null,
   session: null,
   isLoading: true,
+  authSuccessMessage: null,
+  clearAuthSuccessMessage: () => set({ authSuccessMessage: null }),
 
   initializeAuth: async () => {
     if (isAuthInitialized) {
@@ -80,6 +82,58 @@ export const useUserStore = create<UserState>((set, get) => ({
     isAuthInitialized = true;
 
     try {
+      // 1. On Web: Parse incoming URL hash or search params for OAuth / email confirmation tokens
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const hash = window.location.hash;
+        const search = window.location.search;
+        const hashParams = new URLSearchParams(hash.replace(/^#/, ''));
+        const searchParams = new URLSearchParams(search);
+
+        const accessToken = hashParams.get('access_token') || searchParams.get('access_token');
+        const refreshToken = hashParams.get('refresh_token') || searchParams.get('refresh_token');
+        const code = searchParams.get('code') || hashParams.get('code');
+        const authType = hashParams.get('type') || searchParams.get('type');
+
+        if (code) {
+          try {
+            const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+            if (!error && data?.session) {
+              set({
+                session: data.session,
+                user: data.user,
+                isLoading: false,
+                authSuccessMessage:
+                  authType === 'signup' || authType === 'email'
+                    ? '🎉 Email confirmed! Welcome to Yomite.'
+                    : 'Signed in successfully.',
+              });
+              if (data.user?.id) syncUserDataWithCloud(data.user.id);
+            }
+          } catch (_e) {}
+          window.history.replaceState(null, '', window.location.pathname);
+        } else if (accessToken && refreshToken) {
+          try {
+            const { data, error } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            });
+            if (!error && data?.session) {
+              set({
+                session: data.session,
+                user: data.user,
+                isLoading: false,
+                authSuccessMessage:
+                  authType === 'signup' || authType === 'email'
+                    ? '🎉 Email confirmed! Welcome to Yomite.'
+                    : 'Signed in successfully.',
+              });
+              if (data.user?.id) syncUserDataWithCloud(data.user.id);
+            }
+          } catch (_e) {}
+          window.history.replaceState(null, '', window.location.pathname);
+        }
+      }
+
       const { data } = await supabase.auth.getSession();
       const session = data?.session ?? null;
       set({ session, user: session?.user ?? null, isLoading: false });
@@ -127,10 +181,15 @@ export const useUserStore = create<UserState>((set, get) => ({
   signUpWithEmail: async (email, password, username) => {
     try {
       const cleanUsername = username?.trim() || email.split('@')[0];
+      const redirectUri = Platform.OS === 'web'
+        ? (typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : 'https://yomite.vercel.app/auth/callback')
+        : createURL('auth/callback');
+
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
+          emailRedirectTo: redirectUri,
           data: {
             username: cleanUsername,
             display_name: cleanUsername,
@@ -142,7 +201,7 @@ export const useUserStore = create<UserState>((set, get) => ({
         set({ session: data.session, user: data.user });
         if (data.user?.id) syncUserDataWithCloud(data.user.id);
       }
-      return { error };
+      return { error, user: data?.user, session: data?.session };
     } catch (err: any) {
       console.error('Sign up error:', err);
       return { error: { message: err?.message || 'Sign up failed. Please check your network connection.' } };
@@ -165,6 +224,22 @@ export const useUserStore = create<UserState>((set, get) => ({
 
   signInWithGoogle: async () => {
     try {
+      if (Platform.OS === 'web') {
+        const redirectUri = typeof window !== 'undefined'
+          ? `${window.location.origin}/auth/callback`
+          : 'https://yomite.vercel.app/auth/callback';
+
+        const { data, error } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: redirectUri,
+            skipBrowserRedirect: false,
+          },
+        });
+        return { error };
+      }
+
+      // Native iOS & Android flow with WebBrowser auth session
       const redirectUri = createURL('auth/callback');
       console.log('Google Auth Redirect URI:', redirectUri);
 

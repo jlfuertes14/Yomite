@@ -1,11 +1,9 @@
-/**
- * Root Layout — App-wide providers and navigation stack with Dark Theme & dark transition backgrounds
- */
 import React, { useEffect } from 'react';
-import { View, Platform, StyleSheet } from 'react-native';
+import { View, Text, Pressable, Platform, StyleSheet } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
+import { Ionicons } from '@expo/vector-icons';
 import * as SplashScreen from 'expo-splash-screen';
 import * as SystemUI from 'expo-system-ui';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -31,6 +29,9 @@ const YomiteDarkTheme = {
 
 export default function RootLayout() {
   useDocumentTitle();
+  const authSuccessMessage = useUserStore((s) => s.authSuccessMessage);
+  const clearAuthSuccessMessage = useUserStore((s) => s.clearAuthSuccessMessage);
+
   const [fontsLoaded] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
   });
@@ -42,6 +43,15 @@ export default function RootLayout() {
     requestStoragePermissionOnLaunch();
     useUserStore.getState().initializeAuth();
   }, []);
+
+  useEffect(() => {
+    if (authSuccessMessage) {
+      const timer = setTimeout(() => {
+        clearAuthSuccessMessage();
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [authSuccessMessage, clearAuthSuccessMessage]);
 
   useEffect(() => {
     if (fontsLoaded) {
@@ -62,6 +72,17 @@ export default function RootLayout() {
               : styles.nativeGlobalContainer
           }
         >
+          {authSuccessMessage && (
+            <View style={styles.toastOverlay}>
+              <View style={styles.toastContainer}>
+                <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+                <Text style={styles.toastText}>{authSuccessMessage}</Text>
+                <Pressable onPress={clearAuthSuccessMessage} hitSlop={8} style={({ pressed }) => [{ opacity: pressed ? 0.6 : 1 }]}>
+                  <Ionicons name="close" size={16} color="#A1A1AA" />
+                </Pressable>
+              </View>
+            </View>
+          )}
           <Stack
             screenOptions={{
               headerShown: false,
@@ -96,6 +117,14 @@ export default function RootLayout() {
               }}
             />
             <Stack.Screen
+              name="auth/callback"
+              options={{
+                headerShown: false,
+                animation: 'fade',
+                contentStyle: { backgroundColor: '#09090B' },
+              }}
+            />
+            <Stack.Screen
               name="+not-found"
               options={{ title: 'Not Found', headerShown: true }}
             />
@@ -114,5 +143,34 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     backgroundColor: '#09090B',
+  },
+  toastOverlay: {
+    position: 'absolute',
+    top: Platform.OS === 'web' ? 16 : 48,
+    left: 0,
+    right: 0,
+    zIndex: 99999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    pointerEvents: 'box-none',
+  },
+  toastContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(24, 24, 27, 0.94)',
+    borderColor: 'rgba(16, 185, 129, 0.4)',
+    borderWidth: 1,
+    borderRadius: 24,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    gap: 10,
+    boxShadow: '0 8px 30px rgba(0, 0, 0, 0.5)',
+    elevation: 10,
+  },
+  toastText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

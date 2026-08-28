@@ -80,9 +80,15 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
     setIsSubmitting(true);
     try {
       if (authMode === 'signup') {
-        const { error } = await signUpWithEmail(email.trim(), password.trim(), username.trim());
+        const { error, session } = await signUpWithEmail(email.trim(), password.trim(), username.trim());
         if (error) {
           Alert.alert('Registration Failed', error.message || 'Could not create account.');
+        } else if (!session) {
+          Alert.alert(
+            'Check Your Email',
+            'A confirmation link has been sent to your email. Click the verification link to activate your Yomite account!',
+            [{ text: 'OK', onPress: onClose }]
+          );
         } else {
           Alert.alert('Success', 'Account created successfully! Welcome to Yomite.');
           onClose();
