@@ -33,7 +33,19 @@ import type {
 
 // ─── Constants ────────────────────────────────────────────────────
 
-const API_BASE = 'https://api.mangadex.org';
+export function getMangaDexApiBase(): string {
+  if (Platform.OS !== 'web') {
+    return 'https://api.mangadex.org';
+  }
+  // In Web: on hosted environments (e.g. Vercel / production domain), route through the serverless proxy to bypass CORS
+  if (typeof window !== 'undefined' && window.location?.hostname) {
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      return '/api/mangadex';
+    }
+  }
+  return 'https://api.mangadex.org';
+}
+
 const AUTH_BASE = 'https://auth.mangadex.org/realms/mangadex/protocol/openid-connect/token';
 const COVERS_BASE = 'https://uploads.mangadex.org/covers';
 const APP_USER_AGENT = 'MangaReaderApp/1.0.0';
@@ -51,7 +63,7 @@ const TOKEN_KEYS = {
 // ─── API Instance ─────────────────────────────────────────────────
 
 const api: AxiosInstance = axios.create({
-  baseURL: API_BASE,
+  baseURL: getMangaDexApiBase(),
   timeout: 15000,
   headers: {
     // Web browsers forbid custom User-Agent in XHR/fetch; native platforms require it for MangaDex
@@ -83,6 +95,9 @@ function parseRateLimitHeaders(headers: any) {
 // Request interceptor: inject auth token when available & attach start time
 api.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
   (config as any)._startTime = Date.now();
+
+  // Dynamically ensure the correct baseURL on Web vs Native
+  config.baseURL = getMangaDexApiBase();
 
   // Never send auth headers to image servers
   const url = config.url ?? '';

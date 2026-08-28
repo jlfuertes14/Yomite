@@ -6,7 +6,15 @@
   "framework": null,
   "rewrites": [
     {
-      "source": "/((?!_expo|assets|favicon|.*\\..*).*)",
+      "source": "/api/mangadex/:path*",
+      "destination": "https://api.mangadex.org/:path*"
+    },
+    {
+      "source": "/api/mangadex-covers/:path*",
+      "destination": "https://uploads.mangadex.org/covers/:path*"
+    },
+    {
+      "source": "/((?!api/|_expo|assets|favicon|.*\\..*).*)",
       "destination": "/index.html"
     }
   ]

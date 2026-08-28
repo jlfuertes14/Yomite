@@ -1,7 +1,6 @@
 import axios from 'axios';
 import { CacheManager } from '../utils/cacheManager';
-
-const MANGADEX_BASE_URL = 'https://api.mangadex.org';
+import { getMangaDexApiBase } from './mangadex';
 
 export interface ForumComment {
   id: string;
@@ -32,11 +31,12 @@ export async function getChapterComments(chapterId: string): Promise<ForumCommen
   if (cached) return cached;
 
   try {
-    const res = await axios.get(`${MANGADEX_BASE_URL}/chapter/${chapterId}`);
+    const baseUrl = getMangaDexApiBase();
+    const res = await axios.get(`${baseUrl}/chapter/${chapterId}`);
     const threadId = res.data?.data?.attributes?.threadId;
 
     if (threadId) {
-      const threadRes = await axios.get(`${MANGADEX_BASE_URL}/forum/thread/${threadId}`);
+      const threadRes = await axios.get(`${baseUrl}/forum/thread/${threadId}`);
       const posts = threadRes.data?.data || [];
       if (posts.length > 0) {
         const comments = posts.map((p: any) => ({
@@ -95,7 +95,8 @@ export async function getCommunityForums(bypassCache = false): Promise<ForumThre
   }
 
   try {
-    const res = await axios.get(`${MANGADEX_BASE_URL}/chapter`, {
+    const baseUrl = getMangaDexApiBase();
+    const res = await axios.get(`${baseUrl}/chapter`, {
       params: {
         limit: 15,
         'order[publishAt]': 'desc',
