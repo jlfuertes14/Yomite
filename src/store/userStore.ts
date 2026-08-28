@@ -182,7 +182,7 @@ export const useUserStore = create<UserState>((set, get) => ({
     try {
       const cleanUsername = username?.trim() || email.split('@')[0];
       const redirectUri = Platform.OS === 'web'
-        ? (typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : 'https://yomite.vercel.app/auth/callback')
+        ? (typeof window !== 'undefined' ? window.location.origin : 'https://yomite.vercel.app')
         : createURL('auth/callback');
 
       const { data, error } = await supabase.auth.signUp({
@@ -226,8 +226,8 @@ export const useUserStore = create<UserState>((set, get) => ({
     try {
       if (Platform.OS === 'web') {
         const redirectUri = typeof window !== 'undefined'
-          ? `${window.location.origin}/auth/callback`
-          : 'https://yomite.vercel.app/auth/callback';
+          ? window.location.origin
+          : 'https://yomite.vercel.app';
 
         const { data, error } = await supabase.auth.signInWithOAuth({
           provider: 'google',

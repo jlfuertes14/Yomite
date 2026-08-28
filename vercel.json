@@ -2,8 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npx expo export --platform web",
   "outputDirectory": "dist",
-  "cleanUrls": true,
-  "framework": null,
   "rewrites": [
     {
       "source": "/api/mangadex/:path*",
@@ -14,7 +12,11 @@
       "destination": "/api/cover?path=:path*"
     },
     {
-      "source": "/:path*",
+      "source": "/auth/callback",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]
