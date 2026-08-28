@@ -11,7 +11,7 @@
     },
     {
       "source": "/api/mangadex-covers/:path*",
-      "destination": "https://uploads.mangadex.org/covers/:path*"
+      "destination": "/api/cover?path=:path*"
     },
     {
       "source": "/((?!api/|_expo|assets|public|favicon|.*\\..*).*)",
