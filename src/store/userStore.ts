@@ -2,14 +2,19 @@ import { Platform } from 'react-native';
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import type { Session, User } from '@supabase/supabase-js';
-import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import { createURL, parse } from 'expo-linking';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
 import { syncUserDataWithCloud } from '../services/cloudSync';
 
-// Complete any pending auth session when the app is foregrounded from deep link redirect
-WebBrowser.maybeCompleteAuthSession();
+// Configure native Google Sign-In SDK with Web Client ID
+if (Platform.OS !== 'web') {
+  GoogleSignin.configure({
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+    offlineAccess: false,
+  });
+}
 
 export interface UserProfileData {
   username?: string;
@@ -297,56 +302,36 @@ export const useUserStore = create<UserState>((set, get) => ({
         return { error };
       }
 
-      // Native iOS & Android flow with WebBrowser auth session
-      const redirectUri = createURL('auth/callback');
-      console.log('Google Auth Redirect URI:', redirectUri);
+      // Native iOS & Android: Use native Google Sign-In SDK (no browser)
+      // This shows the native OS account picker sheet instead of Chrome Custom Tabs
+      const response = await GoogleSignin.signIn();
+      const idToken = response?.data?.idToken;
 
-      const { data, error } = await supabase.auth.signInWithOAuth({
+      if (!idToken) {
+        return { error: { message: 'Google Sign-In failed: no ID token received.' } };
+      }
+
+      // Exchange the native ID token with Supabase for a session
+      const { data, error } = await supabase.auth.signInWithIdToken({
         provider: 'google',
-        options: {
-          redirectTo: redirectUri,
-          skipBrowserRedirect: true,
-        },
+        token: idToken,
       });
 
-      if (error) return { error };
-
-      if (data?.url) {
-        const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUri, {
-          showInRecents: false,
-          createTask: false,
+      if (!error && data?.session) {
+        set({
+          session: data.session,
+          user: data.user,
+          authSuccessMessage: '🎉 Signed in with Google!',
         });
-        if (result.type === 'success' && result.url) {
-          const urlStr = result.url;
-          let accessToken: string | undefined;
-          let refreshToken: string | undefined;
-
-          if (urlStr.includes('#')) {
-            const hashParts = urlStr.split('#')[1];
-            const params = new URLSearchParams(hashParts);
-            accessToken = params.get('access_token') || undefined;
-            refreshToken = params.get('refresh_token') || undefined;
-          }
-
-          if (!accessToken || !refreshToken) {
-            const parsed = parse(urlStr);
-            accessToken = parsed.queryParams?.access_token as string;
-            refreshToken = parsed.queryParams?.refresh_token as string;
-          }
-
-          if (accessToken && refreshToken) {
-            await supabase.auth.setSession({
-              access_token: accessToken,
-              refresh_token: refreshToken,
-            });
-            set({
-              authSuccessMessage: '🎉 Signed in with Google!',
-            });
-          }
-        }
+        if (data.user?.id) syncUserDataWithCloud(data.user.id);
       }
-      return { error: null };
+
+      return { error: error || null };
     } catch (err: any) {
+      // User cancelled the native Google picker
+      if (err?.code === 'SIGN_IN_CANCELLED') {
+        return { error: null };
+      }
       return { error: err };
     }
   },
