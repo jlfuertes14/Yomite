@@ -3,9 +3,13 @@ import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import type { Session, User } from '@supabase/supabase-js';
 import * as WebBrowser from 'expo-web-browser';
+import * as Linking from 'expo-linking';
 import { createURL, parse } from 'expo-linking';
 
 import { syncUserDataWithCloud } from '../services/cloudSync';
+
+// Complete any pending auth session when the app is foregrounded from deep link redirect
+WebBrowser.maybeCompleteAuthSession();
 
 export interface UserProfileData {
   username?: string;
@@ -66,6 +70,7 @@ export function getUserAvatarUrl(user: User | null | undefined): string | null {
 
 let isAuthInitialized = false;
 let authListenerSubscription: any = null;
+let deepLinkSubscription: any = null;
 
 export const useUserStore = create<UserState>((set, get) => ({
   user: null,
@@ -132,6 +137,59 @@ export const useUserStore = create<UserState>((set, get) => ({
           } catch (_e) {}
           window.history.replaceState(null, '', window.location.pathname);
         }
+      }
+
+      // 2. On Native (Android / iOS): Listen for incoming OAuth deep links
+      if (Platform.OS !== 'web') {
+        const processDeepLink = async (urlStr: string) => {
+          if (!urlStr) return;
+          if (urlStr.includes('access_token') || urlStr.includes('refresh_token')) {
+            let accessToken: string | undefined;
+            let refreshToken: string | undefined;
+
+            if (urlStr.includes('#')) {
+              const hashParts = urlStr.split('#')[1];
+              const params = new URLSearchParams(hashParts);
+              accessToken = params.get('access_token') || undefined;
+              refreshToken = params.get('refresh_token') || undefined;
+            }
+
+            if (!accessToken || !refreshToken) {
+              const parsed = parse(urlStr);
+              accessToken = parsed.queryParams?.access_token as string;
+              refreshToken = parsed.queryParams?.refresh_token as string;
+            }
+
+            if (accessToken && refreshToken) {
+              const { data, error } = await supabase.auth.setSession({
+                access_token: accessToken,
+                refresh_token: refreshToken,
+              });
+              if (!error && data?.session) {
+                set({
+                  session: data.session,
+                  user: data.user,
+                  isLoading: false,
+                  authSuccessMessage: '🎉 Signed in with Google!',
+                });
+                if (data.user?.id) syncUserDataWithCloud(data.user.id);
+              }
+            }
+          }
+        };
+
+        // Check if app was launched via deep link
+        Linking.getInitialURL().then((url) => {
+          if (url) processDeepLink(url);
+        });
+
+        // Listen for foreground deep links while app is running
+        if (deepLinkSubscription) {
+          deepLinkSubscription.remove();
+        }
+        deepLinkSubscription = Linking.addEventListener('url', (event) => {
+          if (event.url) processDeepLink(event.url);
+        });
       }
 
       const { data } = await supabase.auth.getSession();
@@ -254,7 +312,10 @@ export const useUserStore = create<UserState>((set, get) => ({
       if (error) return { error };
 
       if (data?.url) {
-        const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUri);
+        const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUri, {
+          showInRecents: false,
+          createTask: false,
+        });
         if (result.type === 'success' && result.url) {
           const urlStr = result.url;
           let accessToken: string | undefined;
@@ -277,6 +338,9 @@ export const useUserStore = create<UserState>((set, get) => ({
             await supabase.auth.setSession({
               access_token: accessToken,
               refresh_token: refreshToken,
+            });
+            set({
+              authSuccessMessage: '🎉 Signed in with Google!',
             });
           }
         }

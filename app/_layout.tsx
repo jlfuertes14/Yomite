@@ -6,6 +6,7 @@ import { useFonts } from 'expo-font';
 import { Ionicons } from '@expo/vector-icons';
 import * as SplashScreen from 'expo-splash-screen';
 import * as SystemUI from 'expo-system-ui';
+import * as WebBrowser from 'expo-web-browser';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ThemeProvider, DarkTheme } from 'expo-router/react-navigation';
 import { Colors } from '../constants/Colors';
@@ -13,6 +14,9 @@ import { requestStoragePermissionOnLaunch } from '../src/services/storagePermiss
 import { useUserStore } from '../src/store/userStore';
 import { CacheManager } from '../src/utils/cacheManager';
 import { useDocumentTitle } from '../src/utils/useDocumentTitle';
+
+// Ensure pending OAuth web sessions complete immediately on redirect
+WebBrowser.maybeCompleteAuthSession();
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
