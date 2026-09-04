@@ -359,7 +359,7 @@ export async function searchManga(
     limit,
     offset,
     includes: ['cover_art', 'author', 'artist'],
-    'contentRating[]': filters.contentRating ?? ['safe', 'suggestive'],
+    'contentRating[]': filters.contentRating ?? ['safe', 'suggestive', 'erotica', 'pornographic'],
   };
 
   if (filters.title) params.title = filters.title;
@@ -371,7 +371,11 @@ export async function searchManga(
   if (filters.translatedLanguage?.length)
     params['availableTranslatedLanguages[]'] = filters.translatedLanguage;
 
-  if (filters.sort) {
+  if (filters.orders && Object.keys(filters.orders).length > 0) {
+    for (const [field, direction] of Object.entries(filters.orders)) {
+      params[`order[${field}]`] = direction;
+    }
+  } else if (filters.sort) {
     const order = filters.order ?? 'desc';
     params[`order[${filters.sort}]`] = order;
   }
@@ -399,7 +403,7 @@ export async function getPopularManga(limit = 10, bypassCache = false): Promise<
     params: {
       limit,
       includes: ['cover_art', 'author', 'artist'],
-      'contentRating[]': ['safe', 'suggestive'],
+      'contentRating[]': ['safe', 'suggestive', 'erotica', 'pornographic'],
       createdAtSince,
       'order[followedCount]': 'desc',
       hasAvailableChapters: true,
@@ -435,7 +439,7 @@ export async function getLatestUpdates(
       limit: Math.min(100, Math.max(limit * 4, 50)),
       offset,
       includes: ['manga', 'scanlation_group', 'user'],
-      'contentRating[]': ['safe', 'suggestive', 'erotica'],
+      'contentRating[]': ['safe', 'suggestive', 'erotica', 'pornographic'],
       'translatedLanguage[]': ['en'],
       'order[readableAt]': 'desc',
     },
@@ -481,7 +485,7 @@ export async function getRecentlyAdded(
       limit,
       offset,
       includes: ['cover_art', 'author', 'artist'],
-      'contentRating[]': ['safe', 'suggestive', 'erotica'],
+      'contentRating[]': ['safe', 'suggestive', 'erotica', 'pornographic'],
       'order[createdAt]': 'desc',
       hasAvailableChapters: true,
     },
@@ -496,7 +500,7 @@ export async function getRandomManga(): Promise<Manga> {
   const res = await api.get<MangaDexResponse<Manga>>('/manga/random', {
     params: {
       includes: ['cover_art', 'author', 'artist'],
-      'contentRating[]': ['safe', 'suggestive'],
+      'contentRating[]': ['safe', 'suggestive', 'erotica', 'pornographic'],
     },
   });
   return res.data.data;
@@ -628,7 +632,7 @@ export async function getMangaChapters(
       offset,
       includes: ['scanlation_group', 'user'],
       'order[chapter]': order,
-      'contentRating[]': ['safe', 'suggestive', 'erotica'],
+      'contentRating[]': ['safe', 'suggestive', 'erotica', 'pornographic'],
     },
   });
 

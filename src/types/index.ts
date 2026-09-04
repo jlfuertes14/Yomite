@@ -157,4 +157,5 @@ export interface SearchFilters {
   translatedLanguage?: string[];
   sort?: 'relevance' | 'latestUploadedChapter' | 'followedCount' | 'createdAt' | 'year' | 'rating' | 'title';
   order?: 'asc' | 'desc';
+  orders?: Record<string, 'asc' | 'desc'>;
 }

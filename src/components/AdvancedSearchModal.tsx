@@ -93,8 +93,8 @@ export function AdvancedSearchModal({
   const [tags, setTags] = useState<MangaTag[]>([]);
   const [isLoadingTags, setIsLoadingTags] = useState(false);
 
-  // Active Sort Option
-  const [activeSortId, setActiveSortId] = useState<string>('most_follows');
+  // Active Sort Options (ordered by priority for tie-breakers)
+  const [activeSortIds, setActiveSortIds] = useState<string[]>(['most_follows']);
 
   // Filters state
   const [includedTags, setIncludedTags] = useState<string[]>([]);
@@ -102,6 +102,8 @@ export function AdvancedSearchModal({
   const [selectedRatings, setSelectedRatings] = useState<('safe' | 'suggestive' | 'erotica' | 'pornographic')[]>([
     'safe',
     'suggestive',
+    'erotica',
+    'pornographic',
   ]);
   const [selectedStatus, setSelectedStatus] = useState<('ongoing' | 'completed' | 'cancelled' | 'hiatus')[]>([]);
   const [selectedDemographic, setSelectedDemographic] = useState<('shounen' | 'shoujo' | 'josei' | 'seinen')[]>([]);
@@ -150,9 +152,36 @@ export function AdvancedSearchModal({
   }, [tags]);
 
   const toggleRating = (rating: 'safe' | 'suggestive' | 'erotica' | 'pornographic') => {
-    setSelectedRatings((prev) =>
-      prev.includes(rating) ? prev.filter((r) => r !== rating) : [...prev, rating]
-    );
+    if (selectedRatings.includes(rating)) {
+      if (selectedRatings.length === 1) return;
+      setSelectedRatings((prev) => prev.filter((r) => r !== rating));
+    } else {
+      setSelectedRatings((prev) => [...prev, rating]);
+    }
+  };
+
+  const toggleSort = (opt: SortOptionItem) => {
+    setActiveSortIds((prev) => {
+      if (prev.includes(opt.id)) {
+        const remaining = prev.filter((id) => id !== opt.id);
+        return remaining.length > 0 ? remaining : ['most_follows'];
+      }
+
+      // If an option for the same sort field is active (e.g., latest_upload vs oldest_upload),
+      // replace it in-place so its priority position is preserved.
+      const existingSameFieldIdx = prev.findIndex((id) => {
+        const item = MANGADEX_SORT_OPTIONS.find((o) => o.id === id);
+        return item?.sort === opt.sort;
+      });
+
+      if (existingSameFieldIdx !== -1) {
+        const next = [...prev];
+        next[existingSameFieldIdx] = opt.id;
+        return next;
+      }
+
+      return [...prev, opt.id];
+    });
   };
 
   const toggleStatus = (status: 'ongoing' | 'completed' | 'cancelled' | 'hiatus') => {
@@ -180,26 +209,38 @@ export function AdvancedSearchModal({
 
   const handleReset = () => {
     setTitle('');
-    setActiveSortId('most_follows');
+    setActiveSortIds(['most_follows']);
     setIncludedTags([]);
     setExcludedTags([]);
-    setSelectedRatings(['safe', 'suggestive']);
+    setSelectedRatings(['safe', 'suggestive', 'erotica', 'pornographic']);
     setSelectedStatus([]);
     setSelectedDemographic([]);
   };
 
   const handleApply = () => {
-    const selectedSortOpt = MANGADEX_SORT_OPTIONS.find((o) => o.id === activeSortId) || MANGADEX_SORT_OPTIONS[0];
+    const selectedSortOpts = activeSortIds
+      .map((id) => MANGADEX_SORT_OPTIONS.find((o) => o.id === id))
+      .filter((o): o is SortOptionItem => !!o);
+
+    const primary = selectedSortOpts[0] || MANGADEX_SORT_OPTIONS[0];
+
+    const orders: Record<string, 'asc' | 'desc'> = {};
+    for (const opt of selectedSortOpts) {
+      if (opt.sort && opt.order) {
+        orders[opt.sort] = opt.order;
+      }
+    }
 
     onApplyFilters({
       title: title.trim() || undefined,
       includedTags: includedTags.length ? includedTags : undefined,
       excludedTags: excludedTags.length ? excludedTags : undefined,
-      contentRating: selectedRatings.length ? selectedRatings : ['safe', 'suggestive'],
+      contentRating: selectedRatings.length ? selectedRatings : ['safe', 'suggestive', 'erotica', 'pornographic'],
       status: selectedStatus.length ? selectedStatus : undefined,
       publicationDemographic: selectedDemographic.length ? selectedDemographic : undefined,
-      sort: selectedSortOpt.sort,
-      order: selectedSortOpt.order,
+      sort: primary.sort,
+      order: primary.order,
+      orders: Object.keys(orders).length > 0 ? orders : undefined,
     });
     onClose();
   };
@@ -240,22 +281,45 @@ export function AdvancedSearchModal({
         />
 
         {/* MangaDex Official 13 Sort Options */}
-        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Sort By</Text>
+        <View style={styles.sortHeaderRow}>
+          <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Sort By</Text>
+          <Text style={[styles.sectionHint, { color: colors.textMuted }]}>
+            {activeSortIds.length > 1
+              ? `${activeSortIds.length} active (in order of priority)`
+              : 'Multi-select for tie-breaking'}
+          </Text>
+        </View>
         <View style={styles.chipRow}>
           {MANGADEX_SORT_OPTIONS.map((opt) => {
-            const active = activeSortId === opt.id;
+            const sortIndex = activeSortIds.indexOf(opt.id);
+            const active = sortIndex !== -1;
             return (
               <Pressable
                 key={opt.id}
-                onPress={() => setActiveSortId(opt.id)}
+                onPress={() => toggleSort(opt)}
                 style={[
                   styles.chip,
                   {
                     backgroundColor: active ? colors.text : colors.surfaceElevated,
                     borderColor: active ? colors.text : colors.border,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
                   },
                 ]}
               >
+                {active && activeSortIds.length > 1 && (
+                  <View
+                    style={[
+                      styles.sortPriorityBadge,
+                      { backgroundColor: colors.background },
+                    ]}
+                  >
+                    <Text style={[styles.sortPriorityBadgeText, { color: colors.text }]}>
+                      {sortIndex + 1}
+                    </Text>
+                  </View>
+                )}
                 <Text style={[styles.chipText, { color: active ? colors.background : colors.textSecondary }]}>
                   {opt.label}
                 </Text>
@@ -519,6 +583,28 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.footnote,
     fontWeight: Typography.weights.bold,
     marginTop: Spacing.xs,
+  },
+  sortHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    marginTop: Spacing.xs,
+  },
+  sectionHint: {
+    fontSize: 11,
+    fontWeight: Typography.weights.medium,
+  },
+  sortPriorityBadge: {
+    width: 15,
+    height: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sortPriorityBadgeText: {
+    fontSize: 9,
+    fontWeight: Typography.weights.bold,
+    lineHeight: 11,
   },
   input: {
     height: 44,

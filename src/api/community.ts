@@ -100,7 +100,7 @@ export async function getCommunityForums(bypassCache = false): Promise<ForumThre
       params: {
         limit: 15,
         'order[publishAt]': 'desc',
-        'contentRating[]': ['safe', 'suggestive', 'erotica'],
+        'contentRating[]': ['safe', 'suggestive', 'erotica', 'pornographic'],
         includes: ['manga', 'scanlation_group', 'user'],
         'translatedLanguage[]': ['en'],
       },
