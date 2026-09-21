@@ -29,15 +29,15 @@ import { useDocumentTitle } from '../src/utils/useDocumentTitle';
 
 // App Specifications & Release Metadata
 const APP_RELEASE = {
-  version: 'v1.2.1',
-  buildNumber: '105',
-  releaseDate: 'August 2026',
+  version: 'v1.2.2',
+  buildNumber: '106',
+  releaseDate: 'September 2026',
   fileSize: '118.86 MB',
   minAndroid: 'Android 8.0 (Oreo) or higher',
   minIos: 'iOS 15.0+ (via Web PWA)',
   architecture: 'Universal (ARM64 & x86_64)',
   sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-  apkDownloadUrl: 'https://expo.dev/accounts/chiro14/projects/yomite/builds/ebcda5ee-2451-480c-a888-35e5b48cfe61',
+  apkDownloadUrl: 'https://expo.dev/accounts/chiro14/projects/yomite/builds/2675b251-7b47-4886-9769-f669f55a9691',
 };
 
 type DemoTab = 'reader' | 'offline' | 'languages' | 'library';

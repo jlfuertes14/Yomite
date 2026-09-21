@@ -713,7 +713,7 @@ export default function SettingsScreen() {
                       Get Yomite for Mobile
                     </Text>
                     <View style={[styles.promoBadge, { backgroundColor: colors.accentSubtle }]}>
-                      <Text style={[styles.promoBadgeText, { color: colors.accent }]}>APK v1.2.0</Text>
+                      <Text style={[styles.promoBadgeText, { color: colors.accent }]}>APK v1.2.2</Text>
                     </View>
                   </View>
                   <Text style={[styles.optionDesc, { color: colors.textMuted }]}>
@@ -729,7 +729,7 @@ export default function SettingsScreen() {
         {/* App Info */}
         <View style={styles.footer}>
           <Text style={[styles.footerText, { color: colors.textMuted }]}>
-            Yomite Manga Reader v1.2.0
+            Yomite Manga Reader v1.2.2
           </Text>
           <Text style={[styles.footerSubText, { color: colors.textMuted }]}>
             Powered by MangaDex API & Supabase Cloud Sync
