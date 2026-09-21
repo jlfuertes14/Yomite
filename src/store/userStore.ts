@@ -1,19 +1,55 @@
-import { Platform } from 'react-native';
+import { Platform, NativeModules, TurboModuleRegistry } from 'react-native';
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import type { Session, User } from '@supabase/supabase-js';
 import * as Linking from 'expo-linking';
 import { createURL, parse } from 'expo-linking';
-import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import * as WebBrowser from 'expo-web-browser';
 
 import { syncUserDataWithCloud } from '../services/cloudSync';
 
-// Configure native Google Sign-In SDK with Web Client ID
-if (Platform.OS !== 'web') {
-  GoogleSignin.configure({
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
-    offlineAccess: false,
-  });
+let GoogleSigninModule: any = null;
+let googleSigninConfigured = false;
+
+/**
+ * Safely access @react-native-google-signin/google-signin only when its native binary
+ * module (RNGoogleSignin) exists in the runtime environment.
+ * This prevents Expo Go from throwing:
+ * "TurboModuleRegistry.getEnforcing(...): 'RNGoogleSignin' could not be found"
+ */
+function getNativeGoogleSignin() {
+  if (Platform.OS === 'web') return null;
+  if (GoogleSigninModule) return GoogleSigninModule;
+
+  const isAvailable =
+    (typeof TurboModuleRegistry !== 'undefined' &&
+      typeof TurboModuleRegistry.get === 'function' &&
+      TurboModuleRegistry.get('RNGoogleSignin') != null) ||
+    (typeof NativeModules !== 'undefined' &&
+      NativeModules?.RNGoogleSignin != null);
+
+  if (!isAvailable) {
+    return null;
+  }
+
+  try {
+    const { GoogleSignin } = require('@react-native-google-signin/google-signin');
+    if (GoogleSignin && !googleSigninConfigured) {
+      const webClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
+      if (webClientId) {
+        GoogleSignin.configure({
+          webClientId,
+          offlineAccess: false,
+        });
+      }
+      googleSigninConfigured = true;
+    }
+    GoogleSigninModule = GoogleSignin;
+    return GoogleSigninModule;
+  } catch (err) {
+    console.warn('[userStore] Native GoogleSignin module could not be loaded:', err);
+    return null;
+  }
 }
 
 export interface UserProfileData {
@@ -287,11 +323,43 @@ export const useUserStore = create<UserState>((set, get) => ({
 
   signInWithGoogle: async () => {
     try {
-      if (Platform.OS === 'web') {
-        const redirectUri = typeof window !== 'undefined'
-          ? window.location.origin
-          : 'https://yomite.vercel.app';
+      const nativeGoogleSignin = getNativeGoogleSignin();
 
+      if (nativeGoogleSignin) {
+        // Native iOS & Android with custom dev client or standalone APK:
+        // Use native Google Sign-In SDK (no browser)
+        const response = await nativeGoogleSignin.signIn();
+        const idToken = response?.data?.idToken;
+
+        if (!idToken) {
+          return { error: { message: 'Google Sign-In failed: no ID token received.' } };
+        }
+
+        // Exchange the native ID token with Supabase for a session
+        const { data, error } = await supabase.auth.signInWithIdToken({
+          provider: 'google',
+          token: idToken,
+        });
+
+        if (!error && data?.session) {
+          set({
+            session: data.session,
+            user: data.user,
+            authSuccessMessage: '🎉 Signed in with Google!',
+          });
+          if (data.user?.id) syncUserDataWithCloud(data.user.id);
+        }
+
+        return { error: error || null };
+      }
+
+      // Web or Expo Go (where RNGoogleSignin native binary module is not present):
+      // Use Supabase OAuth flow via browser or Expo WebBrowser
+      const redirectUri = Platform.OS === 'web'
+        ? (typeof window !== 'undefined' ? window.location.origin : 'https://yomite.vercel.app')
+        : createURL('auth/callback');
+
+      if (Platform.OS === 'web') {
         const { data, error } = await supabase.auth.signInWithOAuth({
           provider: 'google',
           options: {
@@ -300,35 +368,44 @@ export const useUserStore = create<UserState>((set, get) => ({
           },
         });
         return { error };
-      }
-
-      // Native iOS & Android: Use native Google Sign-In SDK (no browser)
-      // This shows the native OS account picker sheet instead of Chrome Custom Tabs
-      const response = await GoogleSignin.signIn();
-      const idToken = response?.data?.idToken;
-
-      if (!idToken) {
-        return { error: { message: 'Google Sign-In failed: no ID token received.' } };
-      }
-
-      // Exchange the native ID token with Supabase for a session
-      const { data, error } = await supabase.auth.signInWithIdToken({
-        provider: 'google',
-        token: idToken,
-      });
-
-      if (!error && data?.session) {
-        set({
-          session: data.session,
-          user: data.user,
-          authSuccessMessage: '🎉 Signed in with Google!',
+      } else {
+        // Mobile Expo Go fallback: use Supabase OAuth with openAuthSessionAsync
+        const { data, error } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: redirectUri,
+            skipBrowserRedirect: true,
+          },
         });
-        if (data.user?.id) syncUserDataWithCloud(data.user.id);
-      }
 
-      return { error: error || null };
+        if (error || !data?.url) {
+          return { error: error || { message: 'Failed to generate Google Sign-In URL' } };
+        }
+
+        const res = await WebBrowser.openAuthSessionAsync(data.url, redirectUri);
+        if (res.type === 'success' && res.url) {
+          const parsed = parse(res.url);
+          const accessToken = parsed.queryParams?.access_token as string;
+          const refreshToken = parsed.queryParams?.refresh_token as string;
+          if (accessToken && refreshToken) {
+            const { data: sessionData, error: sessionErr } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            });
+            if (!sessionErr && sessionData?.session) {
+              set({
+                session: sessionData.session,
+                user: sessionData.user,
+                authSuccessMessage: '🎉 Signed in with Google!',
+              });
+              if (sessionData.user?.id) syncUserDataWithCloud(sessionData.user.id);
+            }
+            return { error: sessionErr };
+          }
+        }
+        return { error: null };
+      }
     } catch (err: any) {
-      // User cancelled the native Google picker
       if (err?.code === 'SIGN_IN_CANCELLED') {
         return { error: null };
       }
@@ -353,6 +430,12 @@ export const useUserStore = create<UserState>((set, get) => ({
   },
 
   signOut: async () => {
+    try {
+      const nativeGoogleSignin = getNativeGoogleSignin();
+      if (nativeGoogleSignin) {
+        await nativeGoogleSignin.signOut().catch(() => {});
+      }
+    } catch (_) {}
     await supabase.auth.signOut();
     set({ user: null, session: null });
   },

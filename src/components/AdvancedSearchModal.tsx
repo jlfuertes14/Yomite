@@ -103,7 +103,6 @@ export function AdvancedSearchModal({
     'safe',
     'suggestive',
     'erotica',
-    'pornographic',
   ]);
   const [selectedStatus, setSelectedStatus] = useState<('ongoing' | 'completed' | 'cancelled' | 'hiatus')[]>([]);
   const [selectedDemographic, setSelectedDemographic] = useState<('shounen' | 'shoujo' | 'josei' | 'seinen')[]>([]);
@@ -212,7 +211,7 @@ export function AdvancedSearchModal({
     setActiveSortIds(['most_follows']);
     setIncludedTags([]);
     setExcludedTags([]);
-    setSelectedRatings(['safe', 'suggestive', 'erotica', 'pornographic']);
+    setSelectedRatings(['safe', 'suggestive', 'erotica']);
     setSelectedStatus([]);
     setSelectedDemographic([]);
   };
@@ -235,7 +234,7 @@ export function AdvancedSearchModal({
       title: title.trim() || undefined,
       includedTags: includedTags.length ? includedTags : undefined,
       excludedTags: excludedTags.length ? excludedTags : undefined,
-      contentRating: selectedRatings.length ? selectedRatings : ['safe', 'suggestive', 'erotica', 'pornographic'],
+      contentRating: selectedRatings.length ? selectedRatings : ['safe', 'suggestive', 'erotica'],
       status: selectedStatus.length ? selectedStatus : undefined,
       publicationDemographic: selectedDemographic.length ? selectedDemographic : undefined,
       sort: primary.sort,

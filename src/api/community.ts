@@ -88,7 +88,7 @@ export async function getChapterComments(chapterId: string): Promise<ForumCommen
  * Fetch trending community forum threads dynamically based on real MangaDex top titles
  */
 export async function getCommunityForums(bypassCache = false): Promise<ForumThread[]> {
-  const cacheKey = 'community_forums_clean_v4';
+  const cacheKey = 'community_forums_clean_v5';
   if (!bypassCache) {
     const cached = await CacheManager.get<ForumThread[]>(cacheKey);
     if (cached) return cached;
@@ -100,7 +100,7 @@ export async function getCommunityForums(bypassCache = false): Promise<ForumThre
       params: {
         limit: 15,
         'order[publishAt]': 'desc',
-        'contentRating[]': ['safe', 'suggestive', 'erotica', 'pornographic'],
+        'contentRating[]': ['safe', 'suggestive', 'erotica'],
         includes: ['manga', 'scanlation_group', 'user'],
         'translatedLanguage[]': ['en'],
       },

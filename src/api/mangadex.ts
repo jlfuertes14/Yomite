@@ -346,6 +346,9 @@ export function getMangaDescription(manga: Manga): string {
 
 // ─── Search & Discovery ──────────────────────────────────────────
 
+export const DEFAULT_CONTENT_RATINGS: ('safe' | 'suggestive' | 'erotica')[] = ['safe', 'suggestive', 'erotica'];
+export const KITSUNE_SCANS_GROUP_ID = '76b8ba67-ccf8-49d2-8a82-ae3ba6732aa4';
+
 export async function searchManga(
   filters: SearchFilters = {},
   limit = 27,
@@ -359,7 +362,9 @@ export async function searchManga(
     limit,
     offset,
     includes: ['cover_art', 'author', 'artist'],
-    'contentRating[]': filters.contentRating ?? ['safe', 'suggestive', 'erotica', 'pornographic'],
+    'contentRating[]': (filters.contentRating && filters.contentRating.length > 0)
+      ? filters.contentRating
+      : DEFAULT_CONTENT_RATINGS,
   };
 
   if (filters.title) params.title = filters.title;
@@ -393,7 +398,7 @@ export async function getPopularManga(limit = 10, bypassCache = false): Promise<
   // recent-title search sorted by follow count: new enough to be a fresh title,
   // then popular within that window.
   const createdAtSince = createdAtSinceDate.toISOString().slice(0, 19);
-  const cacheKey = `popular_new_titles_${limit}_${createdAtSince.slice(0, 10)}`;
+  const cacheKey = `popular_new_titles_v3_${limit}_${createdAtSince.slice(0, 10)}`;
   if (!bypassCache) {
     const cached = await CacheManager.get<Manga[]>(cacheKey);
     if (cached) return cached;
@@ -403,14 +408,14 @@ export async function getPopularManga(limit = 10, bypassCache = false): Promise<
     params: {
       limit,
       includes: ['cover_art', 'author', 'artist'],
-      'contentRating[]': ['safe', 'suggestive', 'erotica', 'pornographic'],
+      'contentRating[]': DEFAULT_CONTENT_RATINGS,
       createdAtSince,
       'order[followedCount]': 'desc',
       hasAvailableChapters: true,
     },
   });
 
-  const data = res.data.data;
+  const data = res.data.data.filter((m) => m.attributes?.contentRating !== 'pornographic');
   await CacheManager.set(cacheKey, data, 10 * 60 * 1000); // 10 min TTL
   return data;
 }
@@ -420,7 +425,7 @@ export async function getLatestUpdates(
   offset = 0,
   bypassCache = false
 ): Promise<{ data: Manga[]; total: number }> {
-  const cacheKey = `latest_updates_${limit}_${offset}`;
+  const cacheKey = `latest_updates_v3_${limit}_${offset}`;
   if (!bypassCache) {
     const cached = await CacheManager.get<{ data: Manga[]; total: number }>(cacheKey);
     if (cached) return cached;
@@ -439,7 +444,8 @@ export async function getLatestUpdates(
       limit: Math.min(100, Math.max(limit * 4, 50)),
       offset,
       includes: ['manga', 'scanlation_group', 'user'],
-      'contentRating[]': ['safe', 'suggestive', 'erotica', 'pornographic'],
+      'contentRating[]': DEFAULT_CONTENT_RATINGS,
+      'excludedGroups[]': [KITSUNE_SCANS_GROUP_ID],
       'translatedLanguage[]': ['en'],
       'order[readableAt]': 'desc',
     },
@@ -448,6 +454,13 @@ export async function getLatestUpdates(
   const mangaIds: string[] = [];
   const seen = new Set<string>();
   for (const chapter of chapterRes.data.data) {
+    // Filter out Kitsune Scans releases
+    const scanGroup = chapter.relationships?.find((rel) => rel.type === 'scanlation_group');
+    const groupName = (scanGroup as any)?.attributes?.name?.toLowerCase() || '';
+    if (scanGroup?.id === KITSUNE_SCANS_GROUP_ID || groupName.includes('kitsune')) {
+      continue;
+    }
+
     const mangaId = chapter.relationships?.find((rel) => rel.type === 'manga')?.id;
     if (mangaId && !seen.has(mangaId)) {
       seen.add(mangaId);
@@ -458,7 +471,12 @@ export async function getLatestUpdates(
 
   const data = (await Promise.all(mangaIds.map(async (mangaId) => {
     try {
-      return await getMangaDetails(mangaId);
+      const manga = await getMangaDetails(mangaId);
+      // Double check contentRating to exclude any pornographic titles
+      if (manga?.attributes?.contentRating === 'pornographic') {
+        return null;
+      }
+      return manga;
     } catch {
       return null;
     }
@@ -474,7 +492,7 @@ export async function getRecentlyAdded(
   offset = 0,
   bypassCache = false
 ): Promise<{ data: Manga[]; total: number }> {
-  const cacheKey = `recently_added_${limit}_${offset}`;
+  const cacheKey = `recently_added_v3_${limit}_${offset}`;
   if (!bypassCache) {
     const cached = await CacheManager.get<{ data: Manga[]; total: number }>(cacheKey);
     if (cached) return cached;
@@ -485,13 +503,14 @@ export async function getRecentlyAdded(
       limit,
       offset,
       includes: ['cover_art', 'author', 'artist'],
-      'contentRating[]': ['safe', 'suggestive', 'erotica', 'pornographic'],
+      'contentRating[]': DEFAULT_CONTENT_RATINGS,
       'order[createdAt]': 'desc',
       hasAvailableChapters: true,
     },
   });
 
-  const result = { data: res.data.data, total: res.data.total ?? 0 };
+  const filteredData = res.data.data.filter((m) => m.attributes?.contentRating !== 'pornographic');
+  const result = { data: filteredData, total: res.data.total ?? 0 };
   await CacheManager.set(cacheKey, result, 5 * 60 * 1000); // 5 min TTL
   return result;
 }
@@ -500,7 +519,7 @@ export async function getRandomManga(): Promise<Manga> {
   const res = await api.get<MangaDexResponse<Manga>>('/manga/random', {
     params: {
       includes: ['cover_art', 'author', 'artist'],
-      'contentRating[]': ['safe', 'suggestive', 'erotica', 'pornographic'],
+      'contentRating[]': DEFAULT_CONTENT_RATINGS,
     },
   });
   return res.data.data;

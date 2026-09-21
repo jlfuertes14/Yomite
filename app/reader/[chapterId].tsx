@@ -59,6 +59,7 @@ interface ReaderImagePageProps {
   width: number;
   height: number;
   contentFit: 'contain' | 'cover' | 'fill';
+  zoomEnabled?: boolean;
   onTap?: (x: number) => void;
   onAspectMeasured?: (ratio: number) => void;
 }
@@ -69,6 +70,7 @@ const ReaderImagePage = React.memo(function ReaderImagePage({
   width,
   height,
   contentFit,
+  zoomEnabled = true,
   onTap,
   onAspectMeasured,
 }: ReaderImagePageProps) {
@@ -142,6 +144,7 @@ const ReaderImagePage = React.memo(function ReaderImagePage({
               source={imageSource}
               style={{ width, height }}
               contentFit={contentFit}
+              zoomEnabled={zoomEnabled}
               recyclingKey={url}
               onTap={onTap}
               onLoad={(e) => {
@@ -198,6 +201,7 @@ const WebtoonPageItem = React.memo(function WebtoonPageItem({
       width={webtoonWidth}
       height={displayHeight}
       contentFit={displayFit}
+      zoomEnabled={false}
       onTap={onTap}
       onAspectMeasured={(ratio) => {
         setAspectRatio((prev) => (prev === ratio ? prev : ratio));
@@ -810,6 +814,7 @@ export default function ReaderScreen() {
         <FlatList
           key={`flatlist-webtoon-${chapterId}`}
           ref={webtoonListRef}
+          style={styles.webtoonList}
           data={pages}
           keyExtractor={(item, index) => `webtoon-${item}-${index}`}
           renderItem={({ item, index }) => (
@@ -824,11 +829,13 @@ export default function ReaderScreen() {
           )}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
-          removeClippedSubviews={Platform.OS !== 'web'}
-          maxToRenderPerBatch={3}
+          removeClippedSubviews={false}
+          scrollEnabled={true}
+          nestedScrollEnabled={true}
+          maxToRenderPerBatch={5}
           updateCellsBatchingPeriod={50}
-          initialNumToRender={2}
-          windowSize={5}
+          initialNumToRender={5}
+          windowSize={7}
           onScrollToIndexFailed={({ index, averageItemLength }) => {
             if (resumeRestoreAttemptsRef.current >= 3) return;
             resumeRestoreAttemptsRef.current += 1;
@@ -914,7 +921,7 @@ export default function ReaderScreen() {
 
       {/* Page Number Indicator */}
       {showPageNumber && pages.length > 0 && (
-        <View style={styles.pageIndicator}>
+        <View style={styles.pageIndicator} pointerEvents="none">
           <Text style={styles.pageIndicatorText}>
             {currentPage + 1} / {pages.length}
           </Text>
@@ -1182,6 +1189,10 @@ const styles = StyleSheet.create({
   doubleImage: {},
 
   // Webtoon / Long Strip
+  webtoonList: {
+    flex: 1,
+    width: '100%',
+  },
   webtoonImage: {},
 
   // Controls Overlay

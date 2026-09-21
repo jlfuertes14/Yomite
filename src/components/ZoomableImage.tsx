@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { StyleProp, ImageStyle, Platform, Pressable } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -13,6 +13,7 @@ interface ZoomableImageProps {
   source: any;
   style: StyleProp<ImageStyle>;
   contentFit?: 'contain' | 'cover' | 'fill';
+  zoomEnabled?: boolean;
   onTap?: (pageX: number) => void;
   onLoad?: (e: any) => void;
   onError?: () => void;
@@ -23,12 +24,15 @@ export function ZoomableImage({
   source,
   style,
   contentFit = 'contain',
+  zoomEnabled = true,
   onTap,
   onLoad,
   onError,
   recyclingKey,
 }: ZoomableImageProps) {
-  if (Platform.OS === 'web') {
+  // If zoom is explicitly disabled or we are on web, render standard pressable image
+  // without any gesture detector or pan handler overhead so native scroll is 100% unimpeded.
+  if (!zoomEnabled || Platform.OS === 'web') {
     return (
       <Pressable
         onPress={(e: any) => {
@@ -41,7 +45,7 @@ export function ZoomableImage({
             onTap(pageX);
           }
         }}
-        style={[{ justifyContent: 'center', alignItems: 'center', cursor: 'pointer' }, style as any]}
+        style={[{ justifyContent: 'center', alignItems: 'center' }, Platform.OS === 'web' ? { cursor: 'pointer' } : null, style as any]}
       >
         <Image
           source={source}
@@ -54,6 +58,9 @@ export function ZoomableImage({
       </Pressable>
     );
   }
+
+  const [isZoomed, setIsZoomed] = useState(false);
+
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
 
@@ -71,6 +78,9 @@ export function ZoomableImage({
   const pinchGesture = Gesture.Pinch()
     .onUpdate((e) => {
       scale.value = Math.max(1, Math.min(savedScale.value * e.scale, 4));
+      if (scale.value > 1.05 && !isZoomed) {
+        runOnJS(setIsZoomed)(true);
+      }
     })
     .onEnd(() => {
       savedScale.value = scale.value;
@@ -81,10 +91,16 @@ export function ZoomableImage({
         translateY.value = withSpring(0);
         savedTranslateX.value = 0;
         savedTranslateY.value = 0;
+        runOnJS(setIsZoomed)(false);
+      } else {
+        runOnJS(setIsZoomed)(true);
       }
     });
 
+  // Pan is ONLY enabled when zoomed in. This is critical: when not zoomed, pan is disabled
+  // so touches pass completely through to parent FlatList / ScrollView without being cancelled.
   const panGesture = Gesture.Pan()
+    .enabled(isZoomed)
     .onUpdate((e) => {
       if (scale.value > 1.05) {
         translateX.value = savedTranslateX.value + e.translationX;
@@ -99,10 +115,35 @@ export function ZoomableImage({
         translateY.value = withSpring(0);
         savedTranslateX.value = 0;
         savedTranslateY.value = 0;
+        runOnJS(setIsZoomed)(false);
       }
     });
 
-  const tapGesture = Gesture.Tap()
+  const doubleTapGesture = Gesture.Tap()
+    .numberOfTaps(2)
+    .maxDuration(250)
+    .onEnd((e) => {
+      if (scale.value > 1.05) {
+        scale.value = withSpring(1);
+        savedScale.value = 1;
+        translateX.value = withSpring(0);
+        translateY.value = withSpring(0);
+        savedTranslateX.value = 0;
+        savedTranslateY.value = 0;
+        runOnJS(setIsZoomed)(false);
+      } else {
+        scale.value = withSpring(2.5);
+        savedScale.value = 2.5;
+        translateX.value = withSpring(0);
+        translateY.value = withSpring(0);
+        savedTranslateX.value = 0;
+        savedTranslateY.value = 0;
+        runOnJS(setIsZoomed)(true);
+      }
+    });
+
+  const singleTapGesture = Gesture.Tap()
+    .numberOfTaps(1)
     .maxDuration(250)
     .onEnd((e) => {
       if (scale.value <= 1.05 && onTap) {
@@ -113,7 +154,7 @@ export function ZoomableImage({
   const composedGesture = Gesture.Simultaneous(
     pinchGesture,
     panGesture,
-    tapGesture
+    Gesture.Exclusive(doubleTapGesture, singleTapGesture)
   );
 
   const animatedStyle = useAnimatedStyle(() => {
