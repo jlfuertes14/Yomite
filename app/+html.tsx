@@ -30,6 +30,7 @@ export default function Root({ children }: PropsWithChildren) {
         />
         <meta name="author" content="Yomite" />
         <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+        <meta name="google-site-verification" content="qrlNJcgs_SW_y1-zfCBYFSm2ZIWTAyPQsvb9V7dCzM8" />
         <link rel="canonical" href="https://yomite.vercel.app/" />
 
         {/* OpenGraph / Facebook */}
