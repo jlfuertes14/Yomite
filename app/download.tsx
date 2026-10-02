@@ -4,7 +4,7 @@
  * Features: Interactive Sliding Feature Carousel (space-saving), Authentic Flagship
  * Device Mockups, Perfectly Centered Grid, Direct APK Download & Sideloading Hub.
  */
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Radius, Spacing, Typography } from '../constants/Colors';
@@ -40,188 +41,9 @@ const APP_RELEASE = {
   apkDownloadUrl: 'https://expo.dev/accounts/chiro14/projects/yomite/builds/2675b251-7b47-4886-9769-f669f55a9691',
 };
 
-type DemoTab = 'reader' | 'offline' | 'languages' | 'library';
 
-const HERO_PREVIEWS: Record<DemoTab, { title: string; subtitle: string; image: any; tag: string; tagColor: string }> = {
-  reader: {
-    title: 'Reader Engine',
-    subtitle: 'OLED Pure Black & 60 FPS Scroll',
-    image: require('../assets/images/reader_image.png'),
-    tag: 'OLED BLACK • 60 FPS',
-    tagColor: '#F43F5E',
-  },
-  offline: {
-    title: 'Offline Vault',
-    subtitle: 'Zero Buffering Disk Storage',
-    image: require('../assets/images/offline_vault.png'),
-    tag: '100% OFFLINE DISK',
-    tagColor: '#10B981',
-  },
-  languages: {
-    title: '30+ Languages',
-    subtitle: 'Direct MangaDex Scanlations',
-    image: require('../assets/images/language_options.png'),
-    tag: 'MANGADEX API',
-    tagColor: '#3B82F6',
-  },
-  library: {
-    title: 'Cloud Library',
-    subtitle: 'Seamless Mobile ↔ Web Sync',
-    image: require('../assets/images/cloud_libary.png'),
-    tag: 'REALTIME SYNC',
-    tagColor: '#F59E0B',
-  },
-};
 
-interface FeatureSlide {
-  id: string;
-  number: string;
-  tabLabel: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  category: string;
-  title: string;
-  paragraph: string;
-  tag: string;
-  tagColor: string;
-  image: any;
-  interactiveType?: 'readerMode' | 'languages';
-  checklist: Array<{ title: string; desc: string }>;
-}
 
-const FEATURE_SLIDES: FeatureSlide[] = [
-  {
-    id: 'reader',
-    number: '01',
-    tabLabel: 'Core Engine',
-    icon: 'speedometer-outline',
-    category: 'CORE ENGINE',
-    title: 'Instant, 60 fps page turns with true OLED black.',
-    paragraph: 'Whether you are binge-reading continuous vertical manhwa webtoons or savoring delicate right-to-left double page spreads, Yomite responds instantaneously with zero hitch or stutter.',
-    tag: 'OLED BLACK • 60 FPS',
-    tagColor: '#F43F5E',
-    image: require('../assets/images/reader_image.png'),
-    interactiveType: 'readerMode',
-    checklist: [
-      { title: 'OLED Pure Black Background', desc: 'eliminates battery drain on long midnight reads.' },
-      { title: 'Micro-Touch Zoom Physics', desc: 'renders fine ink lines and double spreads without blur.' },
-      { title: 'Custom Margins & Brightness', desc: 'saved per series automatically.' },
-    ],
-  },
-  {
-    id: 'offline',
-    number: '02',
-    tabLabel: 'Offline Vault',
-    icon: 'cloud-download-outline',
-    category: 'OFFLINE VAULT',
-    title: 'Subways, flights, and dead zones. Carry entire arcs anywhere.',
-    paragraph: 'Never let an underground tunnel or airplane mode interrupt your favorite story climax. Batch-download 20, 50, or 100 chapters in a single tap directly to your device storage.',
-    tag: '100% OFFLINE DISK',
-    tagColor: '#10B981',
-    image: require('../assets/images/offline_vault.png'),
-    checklist: [
-      { title: 'Zero Buffer Lag', desc: 'Chapters read from encrypted flash storage with immediate page switches.' },
-      { title: 'Background Task Downloads', desc: 'Queue large arcs and let Yomite finish in the background.' },
-      { title: 'MicroSD & Internal Storage', desc: 'Choose where your downloaded manga lives without restrictions.' },
-    ],
-  },
-  {
-    id: 'languages',
-    number: '03',
-    tabLabel: '30+ Languages',
-    icon: 'globe-outline',
-    category: 'COMMUNITY ARCHIVE',
-    title: 'Global scanlations across 30+ languages. Zero gatekeeping.',
-    paragraph: 'Powered directly by MangaDex’s community API. Read releases from passionate fan scanlation teams across the world as soon as raw scans are translated.',
-    tag: '30+ LANGUAGES',
-    tagColor: '#3B82F6',
-    image: require('../assets/images/language_options.png'),
-    interactiveType: 'languages',
-    checklist: [
-      { title: 'Direct Scanlation Credit', desc: 'Support scanlation groups with group details and direct links.' },
-      { title: 'Instant Chapter Drops', desc: 'New chapter updates appear the moment they are indexed.' },
-    ],
-  },
-  {
-    id: 'library',
-    number: '04',
-    tabLabel: 'Cloud Sync',
-    icon: 'sync-outline',
-    category: 'CLOUD CONTINUITY',
-    title: 'Start reading on desktop. Pick up on your phone.',
-    paragraph: 'Read Chapter 34 at your desk on the web app during your lunch break. Open Yomite on your phone on the train ride home, and you will be exactly where you left off at page 18.',
-    tag: 'REALTIME SYNC',
-    tagColor: '#F59E0B',
-    image: require('../assets/images/cloud_libary.png'),
-    checklist: [
-      { title: 'Zero Account Friction', desc: 'Works seamlessly with optional Google authentication or anonymous local storage.' },
-      { title: 'Unread Badges & Reading History', desc: 'Keep track of your progress across hundreds of titles automatically.' },
-    ],
-  },
-];
-
-interface PhoneMockupFrameProps {
-  image: any;
-  tag: string;
-  tagColor?: string;
-  isMobile?: boolean;
-  isDesktop?: boolean;
-  variant?: 'hero' | 'carousel';
-}
-
-function PhoneMockupFrame({
-  image,
-  tag,
-  tagColor = '#F43F5E',
-  isMobile,
-  isDesktop,
-  variant = 'hero',
-}: PhoneMockupFrameProps) {
-  const isCarousel = variant === 'carousel';
-
-  return (
-    <View style={styles.phoneMockupWrapper}>
-      {/* Ambient Device Halo */}
-      <View
-        style={[
-          styles.ambientDeviceGlow,
-          isDesktop && (isCarousel ? styles.ambientDeviceGlowCarouselDesktop : styles.ambientDeviceGlowDesktop),
-          { backgroundColor: `${tagColor}18` },
-        ]}
-      />
-
-      {/* Flagship Bezel & Body */}
-      <View
-        style={[
-          styles.phoneShell,
-          isDesktop && (isCarousel ? styles.phoneShellCarouselDesktop : styles.phoneShellDesktop),
-          isMobile && styles.phoneShellMobile,
-        ]}
-      >
-        {/* Top Punch Hole Camera */}
-        <View style={styles.phonePunchHole} />
-
-        {/* Screen Content Surface */}
-        <View style={styles.phoneScreenSurface}>
-          <Image
-            source={image}
-            style={styles.phoneScreenImage}
-            contentFit="cover"
-            transition={150}
-          />
-
-          {/* Floating Context Pill */}
-          <View style={styles.screenContextPill}>
-            <View style={[styles.screenContextDot, { backgroundColor: tagColor }]} />
-            <Text style={styles.screenContextText}>{tag}</Text>
-          </View>
-        </View>
-
-        {/* Bottom Gesture Bar */}
-        <View style={styles.phoneHomeBar} />
-      </View>
-    </View>
-  );
-}
 
 export default function AppDownloadScreen() {
   useDocumentTitle('Get App — Yomite');
@@ -232,163 +54,409 @@ export default function AppDownloadScreen() {
   const isTablet = windowWidth >= 640 && windowWidth < 960;
   const isMobile = windowWidth < 640;
 
-  // Hero state
-  const [activeTab, setActiveTab] = useState<DemoTab>('reader');
-  const [hoveredHeroTab, setHoveredHeroTab] = useState<DemoTab | null>(null);
-  const heroFadeAnim = useRef(new Animated.Value(1)).current;
+  // Hero Video state
+  const videoRef = useRef<any>(null);
+  const [isVideoMuted, setIsVideoMuted] = useState(true);
 
-  // Sliding Feature Carousel state & auto-sliding
-  const [activeFeatureIndex, setActiveFeatureIndex] = useState(0);
-  const [isAutoPlayPaused, setIsAutoPlayPaused] = useState(false);
-  const [hoveredNavIndex, setHoveredNavIndex] = useState<number | null>(null);
-  const featureFadeAnim = useRef(new Animated.Value(1)).current;
-  const featureSlideAnim = useRef(new Animated.Value(0)).current;
-  const autoPlayProgress = useRef(new Animated.Value(0)).current;
-  const AUTOPLAY_DURATION = 5000;
+  const toggleVideoMute = () => {
+    triggerHaptic();
+    if (Platform.OS === 'web' && videoRef.current) {
+      videoRef.current.muted = !videoRef.current.muted;
+      setIsVideoMuted(videoRef.current.muted);
+    }
+  };
 
-  const activeFeatureIndexRef = useRef(activeFeatureIndex);
-  activeFeatureIndexRef.current = activeFeatureIndex;
+  // Hero Text Left-to-Right Staggered Motion (Like Mascot Walking)
+  const heroSlideAnim = useRef(new Animated.Value(-60)).current;
+  const heroFadeAnim = useRef(new Animated.Value(0)).current;
+  const headlineSlideAnim = useRef(new Animated.Value(-50)).current;
+  const headlineFadeAnim = useRef(new Animated.Value(0)).current;
+  const subheadSlideAnim = useRef(new Animated.Value(-40)).current;
+  const subheadFadeAnim = useRef(new Animated.Value(0)).current;
+  const ctaSlideAnim = useRef(new Animated.Value(-35)).current;
+  const ctaFadeAnim = useRef(new Animated.Value(0)).current;
+  const commitmentsSlideAnim = useRef(new Animated.Value(-30)).current;
+  const commitmentsFadeAnim = useRef(new Animated.Value(0)).current;
+  const heroBobAnim = useRef(new Animated.Value(0)).current;
 
-  // Interactive controls within features
-  const [readerModeChoice, setReaderModeChoice] = useState<'webtoon' | 'rtl' | 'spread'>('webtoon');
-  const [selectedLang, setSelectedLang] = useState('en');
+  // Staggered entrance from left to right & walking rhythm bob
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+      if (mediaQuery.matches) {
+        if (videoRef.current) videoRef.current.pause();
+        heroSlideAnim.setValue(0);
+        heroFadeAnim.setValue(1);
+        headlineSlideAnim.setValue(0);
+        headlineFadeAnim.setValue(1);
+        subheadSlideAnim.setValue(0);
+        subheadFadeAnim.setValue(1);
+        ctaSlideAnim.setValue(0);
+        ctaFadeAnim.setValue(1);
+        commitmentsSlideAnim.setValue(0);
+        commitmentsFadeAnim.setValue(1);
+        return;
+      }
+
+      // Ensure video plays once from start on page load / reload
+      if (videoRef.current) {
+        videoRef.current.currentTime = 0;
+        videoRef.current.play().catch(() => {});
+      }
+    }
+
+    Animated.stagger(70, [
+      Animated.parallel([
+        Animated.timing(heroSlideAnim, {
+          toValue: 0,
+          duration: 750,
+          easing: Easing.bezier(0.16, 1, 0.3, 1),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(heroFadeAnim, {
+          toValue: 1,
+          duration: 650,
+          easing: Easing.bezier(0.16, 1, 0.3, 1),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]),
+      Animated.parallel([
+        Animated.timing(headlineSlideAnim, {
+          toValue: 0,
+          duration: 750,
+          easing: Easing.bezier(0.16, 1, 0.3, 1),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(headlineFadeAnim, {
+          toValue: 1,
+          duration: 650,
+          easing: Easing.bezier(0.16, 1, 0.3, 1),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]),
+      Animated.parallel([
+        Animated.timing(subheadSlideAnim, {
+          toValue: 0,
+          duration: 750,
+          easing: Easing.bezier(0.16, 1, 0.3, 1),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(subheadFadeAnim, {
+          toValue: 1,
+          duration: 650,
+          easing: Easing.bezier(0.16, 1, 0.3, 1),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]),
+      Animated.parallel([
+        Animated.timing(ctaSlideAnim, {
+          toValue: 0,
+          duration: 750,
+          easing: Easing.bezier(0.16, 1, 0.3, 1),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(ctaFadeAnim, {
+          toValue: 1,
+          duration: 650,
+          easing: Easing.bezier(0.16, 1, 0.3, 1),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]),
+      Animated.parallel([
+        Animated.timing(commitmentsSlideAnim, {
+          toValue: 0,
+          duration: 750,
+          easing: Easing.bezier(0.16, 1, 0.3, 1),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(commitmentsFadeAnim, {
+          toValue: 1,
+          duration: 650,
+          easing: Easing.bezier(0.16, 1, 0.3, 1),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]),
+    ]).start(() => {
+      // Subtle walking rhythm bob animation after entrance
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(heroBobAnim, {
+            toValue: -3,
+            duration: 1200,
+            easing: Easing.inOut(Easing.sin),
+            useNativeDriver: Platform.OS !== 'web',
+          }),
+          Animated.timing(heroBobAnim, {
+            toValue: 0,
+            duration: 1200,
+            easing: Easing.inOut(Easing.sin),
+            useNativeDriver: Platform.OS !== 'web',
+          }),
+        ])
+      ).start();
+    });
+  }, []);
+
+  // Expanding Promotional Video Showcase state
+  const promoSectionRef = useRef<any>(null);
+  const promoVideoRef = useRef<HTMLVideoElement | null>(null);
+  const [expandProgress, setExpandProgress] = useState(0); // 0 (small rounded) to 1 (full page)
+  const promoTargetRadius = Math.round(isDesktop ? (48 - expandProgress * 24) : (36 - expandProgress * 16));
+  const targetProgressRef = useRef(0);
+  const currentProgressRef = useRef(0);
+  const rafIdRef = useRef<number | null>(null);
+  const [isPromoPlaying, setIsPromoPlaying] = useState(false);
+  const [isPromoMuted, setIsPromoMuted] = useState(true);
+
+  // Floating Hover Cursor & Lightbox state
+  const [isHoveringVideo, setIsHoveringVideo] = useState(false);
+  const [videoCursorPos, setVideoCursorPos] = useState({ x: 0, y: 0 });
+  const [isPromoLightboxOpen, setIsPromoLightboxOpen] = useState(false);
+  const [isLightboxPlaying, setIsLightboxPlaying] = useState(true);
+  const [isLightboxMuted, setIsLightboxMuted] = useState(false);
+  const [lightboxTimeCurrent, setLightboxTimeCurrent] = useState(0);
+  const [lightboxDuration, setLightboxDuration] = useState(0);
+  const lightboxVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Strictly gate playback: only play when fully expanded (progress >= 0.98) and visible
+  const checkVideoState = useCallback((progressVal: number) => {
+    if (!promoVideoRef.current || Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const el = promoSectionRef.current;
+    const domNode = el?.getDOMNode ? el.getDOMNode() : (el?._nativeNode || el);
+    if (!domNode || typeof domNode.getBoundingClientRect !== 'function') return;
+
+    const rect = domNode.getBoundingClientRect();
+    const windowHeight = window.innerHeight || 800;
+    const isVisible = rect.top < windowHeight && rect.bottom > 80;
+    const isFullyExpanded = progressVal >= 0.98;
+
+    if (isFullyExpanded && isVisible) {
+      if (promoVideoRef.current.paused) {
+        promoVideoRef.current.play().then(() => {
+          setIsPromoPlaying(true);
+        }).catch(() => {
+          if (promoVideoRef.current) {
+            promoVideoRef.current.muted = true;
+            setIsPromoMuted(true);
+            promoVideoRef.current.play().then(() => setIsPromoPlaying(true)).catch(() => {});
+          }
+        });
+      }
+    } else if (progressVal < 0.95 || !isVisible) {
+      if (!promoVideoRef.current.paused) {
+        promoVideoRef.current.pause();
+        setIsPromoPlaying(false);
+      }
+    }
+  }, []);
+
+  // Compute smooth progress using VideoScrollHero sticky scroll calculation
+  const computeTargetProgress = useCallback(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return 0;
+    const el = promoSectionRef.current;
+    const domNode = el?.getDOMNode ? el.getDOMNode() : (el?._nativeNode || el);
+    if (!domNode || typeof domNode.getBoundingClientRect !== 'function') return 0;
+
+    const rect = domNode.getBoundingClientRect();
+    const windowHeight = window.innerHeight || 800;
+    const containerHeight = domNode.offsetHeight || domNode.clientHeight || (windowHeight * 1.85);
+
+    // Calculate scroll progress based on container position (from VideoScrollHero)
+    const scrolled = Math.max(0, -rect.top);
+    const maxScroll = Math.max(1, containerHeight - windowHeight);
+    const raw = Math.max(0, Math.min(1, scrolled / maxScroll));
+
+    // Smoothstep Hermite polynomial curve: f(t) = t * t * (3 - 2 * t)
+    return raw * raw * (3 - 2 * raw);
+  }, []);
+
+  // Butter-smooth RAF interpolation loop (0.14 lerp factor eliminates scroll wheel stepped ticks)
+  const updateLoop = useCallback(() => {
+    const target = targetProgressRef?.current ?? 0;
+    const current = currentProgressRef?.current ?? 0;
+    const diff = target - current;
+
+    if (Math.abs(diff) > 0.001) {
+      const next = current + diff * 0.14;
+      if (currentProgressRef) currentProgressRef.current = next;
+      setExpandProgress(next);
+      checkVideoState(next);
+      if (rafIdRef) {
+        rafIdRef.current = requestAnimationFrame(updateLoop);
+      }
+    } else {
+      if (currentProgressRef) currentProgressRef.current = target;
+      setExpandProgress(target);
+      checkVideoState(target);
+      if (rafIdRef) {
+        rafIdRef.current = null;
+      }
+    }
+  }, [checkVideoState]);
+
+  const onScrollOrResize = useCallback(() => {
+    const target = computeTargetProgress();
+    if (targetProgressRef) {
+      targetProgressRef.current = target;
+    }
+    if (rafIdRef && !rafIdRef.current) {
+      rafIdRef.current = requestAnimationFrame(updateLoop);
+    }
+  }, [computeTargetProgress, updateLoop]);
+
+  // Clean up any stale Lenis classes and track scroll progress smoothly
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+
+    // Remove any stale Lenis style tag or classes that collapse React Native Web's #root height
+    const staleStyle = document.getElementById('lenis-smooth-scroll-css');
+    if (staleStyle) staleStyle.remove();
+    document.documentElement.classList.remove('lenis', 'lenis-smooth', 'lenis-stopped');
+    document.body.classList.remove('lenis', 'lenis-smooth', 'lenis-stopped');
+
+    window.addEventListener('scroll', onScrollOrResize, { passive: true });
+    window.addEventListener('resize', onScrollOrResize, { passive: true });
+
+    // Initial check on mount
+    const timer = setTimeout(() => {
+      const initial = computeTargetProgress();
+      targetProgressRef.current = initial;
+      currentProgressRef.current = initial;
+      setExpandProgress(initial);
+      checkVideoState(initial);
+    }, 120);
+
+    return () => {
+      clearTimeout(timer);
+      if (rafIdRef.current) {
+        cancelAnimationFrame(rafIdRef.current);
+      }
+      window.removeEventListener('scroll', onScrollOrResize);
+      window.removeEventListener('resize', onScrollOrResize);
+    };
+  }, [computeTargetProgress, checkVideoState, onScrollOrResize]);
+
+  const togglePromoPlay = () => {
+    triggerHaptic();
+    if (promoVideoRef.current) {
+      if (promoVideoRef.current.paused) {
+        // If not fully expanded, smoothly scroll to fully expand it
+        if (currentProgressRef.current < 0.98 && promoSectionRef.current && Platform.OS === 'web') {
+          const el = promoSectionRef.current;
+          const domNode = el?.getDOMNode ? el.getDOMNode() : (el?._nativeNode || el);
+          if (domNode && typeof domNode.scrollIntoView === 'function') {
+            domNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }
+        promoVideoRef.current.play().then(() => setIsPromoPlaying(true)).catch(() => {});
+      } else {
+        promoVideoRef.current.pause();
+        setIsPromoPlaying(false);
+      }
+    }
+  };
+
+  // Open / Close promo video fullscreen lightbox
+  const openPromoLightbox = () => {
+    triggerHaptic();
+    setIsPromoLightboxOpen(true);
+    setIsLightboxPlaying(true);
+    if (promoVideoRef.current && !promoVideoRef.current.paused) {
+      promoVideoRef.current.pause();
+    }
+  };
+
+  const closePromoLightbox = () => {
+    triggerHaptic();
+    if (lightboxVideoRef.current) {
+      lightboxVideoRef.current.pause();
+    }
+    setIsPromoLightboxOpen(false);
+    if (currentProgressRef.current >= 0.98 && promoVideoRef.current) {
+      promoVideoRef.current.play().catch(() => {});
+    }
+  };
+
+  // Keyboard escape listener to dismiss lightbox
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isPromoLightboxOpen) {
+        closePromoLightbox();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPromoLightboxOpen]);
+
+  const toggleLightboxPlay = () => {
+    triggerHaptic();
+    if (lightboxVideoRef.current) {
+      if (lightboxVideoRef.current.paused) {
+        lightboxVideoRef.current.play().then(() => setIsLightboxPlaying(true)).catch(() => {});
+      } else {
+        lightboxVideoRef.current.pause();
+        setIsLightboxPlaying(false);
+      }
+    }
+  };
+
+  const toggleLightboxMute = () => {
+    triggerHaptic();
+    if (lightboxVideoRef.current) {
+      const next = !lightboxVideoRef.current.muted;
+      lightboxVideoRef.current.muted = next;
+      setIsLightboxMuted(next);
+    }
+  };
+
+  const handleLightboxTimeUpdate = () => {
+    if (lightboxVideoRef.current) {
+      setLightboxTimeCurrent(lightboxVideoRef.current.currentTime);
+      if (!lightboxDuration && lightboxVideoRef.current.duration) {
+        setLightboxDuration(lightboxVideoRef.current.duration);
+      }
+    }
+  };
+
+  const handleLightboxScrub = (e: any) => {
+    if (Platform.OS === 'web' && lightboxVideoRef.current && lightboxDuration > 0) {
+      const rect = e.currentTarget?.getBoundingClientRect();
+      if (rect) {
+        const clickX = e.clientX - rect.left;
+        const pct = Math.max(0, Math.min(1, clickX / rect.width));
+        lightboxVideoRef.current.currentTime = pct * lightboxDuration;
+        setLightboxTimeCurrent(pct * lightboxDuration);
+      }
+    }
+  };
+
+  const toggleLightboxFullscreen = () => {
+    triggerHaptic();
+    if (Platform.OS === 'web' && lightboxVideoRef.current) {
+      const v = lightboxVideoRef.current as any;
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      } else if (v.requestFullscreen) {
+        v.requestFullscreen().catch(() => {});
+      } else if (v.webkitRequestFullscreen) {
+        v.webkitRequestFullscreen();
+      }
+    }
+  };
+
+  const formatVideoTime = (seconds: number) => {
+    if (isNaN(seconds) || seconds < 0) return '0:00';
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+
 
   // Specs & Guide state
   const [copiedSha, setCopiedSha] = useState(false);
   const [showShaDrawer, setShowShaDrawer] = useState(false);
   const [activeGuideTab, setActiveGuideTab] = useState<'android' | 'ios'>('android');
-
-  const handleSelectHeroTab = (tab: DemoTab) => {
-    if (tab === activeTab) return;
-    triggerHaptic();
-
-    Animated.timing(heroFadeAnim, {
-      toValue: 0.15,
-      duration: 120,
-      easing: Easing.bezier(0.23, 1, 0.32, 1),
-      useNativeDriver: Platform.OS !== 'web',
-    }).start(() => {
-      setActiveTab(tab);
-      Animated.timing(heroFadeAnim, {
-        toValue: 1,
-        duration: 220,
-        easing: Easing.bezier(0.23, 1, 0.32, 1),
-        useNativeDriver: Platform.OS !== 'web',
-      }).start();
-    });
-  };
-
-  const switchFeatureSlide = (targetIndex: number, direction?: 'next' | 'prev') => {
-    if (targetIndex === activeFeatureIndex) return;
-    const dir = direction ?? (targetIndex > activeFeatureIndex ? 'next' : 'prev');
-    triggerHaptic();
-
-    Animated.parallel([
-      Animated.timing(featureFadeAnim, {
-        toValue: 0.1,
-        duration: 120,
-        easing: Easing.bezier(0.23, 1, 0.32, 1),
-        useNativeDriver: Platform.OS !== 'web',
-      }),
-      Animated.timing(featureSlideAnim, {
-        toValue: dir === 'next' ? -24 : 24,
-        duration: 120,
-        easing: Easing.bezier(0.23, 1, 0.32, 1),
-        useNativeDriver: Platform.OS !== 'web',
-      }),
-    ]).start(() => {
-      setActiveFeatureIndex(targetIndex);
-      featureSlideAnim.setValue(dir === 'next' ? 24 : -24);
-      Animated.parallel([
-        Animated.timing(featureFadeAnim, {
-          toValue: 1,
-          duration: 240,
-          easing: Easing.bezier(0.23, 1, 0.32, 1),
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-        Animated.timing(featureSlideAnim, {
-          toValue: 0,
-          duration: 240,
-          easing: Easing.bezier(0.23, 1, 0.32, 1),
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-      ]).start();
-    });
-  };
-
-  const handlePrevSlide = () => {
-    const prev = (activeFeatureIndex - 1 + FEATURE_SLIDES.length) % FEATURE_SLIDES.length;
-    switchFeatureSlide(prev, 'prev');
-  };
-
-  const handleNextSlide = () => {
-    const next = (activeFeatureIndex + 1) % FEATURE_SLIDES.length;
-    switchFeatureSlide(next, 'next');
-  };
-
-  // Automatic Feature Slide Timer with pause/play & smooth progress
-  useEffect(() => {
-    if (isAutoPlayPaused) {
-      autoPlayProgress.stopAnimation();
-      return;
-    }
-
-    autoPlayProgress.setValue(0);
-    const anim = Animated.timing(autoPlayProgress, {
-      toValue: 1,
-      duration: AUTOPLAY_DURATION,
-      easing: Easing.linear,
-      useNativeDriver: false,
-    });
-
-    anim.start(({ finished }) => {
-      if (finished) {
-        const next = (activeFeatureIndexRef.current + 1) % FEATURE_SLIDES.length;
-        switchFeatureSlide(next, 'next');
-      }
-    });
-
-    return () => {
-      anim.stop();
-    };
-  }, [activeFeatureIndex, isAutoPlayPaused]);
-
-  // Touch Swipe Gesture Responder for Mobile & Touchscreens
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        return Math.abs(gestureState.dx) > 24 && Math.abs(gestureState.dy) < 30;
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dx < -40) {
-          handleNextSlide();
-        } else if (gestureState.dx > 40) {
-          handlePrevSlide();
-        }
-      },
-    })
-  ).current;
-
-  // Accessible Keyboard Navigation on Web (Left & Right Arrow Keys)
-  useEffect(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const activeEl = document.activeElement;
-      if (activeEl && ['INPUT', 'TEXTAREA'].includes(activeEl.tagName)) return;
-
-      if (e.key === 'ArrowLeft') {
-        const prev = (activeFeatureIndex - 1 + FEATURE_SLIDES.length) % FEATURE_SLIDES.length;
-        switchFeatureSlide(prev, 'prev');
-      } else if (e.key === 'ArrowRight') {
-        const next = (activeFeatureIndex + 1) % FEATURE_SLIDES.length;
-        switchFeatureSlide(next, 'next');
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeFeatureIndex]);
 
   const handleDownloadApk = () => {
     triggerHaptic();
@@ -418,12 +486,10 @@ export default function AppDownloadScreen() {
     }
   };
 
-  const currentSlide = FEATURE_SLIDES[activeFeatureIndex];
-
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: '#09090B' }]} edges={['top', 'left', 'right']}>
       {/* ── TOP NAVBAR ── */}
-      <View style={[styles.navbarOuter, { borderBottomColor: colors.borderSubtle, backgroundColor: colors.background }]}>
+      <View style={[styles.navbarOuter, { borderBottomColor: 'rgba(255, 255, 255, 0.08)', backgroundColor: '#09090B' }]}>
         <View style={[styles.navbarInner, isDesktop && styles.navbarInnerDesktop, isMobile && styles.navbarInnerMobile]}>
           <Pressable
             accessibilityRole="button"
@@ -437,8 +503,8 @@ export default function AppDownloadScreen() {
               contentFit="cover"
             />
             <View style={styles.brandTextGroup}>
-              <Text style={[styles.brandTitle, { color: colors.text }]}>Yomite</Text>
-              <Text style={[styles.brandTagline, { color: colors.textMuted }]}>Manga Reader</Text>
+              <Text style={[styles.brandTitle, { color: '#FFFFFF' }]}>Yomite</Text>
+              <Text style={[styles.brandTagline, { color: '#71717A' }]}>Manga Reader</Text>
             </View>
           </Pressable>
 
@@ -449,12 +515,11 @@ export default function AppDownloadScreen() {
               onPress={() => router.push('/(tabs)' as any)}
               style={({ pressed }) => [
                 styles.navSecondaryButton,
-                { borderColor: colors.borderSubtle, backgroundColor: 'transparent' },
                 pressed && styles.buttonPressed,
               ]}
             >
-              <Ionicons name="desktop-outline" size={14} color={colors.textSecondary} aria-hidden={true} />
-              <Text style={[styles.navSecondaryText, { color: colors.text }]}>
+              <Ionicons name="desktop-outline" size={14} color="#A1A1AA" aria-hidden={true} />
+              <Text style={styles.navSecondaryText}>
                 {isMobile ? 'Web' : 'Open Web App'}
               </Text>
             </Pressable>
@@ -465,11 +530,10 @@ export default function AppDownloadScreen() {
               onPress={handleDownloadApk}
               style={({ pressed }) => [
                 styles.navPrimaryButton,
-                { backgroundColor: colors.accent },
                 pressed && styles.buttonPressed,
               ]}
             >
-              <Ionicons name="arrow-down-circle" size={15} color="#FFFFFF" aria-hidden={true} />
+              <Ionicons name="arrow-down-circle" size={15} color="#000000" aria-hidden={true} />
               <Text style={styles.navPrimaryText}>
                 {isMobile ? 'Get APK' : 'Download APK'}
               </Text>
@@ -482,72 +546,190 @@ export default function AppDownloadScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        onScroll={Platform.OS === 'web' ? onScrollOrResize : undefined}
+        scrollEventThrottle={16}
       >
         {/* ════════════════════════════════════════════════════════════════════════
-            HERO SECTION: High-contrast typography & authentic device showcase
+            HERO SECTION: Full-bleed background video with high-contrast text overlay
            ════════════════════════════════════════════════════════════════════════ */}
-        <View style={[styles.sectionWrapper, isDesktop && styles.sectionWrapperDesktop]}>
-          <View style={[styles.heroContainer, isDesktop && styles.heroContainerDesktop]}>
-            {/* Left Hero Column */}
-            <View style={[styles.heroTextCol, isDesktop && styles.heroTextColDesktop]}>
-              <View style={styles.heroReleaseBar}>
-                <View style={[styles.releasePill, { backgroundColor: 'transparent', borderColor: colors.borderSubtle }]}>
+        <View style={[styles.heroSectionWrap, isDesktop && styles.heroSectionWrapDesktop]}>
+          {/* 1. Full-Bleed Video Asset Background Layer */}
+          <View style={styles.heroBackgroundVideoWrap} pointerEvents="none">
+            {Platform.OS === 'web' ? (
+              React.createElement(
+                'video',
+                {
+                  ref: videoRef,
+                  autoPlay: true,
+                  loop: false,
+                  muted: isVideoMuted,
+                  playsInline: true,
+                  style: {
+                    position: 'absolute',
+                    top: 0,
+                    left: isDesktop ? '-90px' : (isTablet ? '-45px' : '0px'),
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    objectPosition: isDesktop ? '100% center' : 'center center',
+                    display: 'block',
+                    backgroundColor: '#09090B',
+                  },
+                  'aria-label': 'Yomite Manga Reader anime mascot promotional animation',
+                },
+                React.createElement('source', { src: '/PROMPT5-16by9.mp4', type: 'video/mp4' }),
+                React.createElement('source', { src: './PROMPT5-16by9.mp4', type: 'video/mp4' }),
+                React.createElement('source', { src: '/assets/videos/PROMPT5-16by9.mp4', type: 'video/mp4' }),
+              )
+            ) : (
+              <Image
+                source={require('../assets/images/mascot.png')}
+                style={styles.heroFallbackImage}
+                contentFit="cover"
+              />
+            )}
+
+            {/* Readability Scrim (Left-to-Right on Desktop, Top-to-Bottom on Mobile) */}
+            {isDesktop ? (
+              <LinearGradient
+                colors={[
+                  'rgba(9, 9, 11, 0.98)',
+                  'rgba(9, 9, 11, 0.92)',
+                  'rgba(9, 9, 11, 0.50)',
+                  'rgba(9, 9, 11, 0.10)',
+                  'rgba(9, 9, 11, 0.35)',
+                ]}
+                locations={[0, 0.45, 0.70, 0.88, 1]}
+                start={{ x: 0, y: 0.5 }}
+                end={{ x: 1, y: 0.5 }}
+                style={StyleSheet.absoluteFill}
+                pointerEvents="none"
+              />
+            ) : (
+              <LinearGradient
+                colors={[
+                  'rgba(9, 9, 11, 0.90)',
+                  'rgba(9, 9, 11, 0.76)',
+                  'rgba(9, 9, 11, 0.94)',
+                ]}
+                locations={[0, 0.45, 1]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={StyleSheet.absoluteFill}
+                pointerEvents="none"
+              />
+            )}
+
+            {/* Vertical Edge Feathering (blends into top navbar and next section below) */}
+            <LinearGradient
+              colors={['rgba(9, 9, 11, 0.70)', 'transparent', 'transparent', '#09090B']}
+              locations={[0, 0.10, 0.85, 1]}
+              start={{ x: 0.5, y: 0 }}
+              end={{ x: 0.5, y: 1 }}
+              style={StyleSheet.absoluteFill}
+              pointerEvents="none"
+            />
+          </View>
+
+          {/* 2. Hero Content Overlay Container (High contrast, accessible typography) */}
+          {/* 2. Hero Content Overlay Container (High contrast, animated typography) */}
+          <View style={[styles.heroOverlayContainer, isDesktop && styles.heroOverlayContainerDesktop]}>
+            <View style={[styles.heroContentWrap, isDesktop && styles.heroContentWrapDesktop]}>
+              {/* Release Bar */}
+              <Animated.View
+                style={[
+                  styles.heroReleaseBar,
+                  {
+                    opacity: heroFadeAnim,
+                    transform: [{ translateX: heroSlideAnim }],
+                  },
+                ]}
+              >
+                <View style={styles.releaseTag}>
                   <View style={styles.pulseDot} />
-                  <Text style={[styles.releasePillText, { color: colors.text }]}>
-                    {APP_RELEASE.version} Stable
+                  <Text style={[styles.releaseTagText, { color: '#FFFFFF' }]}>
+                    {APP_RELEASE.version} STABLE
                   </Text>
                 </View>
-                <Text style={[styles.releaseMetaText, { color: colors.textMuted }]}>
+                <Text style={[styles.releaseMetaText, { color: '#A1A1AA' }]}>
                   Android 8.0+ • Free & Open Source
                 </Text>
-              </View>
+              </Animated.View>
 
-              <Text
-                accessibilityRole="header"
-                aria-level={1}
+              {/* Headline */}
+              <Animated.View
+                style={{
+                  opacity: headlineFadeAnim,
+                  transform: [
+                    { translateX: headlineSlideAnim },
+                    { translateY: heroBobAnim },
+                  ],
+                }}
+              >
+                <Text
+                  accessibilityRole="header"
+                  aria-level={1}
+                  style={[
+                    styles.heroHeadline,
+                    { color: '#FFFFFF' },
+                    isDesktop && styles.heroHeadlineDesktop,
+                    isMobile && styles.heroHeadlineMobile,
+                    isTablet && styles.heroHeadlineTablet,
+                  ]}
+                >
+                  The art of reading manga,{'\n'}
+                  <Text style={{ color: '#FFFFFF', opacity: 0.9 }}>pure and unfiltered.</Text>
+                </Text>
+              </Animated.View>
+
+              {/* Subheadline */}
+              <Animated.View
+                style={{
+                  opacity: subheadFadeAnim,
+                  transform: [{ translateX: subheadSlideAnim }],
+                }}
+              >
+                <Text
+                  style={[
+                    styles.heroSubheadline,
+                    { color: '#A1A1AA' },
+                    isDesktop && styles.heroSubheadlineDesktop,
+                    isMobile && styles.heroSubheadlineMobile,
+                  ]}
+                >
+                  Zero ads, zero coin paywalls, and zero compression. Experience fluid 60&nbsp;fps page turns, true offline volume downloads, and official MangaDex scanlations in 30+ languages.
+                </Text>
+              </Animated.View>
+
+              {/* CTA Group with Integrated Speaker Icon */}
+              <Animated.View
                 style={[
-                  styles.heroHeadline,
-                  { color: colors.text },
-                  isDesktop && styles.heroHeadlineDesktop,
-                  isMobile && styles.heroHeadlineMobile,
-                  isTablet && styles.heroHeadlineTablet,
+                  styles.heroCtaGroup,
+                  isMobile && styles.heroCtaGroupMobile,
+                  {
+                    opacity: ctaFadeAnim,
+                    transform: [{ translateX: ctaSlideAnim }],
+                  },
                 ]}
               >
-                The art of reading manga,{'\n'}
-                <Text style={{ color: colors.accent }}>pure and unfiltered.</Text>
-              </Text>
-
-              <Text
-                style={[
-                  styles.heroSubheadline,
-                  { color: colors.textSecondary },
-                  isDesktop && styles.heroSubheadlineDesktop,
-                  isMobile && styles.heroSubheadlineMobile,
-                ]}
-              >
-                Zero ads, zero coin paywalls, and zero compression. Experience fluid 60&nbsp;fps page turns, true offline volume downloads, and official MangaDex scanlations in 30+ languages.
-              </Text>
-
-              <View style={[styles.heroCtaGroup, isMobile && styles.heroCtaGroupMobile]}>
                 <Pressable
                   accessibilityRole="button"
                   aria-label="Download Yomite Android APK"
                   onPress={handleDownloadApk}
                   style={({ pressed }) => [
                     styles.heroDownloadButton,
-                    { backgroundColor: colors.accent },
                     isMobile && { width: '100%', justifyContent: 'center' },
                     pressed && styles.buttonPressed,
                   ]}
                 >
-                  <Ionicons name="logo-android" size={22} color="#FFFFFF" aria-hidden={true} />
+                  <Ionicons name="logo-android" size={22} color="#000000" aria-hidden={true} />
                   <View style={styles.heroDownloadLabels}>
                     <Text style={styles.heroDownloadMain}>Download Yomite for Android</Text>
                     <Text style={styles.heroDownloadMeta}>
                       Direct APK • {APP_RELEASE.fileSize} • Clean Build
                     </Text>
                   </View>
-                  <Ionicons name="arrow-down" size={18} color="#FFFFFF" aria-hidden={true} style={{ marginLeft: 6 }} />
+                  <Ionicons name="arrow-down" size={18} color="#000000" aria-hidden={true} style={{ marginLeft: 6 }} />
                 </Pressable>
 
                 {!isMobile && (
@@ -557,454 +739,293 @@ export default function AppDownloadScreen() {
                     onPress={handleScrollToQr}
                     style={({ pressed }) => [
                       styles.heroQrButton,
-                      { backgroundColor: 'transparent', borderColor: colors.borderSubtle },
+                      { backgroundColor: 'rgba(255, 255, 255, 0.05)', borderColor: 'rgba(255, 255, 255, 0.16)' },
                       pressed && styles.buttonPressed,
                     ]}
                   >
-                    <Ionicons name="qr-code-outline" size={18} color={colors.text} aria-hidden={true} />
-                    <Text style={[styles.heroQrText, { color: colors.text }]}>Scan QR from Phone</Text>
+                    <Ionicons name="qr-code-outline" size={18} color="#FFFFFF" aria-hidden={true} />
+                    <Text style={[styles.heroQrText, { color: '#FFFFFF' }]}>Scan QR from Phone</Text>
                   </Pressable>
                 )}
-              </View>
 
-              {/* Interactive Screen Selector Tabs */}
-              <View style={styles.heroTabSelector}>
-                <Text style={[styles.heroTabLabel, { color: colors.textMuted }]}>
-                  SELECT SCREEN TO PREVIEW
-                </Text>
-                <View style={[styles.heroTabList, isMobile && styles.heroTabListMobile]}>
-                  {(['reader', 'offline', 'languages', 'library'] as DemoTab[]).map((tab) => {
-                    const isSelected = activeTab === tab;
-                    const isHovered = hoveredHeroTab === tab;
-                    const meta = HERO_PREVIEWS[tab];
-
-                    return (
-                      <Pressable
-                        key={tab}
-                        accessibilityRole="button"
-                        aria-label={`Preview ${meta.title}`}
-                        onPress={() => handleSelectHeroTab(tab)}
-                        onHoverIn={() => setHoveredHeroTab(tab)}
-                        onHoverOut={() => setHoveredHeroTab(null)}
-                        style={[
-                          styles.heroTabPill,
-                          {
-                            backgroundColor: isSelected
-                              ? 'rgba(244, 63, 94, 0.12)'
-                              : isHovered
-                              ? 'rgba(255, 255, 255, 0.05)'
-                              : 'transparent',
-                            borderColor: isSelected
-                              ? colors.accent
-                              : isHovered
-                              ? colors.accent
-                              : colors.borderSubtle,
-                          },
-                        ]}
-                      >
-                        <View
-                          style={[
-                            styles.heroTabIndicator,
-                            { backgroundColor: isSelected ? colors.accent : colors.border },
-                          ]}
-                        />
-                        <Text
-                          style={[
-                            styles.heroTabPillText,
-                            {
-                              color: isSelected ? colors.text : colors.textSecondary,
-                              fontWeight: isSelected ? Typography.weights.bold : Typography.weights.medium,
-                            },
-                          ]}
-                        >
-                          {meta.title}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              </View>
+                {/* Speaker Audio Toggle inside Hero Text Section */}
+                {Platform.OS === 'web' && (
+                  <Pressable
+                    accessibilityRole="button"
+                    aria-label={isVideoMuted ? 'Unmute video audio' : 'Mute video audio'}
+                    onPress={toggleVideoMute}
+                    style={({ pressed }) => [
+                      styles.heroSpeakerButton,
+                      {
+                        backgroundColor: isVideoMuted ? 'rgba(255, 255, 255, 0.05)' : 'rgba(255, 255, 255, 0.16)',
+                        borderColor: isVideoMuted ? 'rgba(255, 255, 255, 0.14)' : '#FFFFFF',
+                      },
+                      isMobile && { width: '100%', justifyContent: 'center' },
+                      pressed && styles.buttonPressed,
+                    ]}
+                  >
+                    <Ionicons
+                      name={isVideoMuted ? 'volume-mute-outline' : 'volume-high-outline'}
+                      size={20}
+                      color="#FFFFFF"
+                      aria-hidden={true}
+                    />
+                    {isMobile && (
+                      <Text style={[styles.heroSpeakerText, { color: '#FFFFFF' }]}>
+                        {isVideoMuted ? 'Sound Off' : 'Sound On'}
+                      </Text>
+                    )}
+                  </Pressable>
+                )}
+              </Animated.View>
 
               {/* Commitments Row */}
-              <View style={[styles.commitmentsRow, { borderColor: colors.borderSubtle }]}>
+              <Animated.View
+                style={[
+                  styles.commitmentsRow,
+                  {
+                    borderColor: 'rgba(255, 255, 255, 0.12)',
+                    opacity: commitmentsFadeAnim,
+                    transform: [{ translateX: commitmentsSlideAnim }],
+                  },
+                ]}
+              >
                 <View style={styles.commitmentItem}>
-                  <Ionicons name="shield-checkmark-outline" size={16} color={colors.accent} aria-hidden={true} />
-                  <Text style={[styles.commitmentText, { color: colors.textSecondary }]}>
+                  <Ionicons name="shield-checkmark-outline" size={16} color="#FFFFFF" aria-hidden={true} />
+                  <Text style={[styles.commitmentText, { color: '#A1A1AA' }]}>
                     100% Free & Open Source
                   </Text>
                 </View>
                 <View style={styles.commitmentDivider} />
                 <View style={styles.commitmentItem}>
-                  <Ionicons name="phone-portrait-outline" size={16} color={colors.accent} aria-hidden={true} />
-                  <Text style={[styles.commitmentText, { color: colors.textSecondary }]}>
+                  <Ionicons name="phone-portrait-outline" size={16} color="#FFFFFF" aria-hidden={true} />
+                  <Text style={[styles.commitmentText, { color: '#A1A1AA' }]}>
                     True Offline Storage
                   </Text>
                 </View>
                 <View style={styles.commitmentDivider} />
                 <View style={styles.commitmentItem}>
-                  <Ionicons name="sync-outline" size={16} color={colors.accent} aria-hidden={true} />
-                  <Text style={[styles.commitmentText, { color: colors.textSecondary }]}>
+                  <Ionicons name="sync-outline" size={16} color="#FFFFFF" aria-hidden={true} />
+                  <Text style={[styles.commitmentText, { color: '#A1A1AA' }]}>
                     Sub-50ms Cloud Sync
                   </Text>
                 </View>
-              </View>
-            </View>
-
-            {/* Right Hero Column: Flagship Phone Frame with Cross-fade */}
-            <View style={[styles.heroDeviceCol, isDesktop && styles.heroDeviceColDesktop]}>
-              <View style={[styles.ambientDeviceGlow, isDesktop && styles.ambientDeviceGlowDesktop, { backgroundColor: `${HERO_PREVIEWS[activeTab].tagColor}22` }]} />
-
-              <View style={[styles.phoneShell, isDesktop && styles.phoneShellDesktop, isMobile && styles.phoneShellMobile]}>
-                <View style={styles.phonePunchHole} />
-
-                <Animated.View style={[styles.phoneScreenSurface, { opacity: heroFadeAnim }]}>
-                  <Image
-                    source={HERO_PREVIEWS[activeTab].image}
-                    style={styles.phoneScreenImage}
-                    contentFit="cover"
-                    transition={150}
-                  />
-
-                  <View style={styles.screenContextPill}>
-                    <View style={[styles.screenContextDot, { backgroundColor: HERO_PREVIEWS[activeTab].tagColor }]} />
-                    <Text style={styles.screenContextText}>
-                      {HERO_PREVIEWS[activeTab].tag}
-                    </Text>
-                  </View>
-                </Animated.View>
-
-                <View style={styles.phoneHomeBar} />
-              </View>
+              </Animated.View>
             </View>
           </View>
         </View>
 
         {/* ════════════════════════════════════════════════════════════════════════
-            INTERACTIVE SLIDING FEATURE CAROUSEL (0% AI Slop — Space-Saving)
+            SCROLL-EXPANDING PROMOTIONAL VIDEO SHOWCASE (VideoScrollHero sticky track)
            ════════════════════════════════════════════════════════════════════════ */}
-        <View style={[styles.sectionWrapper, isDesktop && styles.sectionWrapperDesktop]}>
-          <View style={[styles.featuresSection, { borderTopColor: colors.borderSubtle }]}>
-            {/* Sliding Feature Stage */}
+        <View
+          ref={promoSectionRef}
+          style={[
+            styles.promoScrollTrack,
+            Platform.OS === 'web'
+              ? ({
+                  height: isDesktop ? '185vh' : '160vh',
+                  position: 'relative',
+                  width: '100%',
+                } as any)
+              : {},
+          ]}
+        >
+          {/* Fixed Sticky Center Viewport */}
+          <View
+            style={[
+              styles.promoStickyViewport,
+              Platform.OS === 'web'
+                ? ({
+                    position: 'sticky',
+                    top: 0,
+                    height: '100vh',
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 10,
+                    paddingHorizontal: isDesktop ? 48 : 16,
+                  } as any)
+                : {},
+            ]}
+          >
             <View
-              style={styles.carouselStageCard}
+              style={[
+                styles.promoVideoCard,
+                Platform.OS === 'web'
+                  ? ({
+                      width: isDesktop ? `${75 + expandProgress * 25}%` : `${88 + expandProgress * 12}%`,
+                      maxWidth: 1600,
+                      borderRadius: promoTargetRadius,
+                      WebkitMaskImage: '-webkit-radial-gradient(white, black)',
+                      maskImage: 'radial-gradient(white, black)',
+                      transform: [
+                        { scale: isDesktop ? 0.78 + expandProgress * 0.22 : 0.86 + expandProgress * 0.14 },
+                      ],
+                      transformOrigin: 'center center',
+                      boxShadow: `0 ${Math.round(24 + expandProgress * 36)}px ${Math.round(56 + expandProgress * 64)}px rgba(0, 0, 0, ${0.80 + expandProgress * 0.18}), 0 0 0 1px rgba(255, 255, 255, ${0.10 + expandProgress * 0.14})`,
+                      borderColor: expandProgress >= 0.98 ? 'rgba(255, 255, 255, 0.32)' : 'rgba(255, 255, 255, 0.15)',
+                      borderWidth: 1.5,
+                      willChange: 'transform, border-radius, width',
+                      transition: 'box-shadow 0.25s ease, border-color 0.25s ease',
+                      cursor: 'pointer',
+                    } as any)
+                  : {},
+              ]}
               {...(Platform.OS === 'web'
                 ? {
-                    onPointerEnter: () => setIsAutoPlayPaused(true),
-                    onPointerLeave: () => setIsAutoPlayPaused(false),
+                    onMouseMove: (e: any) => {
+                      const rect = e.currentTarget?.getBoundingClientRect();
+                      if (rect) {
+                        setVideoCursorPos({
+                          x: e.clientX - rect.left,
+                          y: e.clientY - rect.top,
+                        });
+                      }
+                    },
+                    onMouseEnter: () => setIsHoveringVideo(true),
+                    onMouseLeave: () => setIsHoveringVideo(false),
+                    onClick: openPromoLightbox,
                   }
                 : {})}
-              {...panResponder.panHandlers}
             >
-              {/* Slide Content Row */}
-              <View style={[styles.carouselSlideBody, isDesktop && styles.carouselSlideBodyDesktop]}>
-                {/* Left Column: Section Header in Yellow Box + Active Slide Details */}
-                <View style={styles.slideNarrativeCol}>
-                  {/* Permanent Section Intro (Yellow Box Location — Left Aligned) */}
-                  <View style={styles.featuresHeaderBlock}>
-                    <Text style={[styles.sectionEyebrow, { color: colors.accent }]}>
-                      DESIGNED FOR MANGA PURISTS
-                    </Text>
-                    <Text
-                      accessibilityRole="header"
-                      aria-level={2}
-                      style={[styles.sectionTitle, { color: colors.text }]}
-                    >
-                      Engineered for the pure love of reading
-                    </Text>
-                    <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>
-                      No artificial coins, no daily wait-timers, no aggressive paywalls. Just a fast, quiet, precision canvas built for long reading sessions.
-                    </Text>
-                  </View>
+              {/* Floating "Play intro" Hover Rectangular Badge (No Pill) */}
+              {Platform.OS === 'web' && (
+                <View
+                  style={[
+                    styles.promoCursorBadge,
+                    {
+                      left: videoCursorPos.x || 160,
+                      top: videoCursorPos.y || 120,
+                      opacity: isHoveringVideo ? 1 : (isMobile ? 1 : 0),
+                      transform: [
+                        { translateX: -54 },
+                        { translateY: -18 },
+                        { scale: isHoveringVideo ? 1 : (isMobile ? 1 : 0.75) },
+                      ],
+                    },
+                  ]}
+                  pointerEvents="none"
+                >
+                  <Ionicons name="play" size={12} color="#000000" aria-hidden={true} style={{ marginRight: 6 }} />
+                  <Text style={styles.promoCursorBadgeText}>PLAY INTRO</Text>
+                </View>
+              )}
 
-                  {/* Active Slide Details (Smoothly animated on slide change) */}
-                  <Animated.View
-                    style={[
-                      styles.slideDetailsAnimatedWrap,
-                      {
-                        opacity: featureFadeAnim,
-                        transform: [{ translateX: featureSlideAnim }],
+              {/* Inner Display Screen Area */}
+              <View
+                style={[
+                  styles.promoScreenArea,
+                  Platform.OS === 'web'
+                    ? ({
+                        borderRadius: promoTargetRadius,
+                        WebkitMaskImage: '-webkit-radial-gradient(white, black)',
+                        maskImage: 'radial-gradient(white, black)',
+                      } as any)
+                    : {},
+                ]}
+              >
+                {/* HTML5 Video Element with yomite-promotional-vid.mp4 */}
+                {Platform.OS === 'web' ? (
+                  React.createElement(
+                    'video',
+                    {
+                      ref: promoVideoRef,
+                      loop: true,
+                      muted: isPromoMuted,
+                      playsInline: true,
+                      preload: 'auto',
+                      onLoadedData: () => checkVideoState(currentProgressRef.current),
+                      onPlay: () => setIsPromoPlaying(true),
+                      onPause: () => setIsPromoPlaying(false),
+                      style: {
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                        display: 'block',
+                        backgroundColor: '#09090B',
+                        cursor: 'pointer',
+                        borderRadius: 'inherit',
+                        WebkitMaskImage: '-webkit-radial-gradient(white, black)',
+                        maskImage: 'radial-gradient(white, black)',
+                        overflow: 'hidden',
                       },
-                    ]}
-                  >
-                    <View style={[styles.featureNumberBadge, { backgroundColor: 'transparent', borderColor: colors.borderSubtle }]}>
-                      <Text style={[styles.featureNumberText, { color: currentSlide.tagColor }]}>
-                        {currentSlide.number}
-                      </Text>
-                      <Text style={[styles.featureCategoryText, { color: colors.textMuted }]}>
-                        {currentSlide.category}
-                      </Text>
-                    </View>
-
-                    <Text accessibilityRole="header" aria-level={3} style={[styles.spreadTitle, { color: colors.text }]}>
-                      {currentSlide.title}
-                    </Text>
-                    <Text style={[styles.spreadParagraph, { color: colors.textSecondary }]}>
-                      {currentSlide.paragraph}
-                    </Text>
-
-                    {/* Interactive element for Slide 1 (Reader Modes) */}
-                    {currentSlide.interactiveType === 'readerMode' && (
-                      <View style={styles.modeChoiceContainer}>
-                        <Text style={[styles.modeChoiceLabel, { color: colors.textMuted }]}>
-                          SWITCH READING MODES
-                        </Text>
-                        <View style={styles.modeChoiceRow}>
-                          {[
-                            { id: 'webtoon' as const, label: 'Vertical Webtoon', icon: 'reorder-two-outline' as const },
-                            { id: 'rtl' as const, label: 'Right-to-Left Manga', icon: 'arrow-back-outline' as const },
-                            { id: 'spread' as const, label: 'Dual Spread', icon: 'book-outline' as const },
-                          ].map((item) => {
-                            const isChosen = readerModeChoice === item.id;
-                            return (
-                              <Pressable
-                                key={item.id}
-                                accessibilityRole="button"
-                                aria-label={`Select ${item.label} mode`}
-                                onPress={() => {
-                                  triggerHaptic();
-                                  setReaderModeChoice(item.id);
-                                }}
-                                style={[
-                                  styles.modePill,
-                                  {
-                                    backgroundColor: isChosen ? colors.accentSubtle : 'transparent',
-                                    borderColor: isChosen ? colors.accent : colors.borderSubtle,
-                                  },
-                                ]}
-                              >
-                                <Ionicons
-                                  name={item.icon}
-                                  size={14}
-                                  color={isChosen ? colors.accent : colors.textSecondary}
-                                  aria-hidden={true}
-                                />
-                                <Text
-                                  style={[
-                                    styles.modePillText,
-                                    {
-                                      color: isChosen ? colors.text : colors.textSecondary,
-                                      fontWeight: isChosen ? Typography.weights.bold : Typography.weights.medium,
-                                    },
-                                  ]}
-                                >
-                                  {item.label}
-                                </Text>
-                              </Pressable>
-                            );
-                          })}
-                        </View>
-                      </View>
-                    )}
-
-                    {/* Interactive element for Slide 3 (Languages) */}
-                    {currentSlide.interactiveType === 'languages' && (
-                      <View style={styles.langSelectorContainer}>
-                        <Text style={[styles.modeChoiceLabel, { color: colors.textMuted }]}>
-                          FILTER SCANLATION LANGUAGES
-                        </Text>
-                        <View style={styles.langBadgeGrid}>
-                          {[
-                            { code: 'en', name: 'English', country: 'us' },
-                            { code: 'es', name: 'Español', country: 'es' },
-                            { code: 'id', name: 'Indonesia', country: 'id' },
-                            { code: 'ja', name: '日本語', country: 'jp' },
-                            { code: 'pt-br', name: 'Português', country: 'br' },
-                            { code: 'fr', name: 'Français', country: 'fr' },
-                          ].map((item) => {
-                            const isChosen = selectedLang === item.code;
-                            return (
-                              <Pressable
-                                key={item.code}
-                                accessibilityRole="button"
-                                aria-label={`Select ${item.name} language`}
-                                onPress={() => {
-                                  triggerHaptic();
-                                  setSelectedLang(item.code);
-                                }}
-                                style={[
-                                  styles.langPill,
-                                  {
-                                    backgroundColor: isChosen ? '#3B82F618' : 'transparent',
-                                    borderColor: isChosen ? '#3B82F6' : colors.borderSubtle,
-                                  },
-                                ]}
-                              >
-                                <Image
-                                  source={{ uri: `https://flagcdn.com/w40/${item.country}.png` }}
-                                  style={styles.langFlag}
-                                  contentFit="cover"
-                                />
-                                <Text
-                                  style={[
-                                    styles.langPillText,
-                                    {
-                                      color: isChosen ? colors.text : colors.textSecondary,
-                                      fontWeight: isChosen ? Typography.weights.bold : Typography.weights.medium,
-                                    },
-                                  ]}
-                                >
-                                  {item.name}
-                                </Text>
-                              </Pressable>
-                            );
-                          })}
-                        </View>
-                      </View>
-                    )}
-
-                    {/* Checklist Highlights */}
-                    <View style={styles.spreadChecklist}>
-                      {currentSlide.checklist.map((item, i) => (
-                        <View key={i} style={styles.checkItem}>
-                          <Ionicons name="checkmark-circle" size={16} color={currentSlide.tagColor} aria-hidden={true} />
-                          <Text style={[styles.checkItemText, { color: colors.textSecondary }]}>
-                            <Text style={{ color: colors.text, fontWeight: '600' }}>{item.title}</Text>: {item.desc}
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-                  </Animated.View>
-                </View>
-
-                {/* Right Column: Smartphone Screen Mockup */}
-                <View style={styles.slideVisualCol}>
-                  <Animated.View
-                    style={{
-                      opacity: featureFadeAnim,
-                      transform: [{ translateX: featureSlideAnim }],
-                    }}
-                  >
-                    <PhoneMockupFrame
-                      image={currentSlide.image}
-                      tag={currentSlide.tag}
-                      tagColor={currentSlide.tagColor}
-                      isMobile={isMobile}
-                      isDesktop={isDesktop}
-                      variant="carousel"
-                    />
-                  </Animated.View>
-                </View>
-              </View>
-
-              {/* Bottom Carousel Progress Indicator (Elongated capsule + circular dots) */}
-              <View style={[styles.carouselBottomBar, { borderTopColor: colors.borderSubtle }]}>
-                <View style={styles.carouselProgressTrackRow}>
-                  {FEATURE_SLIDES.map((slide, idx) => {
-                    const isActive = activeFeatureIndex === idx;
-                    const isHovered = hoveredNavIndex === idx;
-                    return (
-                      <Pressable
-                        key={slide.id}
-                        accessibilityRole="button"
-                        aria-label={`Jump to feature slide ${idx + 1}: ${slide.tabLabel}`}
-                        onPress={() => {
-                          switchFeatureSlide(idx, idx > activeFeatureIndex ? 'next' : 'prev');
-                        }}
-                        onHoverIn={() => setHoveredNavIndex(idx)}
-                        onHoverOut={() => setHoveredNavIndex(null)}
-                        style={styles.carouselDotTouchTarget}
-                      >
-                        {isActive ? (
-                          <View style={styles.carouselActiveCapsule}>
-                            <Animated.View
-                              style={[
-                                styles.carouselCapsuleFill,
-                                {
-                                  backgroundColor: slide.tagColor || '#3B82F6',
-                                  width: autoPlayProgress.interpolate({
-                                    inputRange: [0, 1],
-                                    outputRange: ['0%', '100%'],
-                                  }),
-                                },
-                              ]}
-                            />
-                          </View>
-                        ) : (
-                          <View
-                            style={[
-                              styles.carouselInactiveDot,
-                              isHovered && styles.carouselInactiveDotHovered,
-                            ]}
-                          />
-                        )}
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                      'aria-label': 'Yomite promotional video showing fluid manga reading experience',
+                    },
+                    React.createElement('source', { src: '/yomite-promotional-vid.mp4', type: 'video/mp4' }),
+                    React.createElement('source', { src: './yomite-promotional-vid.mp4', type: 'video/mp4' }),
+                    React.createElement('source', { src: '/assets/videos/yomite-promotional-vid.mp4', type: 'video/mp4' }),
+                  )
+                ) : (
+                  <View style={styles.promoNativeFallback}>
+                    <Text style={{ color: '#A1A1AA' }}>Video preview available on web view</Text>
+                  </View>
+                )}
               </View>
             </View>
           </View>
         </View>
 
         {/* ════════════════════════════════════════════════════════════════════════
-            DIRECT APK DOWNLOAD & PHONE QR HUB
+            DIRECT APK DOWNLOAD & PHONE QR HUB (FLAT CONTAINER-FREE DESIGN)
            ════════════════════════════════════════════════════════════════════════ */}
         <View style={[styles.sectionWrapper, isDesktop && styles.sectionWrapperDesktop]}>
           <View
             id="download-hub"
             style={[
               styles.downloadHubSection,
-              { borderTopColor: colors.borderSubtle },
               isMobile && styles.downloadHubSectionMobile,
             ]}
           >
             <View style={[styles.downloadHubGrid, isDesktop && styles.downloadHubGridDesktop]}>
               {/* Left: Official Release Specification */}
               <View style={styles.downloadHubLeft}>
-                <View style={[styles.verifiedBadge, { backgroundColor: 'rgba(16, 185, 129, 0.08)', borderColor: 'rgba(16, 185, 129, 0.25)' }]}>
-                  <Ionicons name="shield-checkmark" size={14} color="#10B981" aria-hidden={true} />
-                  <Text style={[styles.verifiedBadgeText, { color: colors.text }]}>
-                    Verified Official Build
+                <View style={styles.verifiedTag}>
+                  <Ionicons name="shield-checkmark" size={13} color="#FFFFFF" aria-hidden={true} />
+                  <Text style={styles.verifiedTagText}>
+                    OFFICIAL RELEASE • EXPO CLOUD SIGNED
                   </Text>
                 </View>
 
-                <Text accessibilityRole="header" aria-level={2} style={[styles.hubTitle, { color: colors.text }]}>
+                <Text accessibilityRole="header" aria-level={2} style={styles.hubTitle}>
                   Yomite for Android
                 </Text>
-                <Text style={[styles.hubSubtitle, { color: colors.textSecondary }]}>
-                  Direct APK sideload package with zero telemetry, zero trackers, and automatic in-app update notifications.
+                <Text style={styles.hubSubtitle}>
+                  Direct APK sideload package with zero telemetry, zero analytics trackers, and automatic in-app update notifications.
                 </Text>
 
-                {/* Clean Specs Table */}
-                <View style={[styles.metaTable, { borderColor: colors.borderSubtle }]}>
-                  <View style={styles.metaTableRow}>
-                    <Text style={[styles.metaTableLabel, { color: colors.textMuted }]}>Version</Text>
-                    <Text style={[styles.metaTableValue, { color: colors.text }]}>
-                      {APP_RELEASE.version} (Build {APP_RELEASE.buildNumber})
-                    </Text>
+                {/* Flat Open Specifications Table (Zero Container Cards) */}
+                <View style={styles.flatSpecsList}>
+                  <View style={styles.flatSpecRow}>
+                    <Text style={styles.flatSpecLabel}>VERSION</Text>
+                    <Text style={styles.flatSpecValue}>{APP_RELEASE.version} (Build {APP_RELEASE.buildNumber})</Text>
                   </View>
-                  <View style={styles.metaTableRow}>
-                    <Text style={[styles.metaTableLabel, { color: colors.textMuted }]}>Package Size</Text>
-                    <Text style={[styles.metaTableValue, { color: colors.text }]}>
-                      {APP_RELEASE.fileSize}
-                    </Text>
+                  <View style={styles.flatSpecRow}>
+                    <Text style={styles.flatSpecLabel}>PACKAGE SIZE</Text>
+                    <Text style={styles.flatSpecValue}>{APP_RELEASE.fileSize} • Clean Binary</Text>
                   </View>
-                  <View style={styles.metaTableRow}>
-                    <Text style={[styles.metaTableLabel, { color: colors.textMuted }]}>Architecture</Text>
-                    <Text style={[styles.metaTableValue, { color: colors.text }]}>
-                      {APP_RELEASE.architecture}
-                    </Text>
+                  <View style={styles.flatSpecRow}>
+                    <Text style={styles.flatSpecLabel}>ARCHITECTURE</Text>
+                    <Text style={styles.flatSpecValue}>Universal (ARM64 & x86_64)</Text>
                   </View>
-                  <View style={styles.metaTableRow}>
-                    <Text style={[styles.metaTableLabel, { color: colors.textMuted }]}>OS Compatibility</Text>
-                    <Text style={[styles.metaTableValue, { color: colors.text }]}>
-                      {APP_RELEASE.minAndroid}
-                    </Text>
+                  <View style={styles.flatSpecRow}>
+                    <Text style={styles.flatSpecLabel}>COMPATIBILITY</Text>
+                    <Text style={styles.flatSpecValue}>{APP_RELEASE.minAndroid}</Text>
                   </View>
                 </View>
 
-                {/* Big Primary Download CTA */}
+                {/* Flat Pure White Primary Download Button (No Shadows / No Elevation) */}
                 <Pressable
                   accessibilityRole="button"
                   aria-label={`Download Yomite ${APP_RELEASE.version} APK`}
                   onPress={handleDownloadApk}
                   style={({ pressed }) => [
                     styles.bigDownloadButton,
-                    { backgroundColor: colors.accent },
                     pressed && styles.buttonPressed,
                   ]}
                 >
-                  <Ionicons name="arrow-down-circle" size={24} color="#FFFFFF" aria-hidden={true} />
+                  <Ionicons name="arrow-down-circle" size={22} color="#000000" aria-hidden={true} />
                   <View style={styles.bigDownloadTextCol}>
                     <Text style={styles.bigDownloadTitle}>
                       Download {APP_RELEASE.version} APK
@@ -1015,7 +1036,7 @@ export default function AppDownloadScreen() {
                   </View>
                 </Pressable>
 
-                {/* Cryptographic Verification Toggle */}
+                {/* Flat Cryptographic Verification Toggle & Monospace Hash */}
                 <View style={styles.checksumSection}>
                   <Pressable
                     accessibilityRole="button"
@@ -1029,67 +1050,74 @@ export default function AppDownloadScreen() {
                     <Ionicons
                       name={showShaDrawer ? 'chevron-up' : 'chevron-down'}
                       size={14}
-                      color={colors.textMuted}
+                      color="#FFFFFF"
                       aria-hidden={true}
                     />
-                    <Text style={[styles.checksumToggleText, { color: colors.textSecondary }]}>
-                      {showShaDrawer ? 'Hide Cryptographic Checksum' : 'Verify SHA-256 Checksum'}
+                    <Text style={styles.checksumToggleText}>
+                      {showShaDrawer ? 'Hide Cryptographic Digest' : 'Verify SHA-256 Cryptographic Digest'}
                     </Text>
                   </Pressable>
 
                   {showShaDrawer && (
-                    <View style={[styles.shaBox, { backgroundColor: 'transparent', borderColor: colors.borderSubtle }]}>
+                    <View style={styles.flatShaBlock}>
                       <View style={styles.shaHeaderRow}>
-                        <Text style={[styles.shaTitle, { color: colors.textMuted }]}>SHA-256 DIGEST</Text>
+                        <Text style={styles.shaTitle}>SHA-256 DIGEST (STANDALONE BINARY)</Text>
                         <Pressable
                           accessibilityRole="button"
                           aria-label="Copy SHA-256 hash"
                           onPress={handleCopySha}
-                          style={styles.shaCopyPill}
+                          style={[
+                            styles.shaCopyBtn,
+                            copiedSha && { backgroundColor: '#FFFFFF', borderColor: '#FFFFFF' },
+                          ]}
                         >
                           <Ionicons
                             name={copiedSha ? 'checkmark' : 'copy-outline'}
-                            size={13}
-                            color={copiedSha ? '#10B981' : colors.accent}
+                            size={12}
+                            color={copiedSha ? '#000000' : '#FFFFFF'}
                             aria-hidden={true}
                           />
-                          <Text style={[styles.shaCopyText, { color: copiedSha ? '#10B981' : colors.accent }]}>
-                            {copiedSha ? 'Copied to Clipboard' : 'Copy Hash'}
+                          <Text style={[styles.shaCopyText, { color: copiedSha ? '#000000' : '#FFFFFF' }]}>
+                            {copiedSha ? 'Copied' : 'Copy'}
                           </Text>
                         </Pressable>
                       </View>
-                      <Text style={[styles.shaHashString, { color: colors.textSecondary }]} numberOfLines={1}>
+                      <Text style={styles.shaHashString} numberOfLines={1} selectable>
                         {APP_RELEASE.sha256}
+                      </Text>
+                      <Text style={styles.terminalHelperCode} selectable>
+                        $ echo "{APP_RELEASE.sha256}  yomite.apk" | sha256sum -c
                       </Text>
                     </View>
                   )}
                 </View>
               </View>
 
-              {/* Right: Instant Phone QR Scanner Frame */}
+              {/* Right: Flat Phone QR Scanner (Zero Nested Containers) */}
               <View style={styles.downloadHubRight}>
-                <Text accessibilityRole="header" aria-level={3} style={[styles.qrHeading, { color: colors.text }]}>
-                  Scan from Mobile
-                </Text>
-                <Text style={[styles.qrInstructions, { color: colors.textSecondary }]}>
-                  Point your Android camera or QR reader here to download the package directly to your device:
-                </Text>
+                <View style={styles.flatQrColumn}>
+                  <Text accessibilityRole="header" aria-level={3} style={styles.qrHeading}>
+                    Scan from Mobile
+                  </Text>
+                  <Text style={styles.qrInstructions}>
+                    Point your Android camera here to download package directly:
+                  </Text>
 
-                <View style={styles.qrCardFrame}>
+                  {/* Clean Flat White QR Code Image (No Container Boxes) */}
                   <Image
                     source={{
                       uri: `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(APP_RELEASE.apkDownloadUrl)}&bgcolor=FFFFFF&color=09090B&margin=8`,
                     }}
-                    style={styles.qrImageCanvas}
+                    style={styles.flatQrImage}
                     contentFit="contain"
                   />
-                </View>
 
-                <View style={styles.qrHelperRow}>
-                  <Ionicons name="camera-outline" size={15} color={colors.accent} aria-hidden={true} />
-                  <Text style={[styles.qrHelperText, { color: colors.textSecondary }]}>
-                    Direct sideload link • Zero ad redirects
-                  </Text>
+                  <View style={styles.qrHelperRow}>
+                    <Ionicons name="camera-outline" size={14} color="#A1A1AA" aria-hidden={true} />
+                    <Text style={styles.qrHelperText}>
+                      Direct sideload link • Zero ad redirects
+                    </Text>
+                  </View>
                 </View>
               </View>
             </View>
@@ -1097,30 +1125,29 @@ export default function AppDownloadScreen() {
         </View>
 
         {/* ════════════════════════════════════════════════════════════════════════
-            CLEAN SIDELOAD & INSTALLATION GUIDE
+            CLEAN SIDELOAD & INSTALLATION GUIDE (FLAT OPEN SETUP MANUAL)
            ════════════════════════════════════════════════════════════════════════ */}
         <View style={[styles.sectionWrapper, isDesktop && styles.sectionWrapperDesktop]}>
           <View
             style={[
               styles.guideContainer,
-              { borderTopColor: colors.borderSubtle },
               isMobile && styles.guideContainerMobile,
             ]}
           >
             <View style={styles.guideHeaderGroup}>
-              <Text style={[styles.sectionEyebrow, { color: colors.accent }]}>
+              <Text style={styles.sectionEyebrow}>
                 SETUP MANUAL
               </Text>
-              <Text accessibilityRole="header" aria-level={2} style={[styles.guideMainTitle, { color: colors.text }]}>
+              <Text accessibilityRole="header" aria-level={2} style={styles.guideMainTitle}>
                 How to install Yomite
               </Text>
-              <Text style={[styles.guideSubtitle, { color: colors.textSecondary }]}>
-                Installation takes under 60&nbsp;seconds. Choose your platform below:
+              <Text style={styles.guideSubtitle}>
+                Installation takes under 60&nbsp;seconds. Select your platform below:
               </Text>
             </View>
 
-            {/* OS Guide Switcher */}
-            <View style={styles.guideToggleRow}>
+            {/* Flat Platform Switcher (No Box Containers) */}
+            <View style={styles.flatPlatformTabs}>
               <Pressable
                 accessibilityRole="button"
                 aria-label="View Android APK sideload instructions"
@@ -1129,24 +1156,20 @@ export default function AppDownloadScreen() {
                   setActiveGuideTab('android');
                 }}
                 style={[
-                  styles.guideToggleBtn,
-                  {
-                    backgroundColor: activeGuideTab === 'android' ? colors.accent : 'transparent',
-                    borderWidth: 1,
-                    borderColor: activeGuideTab === 'android' ? colors.accent : colors.borderSubtle,
-                  },
+                  styles.flatTabBtn,
+                  activeGuideTab === 'android' && styles.flatTabBtnActive,
                 ]}
               >
                 <Ionicons
                   name="logo-android"
-                  size={16}
-                  color={activeGuideTab === 'android' ? '#FFFFFF' : colors.textSecondary}
+                  size={15}
+                  color={activeGuideTab === 'android' ? '#000000' : '#A1A1AA'}
                   aria-hidden={true}
                 />
                 <Text
                   style={[
-                    styles.guideToggleText,
-                    { color: activeGuideTab === 'android' ? '#FFFFFF' : colors.textSecondary },
+                    styles.flatTabText,
+                    activeGuideTab === 'android' && styles.flatTabTextActive,
                   ]}
                 >
                   Android Sideload (APK)
@@ -1161,24 +1184,20 @@ export default function AppDownloadScreen() {
                   setActiveGuideTab('ios');
                 }}
                 style={[
-                  styles.guideToggleBtn,
-                  {
-                    backgroundColor: activeGuideTab === 'ios' ? colors.accent : 'transparent',
-                    borderWidth: 1,
-                    borderColor: activeGuideTab === 'ios' ? colors.accent : colors.borderSubtle,
-                  },
+                  styles.flatTabBtn,
+                  activeGuideTab === 'ios' && styles.flatTabBtnActive,
                 ]}
               >
                 <Ionicons
                   name="logo-apple"
-                  size={16}
-                  color={activeGuideTab === 'ios' ? '#FFFFFF' : colors.textSecondary}
+                  size={15}
+                  color={activeGuideTab === 'ios' ? '#000000' : '#A1A1AA'}
                   aria-hidden={true}
                 />
                 <Text
                   style={[
-                    styles.guideToggleText,
-                    { color: activeGuideTab === 'ios' ? '#FFFFFF' : colors.textSecondary },
+                    styles.flatTabText,
+                    activeGuideTab === 'ios' && styles.flatTabTextActive,
                   ]}
                 >
                   iPhone & iPad (PWA)
@@ -1186,102 +1205,90 @@ export default function AppDownloadScreen() {
               </Pressable>
             </View>
 
-            {/* Step Cards List */}
+            {/* Flat Open Step Sequence (Zero Card Containers) */}
             {activeGuideTab === 'android' ? (
-              <View style={styles.stepSequence}>
-                <View style={[styles.stepItem, { borderColor: colors.borderSubtle }]}>
-                  <View style={[styles.stepDigitBadge, { backgroundColor: 'rgba(244, 63, 94, 0.10)', borderWidth: 1, borderColor: 'rgba(244, 63, 94, 0.25)' }]}>
-                    <Text style={[styles.stepDigit, { color: colors.accent }]}>1</Text>
-                  </View>
-                  <View style={styles.stepDetailCol}>
-                    <Text accessibilityRole="header" aria-level={3} style={[styles.stepHeader, { color: colors.text }]}>
-                      Download the APK file
+              <View style={styles.flatStepList}>
+                <View style={styles.flatStepRow}>
+                  <Text style={styles.flatStepIndex}>01</Text>
+                  <View style={styles.flatStepBodyCol}>
+                    <Text accessibilityRole="header" aria-level={3} style={styles.flatStepTitle}>
+                      Download the APK package
                     </Text>
-                    <Text style={[styles.stepBody, { color: colors.textSecondary }]}>
-                      Tap <Text style={{ color: colors.text, fontWeight: '600' }}>"Download APK"</Text> above or scan the QR code using your Android camera. Your browser will download the package directly from our official Expo build repository.
+                    <Text style={styles.flatStepText}>
+                      Tap <Text style={styles.inlineKbd}>Download APK</Text> above or scan the QR code with your camera. The package downloads directly from the official Expo build cloud.
                     </Text>
                   </View>
                 </View>
 
-                <View style={[styles.stepItem, { borderColor: colors.borderSubtle }]}>
-                  <View style={[styles.stepDigitBadge, { backgroundColor: 'rgba(244, 63, 94, 0.10)', borderWidth: 1, borderColor: 'rgba(244, 63, 94, 0.25)' }]}>
-                    <Text style={[styles.stepDigit, { color: colors.accent }]}>2</Text>
-                  </View>
-                  <View style={styles.stepDetailCol}>
-                    <Text accessibilityRole="header" aria-level={3} style={[styles.stepHeader, { color: colors.text }]}>
-                      Tap Install from Downloads
+                <View style={styles.flatStepRow}>
+                  <Text style={styles.flatStepIndex}>02</Text>
+                  <View style={styles.flatStepBodyCol}>
+                    <Text accessibilityRole="header" aria-level={3} style={styles.flatStepTitle}>
+                      Install from Browser Downloads
                     </Text>
-                    <Text style={[styles.stepBody, { color: colors.textSecondary }]}>
-                      Open your browser downloads list (in Chrome, tap <Text style={{ color: colors.text, fontWeight: '600' }}>⋮ Menu → Downloads</Text>). Tap the downloaded <Text style={{ color: colors.accent, fontWeight: '600' }}>application-....apk</Text> file. If prompted by Android security, toggle <Text style={{ color: colors.text, fontWeight: '600' }}>"Allow from this source"</Text>.
+                    <Text style={styles.flatStepText}>
+                      Open your browser downloads list (in Chrome, tap <Text style={styles.inlineKbd}>⋮ Menu → Downloads</Text>). Tap the downloaded <Text style={styles.inlineKbd}>yomite-v{APP_RELEASE.version}.apk</Text> file. If prompted by Android security, enable <Text style={styles.inlineKbd}>Allow from this source</Text>.
                     </Text>
                   </View>
                 </View>
 
-                <View style={[styles.stepItem, { borderColor: colors.borderSubtle }]}>
-                  <View style={[styles.stepDigitBadge, { backgroundColor: 'rgba(244, 63, 94, 0.10)', borderWidth: 1, borderColor: 'rgba(244, 63, 94, 0.25)' }]}>
-                    <Text style={[styles.stepDigit, { color: colors.accent }]}>3</Text>
-                  </View>
-                  <View style={styles.stepDetailCol}>
-                    <Text accessibilityRole="header" aria-level={3} style={[styles.stepHeader, { color: colors.text }]}>
-                      Launch Yomite & Read
+                <View style={[styles.flatStepRow, { borderBottomWidth: 0 }]}>
+                  <Text style={styles.flatStepIndex}>03</Text>
+                  <View style={styles.flatStepBodyCol}>
+                    <Text accessibilityRole="header" aria-level={3} style={styles.flatStepTitle}>
+                      Launch Yomite & Start Reading
                     </Text>
-                    <Text style={[styles.stepBody, { color: colors.textSecondary }]}>
-                      Open Yomite from your app drawer. Your offline library is immediately active with zero accounts or sign-ups required.
+                    <Text style={styles.flatStepText}>
+                      Launch Yomite from your app drawer. Your offline library, MangaDex catalog, and 60&nbsp;fps reader are active immediately with zero sign-ups or accounts required.
                     </Text>
                   </View>
                 </View>
               </View>
             ) : (
-              <View style={styles.stepSequence}>
-                <View style={[styles.stepItem, { borderColor: colors.borderSubtle }]}>
-                  <View style={[styles.stepDigitBadge, { backgroundColor: 'rgba(244, 63, 94, 0.10)', borderWidth: 1, borderColor: 'rgba(244, 63, 94, 0.25)' }]}>
-                    <Text style={[styles.stepDigit, { color: colors.accent }]}>1</Text>
-                  </View>
-                  <View style={styles.stepDetailCol}>
-                    <Text accessibilityRole="header" aria-level={3} style={[styles.stepHeader, { color: colors.text }]}>
-                      Open in Mobile Safari
+              <View style={styles.flatStepList}>
+                <View style={styles.flatStepRow}>
+                  <Text style={styles.flatStepIndex}>01</Text>
+                  <View style={styles.flatStepBodyCol}>
+                    <Text accessibilityRole="header" aria-level={3} style={styles.flatStepTitle}>
+                      Open in Apple Safari
                     </Text>
-                    <Text style={[styles.stepBody, { color: colors.textSecondary }]}>
-                      Navigate to Yomite on your iPhone or iPad using Apple’s default Safari browser.
+                    <Text style={styles.flatStepText}>
+                      Navigate to Yomite on your iPhone or iPad using Apple’s default Mobile Safari browser.
                     </Text>
                   </View>
                 </View>
 
-                <View style={[styles.stepItem, { borderColor: colors.borderSubtle }]}>
-                  <View style={[styles.stepDigitBadge, { backgroundColor: 'rgba(244, 63, 94, 0.10)', borderWidth: 1, borderColor: 'rgba(244, 63, 94, 0.25)' }]}>
-                    <Text style={[styles.stepDigit, { color: colors.accent }]}>2</Text>
-                  </View>
-                  <View style={styles.stepDetailCol}>
-                    <Text accessibilityRole="header" aria-level={3} style={[styles.stepHeader, { color: colors.text }]}>
+                <View style={styles.flatStepRow}>
+                  <Text style={styles.flatStepIndex}>02</Text>
+                  <View style={styles.flatStepBodyCol}>
+                    <Text accessibilityRole="header" aria-level={3} style={styles.flatStepTitle}>
                       Tap the Share Button
                     </Text>
-                    <Text style={[styles.stepBody, { color: colors.textSecondary }]}>
-                      Tap the Safari Share button (the square icon with an upward arrow at the bottom center of the screen).
+                    <Text style={styles.flatStepText}>
+                      Tap the Safari Share button (the square icon with an upward arrow <Text style={styles.inlineKbd}>⎋ Share</Text> at the bottom center of the screen).
                     </Text>
                   </View>
                 </View>
 
-                <View style={[styles.stepItem, { borderColor: colors.borderSubtle }]}>
-                  <View style={[styles.stepDigitBadge, { backgroundColor: 'rgba(244, 63, 94, 0.10)', borderWidth: 1, borderColor: 'rgba(244, 63, 94, 0.25)' }]}>
-                    <Text style={[styles.stepDigit, { color: colors.accent }]}>3</Text>
-                  </View>
-                  <View style={styles.stepDetailCol}>
-                    <Text accessibilityRole="header" aria-level={3} style={[styles.stepHeader, { color: colors.text }]}>
+                <View style={[styles.flatStepRow, { borderBottomWidth: 0 }]}>
+                  <Text style={styles.flatStepIndex}>03</Text>
+                  <View style={styles.flatStepBodyCol}>
+                    <Text accessibilityRole="header" aria-level={3} style={styles.flatStepTitle}>
                       Select "Add to Home Screen"
                     </Text>
-                    <Text style={[styles.stepBody, { color: colors.textSecondary }]}>
-                      Scroll down and tap <Text style={{ color: colors.text, fontWeight: '600' }}>Add to Home Screen</Text>. Yomite will run as a standalone, fullscreen native progressive web application.
+                    <Text style={styles.flatStepText}>
+                      Scroll down and tap <Text style={styles.inlineKbd}>Add to Home Screen</Text>. Yomite will run as a standalone, fullscreen progressive web application with native tactile speed.
                     </Text>
                   </View>
                 </View>
               </View>
             )}
 
-            {/* Transparent Credibility Note */}
-            <View style={[styles.credibilityNote, { backgroundColor: 'transparent', borderColor: colors.borderSubtle }]}>
-              <Ionicons name="lock-closed-outline" size={18} color={colors.accent} aria-hidden={true} />
-              <Text style={[styles.credibilityNoteText, { color: colors.textSecondary }]}>
-                <Text style={{ color: colors.text, fontWeight: '600' }}>Transparent & Safe:</Text> Built directly via Expo Cloud Infrastructure with zero proprietary telemetry or ad networks. You can verify the source code and build hashes freely.
+            {/* Flat Open Credibility Row (Zero Box Container) */}
+            <View style={styles.flatCredibilityRow}>
+              <Ionicons name="shield-checkmark-outline" size={18} color="#FFFFFF" aria-hidden={true} />
+              <Text style={styles.flatCredibilityText}>
+                <Text style={{ color: '#FFFFFF', fontWeight: 'bold' }}>Transparent & Open Source:</Text> Built directly via Expo Cloud Infrastructure with zero proprietary telemetry or ad networks. You can verify the source code and build hashes freely.
               </Text>
             </View>
           </View>
@@ -1290,7 +1297,7 @@ export default function AppDownloadScreen() {
         {/* ════════════════════════════════════════════════════════════════════════
             FOOTER: Minimalist brand signature
            ════════════════════════════════════════════════════════════════════════ */}
-        <View style={[styles.footerOuter, { borderTopColor: colors.borderSubtle }]}>
+        <View style={styles.footerOuter}>
           <View style={styles.footerInner}>
             <View style={styles.footerBrandRow}>
               <Image
@@ -1298,9 +1305,9 @@ export default function AppDownloadScreen() {
                 style={styles.footerMascot}
                 contentFit="cover"
               />
-              <Text style={[styles.footerBrandText, { color: colors.text }]}>Yomite Manga Reader</Text>
+              <Text style={styles.footerBrandText}>Yomite Manga Reader</Text>
             </View>
-            <Text style={[styles.footerCopyright, { color: colors.textMuted }]}>
+            <Text style={styles.footerCopyright}>
               Powered by the MangaDex API. 100% Free & Open Source under the MIT License.
             </Text>
             <View style={styles.footerNavLinks}>
@@ -1310,30 +1317,171 @@ export default function AppDownloadScreen() {
                 onPress={() => router.push('/(tabs)' as any)}
                 style={styles.footerLinkPressable}
               >
-                <Text style={[styles.footerLink, { color: colors.accent }]}>Discover</Text>
+                <Text style={styles.footerLink}>Discover</Text>
               </Pressable>
-              <Text style={{ color: colors.border }}>•</Text>
+              <Text style={{ color: 'rgba(255, 255, 255, 0.2)' }}>•</Text>
               <Pressable
                 accessibilityRole="button"
                 aria-label="Community"
                 onPress={() => router.push('/(tabs)/community' as any)}
                 style={styles.footerLinkPressable}
               >
-                <Text style={[styles.footerLink, { color: colors.accent }]}>Community</Text>
+                <Text style={styles.footerLink}>Community</Text>
               </Pressable>
-              <Text style={{ color: colors.border }}>•</Text>
+              <Text style={{ color: 'rgba(255, 255, 255, 0.2)' }}>•</Text>
               <Pressable
                 accessibilityRole="button"
                 aria-label="Settings"
                 onPress={() => router.push('/(tabs)/settings' as any)}
                 style={styles.footerLinkPressable}
               >
-                <Text style={[styles.footerLink, { color: colors.accent }]}>Settings</Text>
+                <Text style={styles.footerLink}>Settings</Text>
               </Pressable>
             </View>
           </View>
         </View>
       </ScrollView>
+
+      {/* ════════════════════════════════════════════════════════════════════════
+          FULLSCREEN VIDEO LIGHTBOX (with Player Menus, Tracker & Controls)
+         ════════════════════════════════════════════════════════════════════════ */}
+      {isPromoLightboxOpen && (
+        <View
+          role="dialog"
+          aria-modal={true}
+          aria-label="Full screen promotional video"
+          style={styles.lightboxBackdrop}
+        >
+          {/* Backdrop dismissal tap target */}
+          <Pressable
+            aria-label="Close dialog background"
+            onPress={closePromoLightbox}
+            style={StyleSheet.absoluteFill}
+          />
+
+          {/* Dialog Card Container */}
+          <View style={styles.lightboxCard}>
+            {/* Top Close Button */}
+            <Pressable
+              accessibilityRole="button"
+              aria-label="Close dialog"
+              onPress={closePromoLightbox}
+              style={({ pressed }) => [styles.lightboxCloseBtn, pressed && styles.buttonPressed]}
+            >
+              <Ionicons name="close" size={20} color="#FFFFFF" aria-hidden={true} />
+            </Pressable>
+
+            {/* Video Player Display */}
+            <View style={styles.lightboxVideoArea}>
+              {Platform.OS === 'web' ? (
+                React.createElement(
+                  'video',
+                  {
+                    ref: lightboxVideoRef,
+                    autoPlay: true,
+                    loop: true,
+                    muted: isLightboxMuted,
+                    playsInline: true,
+                    preload: 'auto',
+                    onTimeUpdate: handleLightboxTimeUpdate,
+                    onLoadedMetadata: handleLightboxTimeUpdate,
+                    onPlay: () => setIsLightboxPlaying(true),
+                    onPause: () => setIsLightboxPlaying(false),
+                    onClick: toggleLightboxPlay,
+                    style: {
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'contain',
+                      backgroundColor: '#000000',
+                      cursor: 'pointer',
+                    },
+                    'aria-label': 'Yomite promotional video showcase',
+                  },
+                  React.createElement('source', { src: '/yomite-promotional-vid.mp4', type: 'video/mp4' }),
+                  React.createElement('source', { src: './yomite-promotional-vid.mp4', type: 'video/mp4' }),
+                  React.createElement('source', { src: '/assets/videos/yomite-promotional-vid.mp4', type: 'video/mp4' }),
+                )
+              ) : (
+                <View style={styles.promoNativeFallback}>
+                  <Text style={{ color: '#FAFAFA' }}>Video preview available on web view</Text>
+                </View>
+              )}
+            </View>
+
+            {/* Bottom Player Menus & Control Bar */}
+            <View style={styles.lightboxControlBar}>
+              {/* Seekable Progress Bar / Tracker */}
+              <Pressable
+                accessibilityRole="progressbar"
+                aria-label="Seek video progress"
+                onPress={handleLightboxScrub}
+                style={styles.lightboxScrubTrack}
+              >
+                <View
+                  style={[
+                    styles.lightboxScrubProgress,
+                    {
+                      width: lightboxDuration > 0 ? `${(lightboxTimeCurrent / lightboxDuration) * 100}%` : '0%',
+                    },
+                  ]}
+                />
+              </Pressable>
+
+              {/* Controls Row */}
+              <View style={styles.lightboxControlsRow}>
+                <View style={styles.lightboxControlsLeft}>
+                  {/* Play/Pause Button */}
+                  <Pressable
+                    accessibilityRole="button"
+                    aria-label={isLightboxPlaying ? 'Pause video' : 'Play video'}
+                    onPress={toggleLightboxPlay}
+                    style={({ pressed }) => [styles.lightboxControlBtn, pressed && styles.buttonPressed]}
+                  >
+                    <Ionicons
+                      name={isLightboxPlaying ? 'pause' : 'play'}
+                      size={18}
+                      color="#FAFAFA"
+                      aria-hidden={true}
+                    />
+                  </Pressable>
+
+                  {/* Volume/Mute Button */}
+                  <Pressable
+                    accessibilityRole="button"
+                    aria-label={isLightboxMuted ? 'Unmute video audio' : 'Mute video audio'}
+                    onPress={toggleLightboxMute}
+                    style={({ pressed }) => [styles.lightboxControlBtn, pressed && styles.buttonPressed]}
+                  >
+                    <Ionicons
+                      name={isLightboxMuted ? 'volume-mute-outline' : 'volume-high-outline'}
+                      size={18}
+                      color={isLightboxMuted ? '#71717A' : '#FFFFFF'}
+                      aria-hidden={true}
+                    />
+                  </Pressable>
+
+                  {/* Time Indicator */}
+                  <Text style={styles.lightboxTimeText}>
+                    {formatVideoTime(lightboxTimeCurrent)}&nbsp;/&nbsp;{formatVideoTime(lightboxDuration || 34)}
+                  </Text>
+                </View>
+
+                {/* Fullscreen Toggle */}
+                {Platform.OS === 'web' && (
+                  <Pressable
+                    accessibilityRole="button"
+                    aria-label="Toggle full screen mode"
+                    onPress={toggleLightboxFullscreen}
+                    style={({ pressed }) => [styles.lightboxControlBtn, pressed && styles.buttonPressed]}
+                  >
+                    <Ionicons name="scan-outline" size={17} color="#FAFAFA" aria-hidden={true} />
+                  </Pressable>
+                )}
+              </View>
+            </View>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -1411,15 +1559,20 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 14,
     paddingVertical: 9,
-    borderRadius: Radius.md,
+    borderRadius: 4,
     borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: 'transparent',
     minHeight: 44,
     minWidth: 44,
     justifyContent: 'center',
+    boxShadow: 'none',
+    elevation: 0,
   },
   navSecondaryText: {
     fontSize: Typography.sizes.footnote,
     fontWeight: Typography.weights.semibold,
+    color: '#FFFFFF',
   },
   navPrimaryButton: {
     flexDirection: 'row',
@@ -1427,13 +1580,17 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 16,
     paddingVertical: 9,
-    borderRadius: Radius.md,
+    borderRadius: 4,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 0,
     minHeight: 44,
     minWidth: 44,
     justifyContent: 'center',
+    boxShadow: 'none',
+    elevation: 0,
   },
   navPrimaryText: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: Typography.sizes.footnote,
     fontWeight: Typography.weights.bold,
   },
@@ -1449,7 +1606,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
   },
   sectionWrapperDesktop: {
-    paddingHorizontal: 40,
+    paddingHorizontal: 48,
+    maxWidth: 1800,
   },
 
   /* ── HERO CONTAINER ── */
@@ -1485,24 +1643,27 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: Spacing.md,
   },
-  releasePill: {
+  releaseTag: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: Radius.full,
+    paddingHorizontal: 9,
+    paddingVertical: 3.5,
+    borderRadius: 4,
     borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
   },
   pulseDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: '#10B981',
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FFFFFF',
   },
-  releasePillText: {
-    fontSize: 12,
-    fontWeight: Typography.weights.semibold,
+  releaseTagText: {
+    fontSize: 11.5,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: 0.8,
   },
   releaseMetaText: {
     fontSize: 12.5,
@@ -1539,7 +1700,7 @@ const styles = StyleSheet.create({
   heroSubheadlineDesktop: {
     fontSize: 20,
     lineHeight: 32,
-    maxWidth: 720,
+    maxWidth: 860,
     marginBottom: Spacing['2xl'],
   },
   heroSubheadlineMobile: {
@@ -1565,22 +1726,25 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 22,
     paddingVertical: 14,
-    borderRadius: Radius.lg,
+    borderRadius: 4,
     minHeight: 48,
-    boxShadow: '0 8px 20px rgba(244, 63, 94, 0.32)',
-    elevation: 6,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 0,
+    boxShadow: 'none',
+    elevation: 0,
   },
   heroDownloadLabels: {
     gap: 2,
   },
   heroDownloadMain: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 16,
     fontWeight: Typography.weights.bold,
+    letterSpacing: -0.2,
   },
   heroDownloadMeta: {
-    color: 'rgba(255, 255, 255, 0.85)',
-    fontSize: 12,
+    color: '#52525B',
+    fontSize: 12.5,
     fontWeight: Typography.weights.medium,
   },
   heroQrButton: {
@@ -1589,59 +1753,28 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 18,
     paddingVertical: 14,
-    borderRadius: Radius.lg,
+    borderRadius: 4,
     borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    backgroundColor: 'transparent',
     minHeight: 48,
+    boxShadow: 'none',
+    elevation: 0,
   },
   heroQrText: {
     fontSize: 14.5,
     fontWeight: Typography.weights.semibold,
-  },
-  heroTabSelector: {
-    gap: 8,
-    marginTop: Spacing.xs,
-  },
-  heroTabLabel: {
-    fontSize: 11,
-    fontWeight: Typography.weights.bold,
-    letterSpacing: 1.2,
-  },
-  heroTabList: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  heroTabListMobile: {
-    gap: 6,
-  },
-  heroTabPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: Radius.full,
-    borderWidth: 1,
-    minHeight: 44,
-    minWidth: 44,
-  },
-  heroTabIndicator: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  heroTabPillText: {
-    fontSize: 13,
+    color: '#FFFFFF',
   },
   commitmentsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-    gap: 12,
-    marginTop: Spacing.xl,
-    paddingTop: Spacing.lg,
+    gap: 16,
+    marginTop: Spacing['2xl'],
+    paddingTop: Spacing.xl,
     borderTopWidth: StyleSheet.hairlineWidth,
+    maxWidth: 920,
   },
   commitmentItem: {
     flexDirection: 'row',
@@ -1658,143 +1791,304 @@ const styles = StyleSheet.create({
     borderRadius: 1.5,
     backgroundColor: '#3F3F46',
   },
-
-  /* ── SMARTPHONE MOCKUP FRAME ── */
-  heroDeviceCol: {
-    alignItems: 'center',
-    justifyContent: 'center',
+  /* ── FULL-BLEED HERO STAGE WITH VIDEO BACKGROUND ── */
+  heroSectionWrap: {
+    width: '100%',
     position: 'relative',
-    minHeight: 520,
-  },
-  heroDeviceColDesktop: {
-    minHeight: 740,
-    flex: 0.95,
-  },
-  phoneMockupWrapper: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  ambientDeviceGlow: {
-    position: 'absolute',
-    width: 340,
-    height: 340,
-    borderRadius: 170,
-    opacity: 0.9,
-    transform: [{ scale: 1.25 }],
-    pointerEvents: 'none',
-  },
-  ambientDeviceGlowDesktop: {
-    width: 460,
-    height: 460,
-    borderRadius: 230,
-    opacity: 0.95,
-  },
-  phoneShell: {
-    width: 275,
-    height: 585,
-    backgroundColor: '#09090B',
-    borderColor: '#27272A',
-    borderWidth: 6,
-    borderRadius: 42,
     overflow: 'hidden',
-    position: 'relative',
-    boxShadow: '0 24px 50px rgba(0, 0, 0, 0.65)',
-    elevation: 16,
-  },
-  phoneShellDesktop: {
-    width: 335,
-    height: 710,
-    borderRadius: 50,
-    borderWidth: 7,
-  },
-  phoneShellCarouselDesktop: {
-    width: 305,
-    height: 650,
-    borderRadius: 46,
-    borderWidth: 6.5,
-  },
-  ambientDeviceGlowCarouselDesktop: {
-    width: 420,
-    height: 420,
-    borderRadius: 210,
-    opacity: 0.9,
-  },
-  phoneShellMobile: {
-    width: 255,
-    height: 540,
-  },
-  phonePunchHole: {
-    position: 'absolute',
-    top: 10,
-    alignSelf: 'center',
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#000000',
-    zIndex: 25,
-  },
-  phoneScreenSurface: {
-    flex: 1,
     backgroundColor: '#09090B',
-    position: 'relative',
+    minHeight: 700,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  phoneScreenImage: {
+  heroSectionWrapDesktop: {
+    minHeight: 880,
+  },
+  heroBackgroundVideoWrap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
+    overflow: 'hidden',
+    zIndex: 0,
+  },
+  heroOverlayContainer: {
+    width: '100%',
+    maxWidth: 1800,
+    alignSelf: 'center',
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing['2xl'],
+    paddingBottom: Spacing['3xl'],
+    zIndex: 10,
+    position: 'relative',
+    justifyContent: 'center',
+  },
+  heroOverlayContainerDesktop: {
+    paddingHorizontal: 56,
+    paddingTop: 100,
+    paddingBottom: 130,
+    minHeight: 880,
+  },
+  heroContentWrap: {
+    width: '100%',
+    zIndex: 10,
+  },
+  heroContentWrapDesktop: {
+    maxWidth: 980,
+  },
+  heroSpeakerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    backgroundColor: 'transparent',
+    minHeight: 48,
+    minWidth: 48,
+    boxShadow: 'none',
+    elevation: 0,
+  },
+  heroSpeakerText: {
+    fontSize: 14,
+    fontWeight: Typography.weights.semibold,
+  },
+  heroFallbackImage: {
     width: '100%',
     height: '100%',
   },
-  screenContextPill: {
-    position: 'absolute',
-    bottom: 22,
+  /* ── EXPANDING PROMOTIONAL VIDEO SHOWCASE ── */
+  promoSectionWrap: {
+    width: '100%',
+    maxWidth: 1720,
     alignSelf: 'center',
+    alignItems: 'center',
+    marginTop: Spacing['2xl'],
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing['4xl'],
+  },
+  promoSectionWrapDesktop: {
+    marginTop: 40,
+    paddingTop: 20,
+    paddingBottom: 80,
+    maxWidth: 1720,
+  },
+  promoHeaderBlock: {
+    width: '100%',
+    maxWidth: 820,
+    alignItems: 'center',
+    textAlign: 'center',
+    marginBottom: Spacing['3xl'],
+  },
+  promoEyebrowRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
     paddingHorizontal: 12,
     paddingVertical: 5,
-    backgroundColor: 'rgba(9, 9, 11, 0.90)',
-    borderColor: 'rgba(255, 255, 255, 0.16)',
+    borderRadius: 4,
     borderWidth: 1,
-    borderRadius: Radius.full,
-    zIndex: 20,
-    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.5)',
+    marginBottom: Spacing.md,
   },
-  screenContextDot: {
+  promoPulseDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
+    backgroundColor: '#FFFFFF',
   },
-  screenContextText: {
-    color: '#FAFAFA',
-    fontSize: 10,
+  promoEyebrowText: {
+    fontSize: 11,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: 1.2,
+  },
+  promoMainTitle: {
+    fontSize: 36,
+    lineHeight: 44,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: -0.8,
+    marginBottom: Spacing.sm,
+    textAlign: 'center',
+  },
+  promoMainTitleMobile: {
+    fontSize: 26,
+    lineHeight: 33,
+    letterSpacing: -0.4,
+  },
+  promoSubtitle: {
+    fontSize: 16.5,
+    lineHeight: 26,
+    textAlign: 'center',
+    maxWidth: 720,
+    marginBottom: Spacing.lg,
+  },
+  promoStatusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 4,
+    borderWidth: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  promoStatusText: {
+    fontSize: 12,
+    fontWeight: Typography.weights.semibold,
+    letterSpacing: 0.6,
+  },
+  promoScrollTrack: {
+    width: '100%',
+    position: 'relative',
+  },
+  promoStickyViewport: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  promoVideoCard: {
+    position: 'relative',
+    backgroundColor: '#09090B',
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    borderTopColor: 'rgba(255, 255, 255, 0.32)',
+    borderWidth: 1.5,
+    overflow: 'hidden',
+    alignSelf: 'center',
+    width: '100%',
+    maxWidth: 1600,
+    padding: 0,
+  },
+  promoCursorBadge: {
+    position: 'absolute',
+    zIndex: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    boxShadow: 'none',
+  },
+  promoCursorBadgeText: {
+    color: '#000000',
+    fontSize: 12.5,
     fontWeight: Typography.weights.bold,
     letterSpacing: 0.8,
   },
-  phoneHomeBar: {
+  lightboxBackdrop: {
+    position: 'fixed' as any,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.90)',
+    zIndex: 9999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.md,
+  },
+  lightboxCard: {
+    width: '100%',
+    maxWidth: 1200,
+    borderRadius: Radius.xl,
+    backgroundColor: '#09090B',
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    borderWidth: 1,
+    overflow: 'hidden',
+    position: 'relative',
+    boxShadow: '0 25px 60px rgba(0, 0, 0, 0.85)',
+  },
+  lightboxCloseBtn: {
     position: 'absolute',
-    bottom: 6,
-    alignSelf: 'center',
-    width: 90,
-    height: 3.5,
-    borderRadius: 2,
-    backgroundColor: '#52525B',
-    zIndex: 25,
+    top: 14,
+    right: 14,
+    zIndex: 40,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.20)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-
-  /* ── SLIDING FEATURE SECTION ── */
-  featuresSection: {
+  lightboxVideoArea: {
     width: '100%',
-    maxWidth: 1600,
-    alignSelf: 'center',
-    paddingTop: Spacing['3xl'],
-    paddingBottom: Spacing['2xl'],
-    borderTopWidth: StyleSheet.hairlineWidth,
+    aspectRatio: 16 / 9,
+    backgroundColor: '#000000',
+    position: 'relative',
+    overflow: 'hidden',
   },
-  featuresHeaderBlock: {
+  lightboxControlBar: {
     width: '100%',
-    maxWidth: 760,
-    alignItems: 'flex-start',
-    marginBottom: Spacing['4xl'],
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    backgroundColor: '#101014',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.10)',
+    flexDirection: 'column',
+    gap: 12,
+  },
+  lightboxScrubTrack: {
+    width: '100%',
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.20)',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  lightboxScrubProgress: {
+    height: '100%',
+    borderRadius: 3,
+    backgroundColor: '#FFFFFF',
+  },
+  lightboxControlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  lightboxControlsLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  lightboxControlBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.md,
+    backgroundColor: 'rgba(255, 255, 255, 0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lightboxTimeText: {
+    fontSize: 12.5,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    color: '#FAFAFA',
+    fontWeight: Typography.weights.medium,
+  },
+  promoScreenArea: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+    position: 'relative',
+    overflow: 'hidden',
+    backgroundColor: '#000000',
+  },
+  promoNativeFallback: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sectionEyebrow: {
     fontSize: 12,
@@ -1803,216 +2097,16 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     textAlign: 'left',
   },
-  sectionTitle: {
-    fontSize: 34,
-    lineHeight: 42,
-    fontWeight: Typography.weights.bold,
-    letterSpacing: -0.6,
-    marginBottom: Spacing.xs,
-    textAlign: 'left',
-  },
-  sectionSubtitle: {
-    fontSize: 16,
-    lineHeight: 25,
-    textAlign: 'left',
-    maxWidth: 680,
-  },
-  slideDetailsAnimatedWrap: {
-    width: '100%',
-    gap: Spacing.md,
-  },
 
-  /* Carousel Navigation Control Bar */
-  /* Carousel Stage Card */
-  carouselStageCard: {
-    width: '100%',
-    position: 'relative',
-  },
-  carouselBottomBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: Spacing.lg,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  carouselProgressTrackRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  carouselDotTouchTarget: {
-    minHeight: 44,
-    minWidth: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 2,
-  },
-  carouselActiveCapsule: {
-    width: 62,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#262626',
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  carouselCapsuleFill: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    bottom: 0,
-    borderRadius: 4,
-  },
-  carouselInactiveDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#262626',
-  },
-  carouselInactiveDotHovered: {
-    backgroundColor: '#52525B',
-  },
-
-  /* Slide Body */
-  carouselSlideBody: {
-    paddingTop: Spacing.xs,
-    paddingBottom: Spacing.xl,
-    gap: Spacing.xl,
-    alignItems: 'flex-start',
-  },
-  carouselSlideBodyDesktop: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    paddingTop: Spacing.sm,
-    paddingBottom: Spacing.xl,
-    gap: Spacing['3xl'],
-  },
-  slideNarrativeCol: {
-    flex: 1.15,
-    alignItems: 'flex-start',
-    justifyContent: 'flex-start',
-  },
-  slideVisualCol: {
-    flex: 0.85,
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    paddingTop: 0,
-  },
-
-  /* Spread Elements */
-  featureNumberBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: Radius.full,
-    borderWidth: 1,
-    alignSelf: 'flex-start',
-  },
-  featureNumberText: {
-    fontSize: 12,
-    fontWeight: Typography.weights.bold,
-  },
-  featureCategoryText: {
-    fontSize: 10,
-    fontWeight: Typography.weights.bold,
-    letterSpacing: 1,
-  },
-  spreadTitle: {
-    fontSize: 26,
-    lineHeight: 33,
-    fontWeight: Typography.weights.bold,
-    letterSpacing: -0.4,
-  },
-  spreadParagraph: {
-    fontSize: 15.5,
-    lineHeight: 24,
-  },
-  spreadChecklist: {
-    gap: 10,
-    marginTop: 4,
-  },
-  checkItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 9,
-  },
-  checkItemText: {
-    fontSize: 14,
-    lineHeight: 21,
-    flex: 1,
-  },
-  modeChoiceContainer: {
-    gap: 6,
-    marginVertical: 4,
-  },
-  modeChoiceLabel: {
-    fontSize: 11,
-    fontWeight: Typography.weights.bold,
-    letterSpacing: 1,
-  },
-  modeChoiceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  modePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    minHeight: 44,
-    minWidth: 44,
-  },
-  modePillText: {
-    fontSize: 13,
-  },
-
-  /* Languages Grid */
-  langSelectorContainer: {
-    gap: 6,
-    marginVertical: 4,
-  },
-  langBadgeGrid: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  langPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    minHeight: 44,
-    minWidth: 44,
-  },
-  langFlag: {
-    width: 18,
-    height: 13,
-    borderRadius: 2,
-  },
-  langPillText: {
-    fontSize: 13,
-  },
-
-  /* ── DOWNLOAD HUB SECTION ── */
+  /* ── DOWNLOAD HUB SECTION (FLAT ARCHITECTURE - ZERO CARD CONTAINERS) ── */
   downloadHubSection: {
     width: '100%',
-    maxWidth: 1600,
+    maxWidth: 1720,
     alignSelf: 'center',
     paddingTop: Spacing['3xl'],
     paddingBottom: Spacing['3xl'],
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
     marginBottom: Spacing.xl,
   },
   downloadHubSectionMobile: {
@@ -2024,158 +2118,188 @@ const styles = StyleSheet.create({
   },
   downloadHubGridDesktop: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    gap: Spacing['2xl'],
+    gap: 64,
   },
   downloadHubLeft: {
     flex: 1.25,
   },
-  verifiedBadge: {
+  verifiedTag: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 10,
+    paddingHorizontal: 9,
     paddingVertical: 4,
-    borderRadius: Radius.full,
+    borderRadius: 4,
     borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    backgroundColor: 'transparent',
     alignSelf: 'flex-start',
     marginBottom: Spacing.md,
   },
-  verifiedBadgeText: {
-    fontSize: 12,
-    fontWeight: Typography.weights.semibold,
+  verifiedTagText: {
+    fontSize: 11,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: 0.9,
+    color: '#FFFFFF',
   },
   hubTitle: {
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: Typography.weights.bold,
-    letterSpacing: -0.4,
-    marginBottom: 6,
+    letterSpacing: -0.8,
+    marginBottom: 8,
+    color: '#FFFFFF',
   },
   hubSubtitle: {
     fontSize: 15.5,
-    lineHeight: 23,
-    marginBottom: Spacing.lg,
+    lineHeight: 24,
+    color: '#A1A1AA',
+    marginBottom: Spacing.xl,
   },
-  metaTable: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingVertical: Spacing.sm,
-    marginBottom: Spacing.lg,
+  flatSpecsList: {
+    width: '100%',
+    marginBottom: Spacing.xl,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
   },
-  metaTableRow: {
+  flatSpecRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 7,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
   },
-  metaTableLabel: {
-    fontSize: 14.5,
+  flatSpecLabel: {
+    fontSize: 11,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: 1.2,
+    color: '#71717A',
   },
-  metaTableValue: {
+  flatSpecValue: {
     fontSize: 14.5,
-    fontWeight: Typography.weights.semibold,
+    fontWeight: Typography.weights.medium,
+    color: '#FFFFFF',
+    fontVariant: ['tabular-nums'],
   },
   bigDownloadButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 14,
     paddingHorizontal: 22,
-    paddingVertical: 15,
-    borderRadius: Radius.lg,
-    minHeight: 48,
-    boxShadow: '0 8px 22px rgba(244, 63, 94, 0.35)',
-    elevation: 6,
+    paddingVertical: 16,
+    borderRadius: 4,
+    minHeight: 52,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 0,
+    elevation: 0,
+    boxShadow: 'none',
+    alignSelf: 'flex-start',
   },
   bigDownloadTextCol: {
     gap: 2,
   },
   bigDownloadTitle: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 16.5,
     fontWeight: Typography.weights.bold,
+    letterSpacing: -0.2,
   },
   bigDownloadSub: {
-    color: 'rgba(255, 255, 255, 0.85)',
+    color: '#52525B',
     fontSize: 12.5,
     fontWeight: Typography.weights.medium,
   },
   checksumSection: {
-    marginTop: Spacing.md,
+    marginTop: Spacing.lg,
   },
   checksumToggleBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingVertical: 6,
+    paddingVertical: 8,
     minHeight: 44,
     minWidth: 44,
   },
   checksumToggleText: {
     fontSize: 13,
     fontWeight: Typography.weights.medium,
+    color: '#A1A1AA',
   },
-  shaBox: {
-    marginTop: 6,
-    padding: 12,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    gap: 6,
+  flatShaBlock: {
+    marginTop: 8,
+    paddingVertical: 14,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+    gap: 10,
   },
   shaHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 8,
   },
   shaTitle: {
     fontSize: 10.5,
     fontWeight: Typography.weights.bold,
-    letterSpacing: 0.8,
+    letterSpacing: 1,
+    color: '#71717A',
   },
-  shaCopyPill: {
+  shaCopyBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    minHeight: 44,
-    minWidth: 44,
-    justifyContent: 'center',
+    gap: 5,
+    minHeight: 32,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    backgroundColor: 'transparent',
   },
   shaCopyText: {
-    fontSize: 12,
-    fontWeight: Typography.weights.semibold,
+    fontSize: 11.5,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: 0.5,
   },
   shaHashString: {
     fontSize: 12,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    color: '#E4E4E7',
+  },
+  terminalHelperCode: {
+    fontSize: 11.5,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    color: '#71717A',
   },
   downloadHubRight: {
-    flex: 0.9,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: Spacing.md,
+    flex: 0.85,
+    alignItems: 'flex-start',
+    justifyContent: 'flex-start',
+  },
+  flatQrColumn: {
+    alignItems: 'flex-start',
+    justifyContent: 'flex-start',
+    gap: 14,
   },
   qrHeading: {
-    fontSize: 19,
+    fontSize: 20,
     fontWeight: Typography.weights.bold,
-    marginBottom: 4,
+    letterSpacing: -0.4,
+    color: '#FFFFFF',
   },
   qrInstructions: {
-    fontSize: 14,
+    fontSize: 13.5,
     lineHeight: 20,
-    textAlign: 'center',
-    marginBottom: Spacing.md,
+    color: '#A1A1AA',
   },
-  qrCardFrame: {
-    padding: 12,
+  flatQrImage: {
+    width: 200,
+    height: 200,
+    borderRadius: 4,
     backgroundColor: '#FFFFFF',
-    borderRadius: Radius.lg,
-    boxShadow: '0 8px 18px rgba(0, 0, 0, 0.3)',
-    elevation: 6,
-    marginBottom: Spacing.md,
-  },
-  qrImageCanvas: {
-    width: 190,
-    height: 190,
   },
   qrHelperRow: {
     flexDirection: 'row',
@@ -2183,18 +2307,20 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   qrHelperText: {
-    fontSize: 12.5,
+    fontSize: 12,
+    color: '#71717A',
     fontWeight: Typography.weights.medium,
   },
 
-  /* ── INSTALLATION GUIDE ── */
+  /* ── INSTALLATION GUIDE (FLAT OPEN SETUP MANUAL - ZERO CARD CONTAINERS) ── */
   guideContainer: {
     width: '100%',
-    maxWidth: 1600,
+    maxWidth: 1720,
     alignSelf: 'center',
     paddingTop: Spacing['3xl'],
     paddingBottom: Spacing['4xl'],
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
     marginBottom: Spacing['2xl'],
   },
   guideContainerMobile: {
@@ -2202,90 +2328,122 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing['2xl'],
   },
   guideHeaderGroup: {
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.md,
   },
   guideMainTitle: {
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: Typography.weights.bold,
-    letterSpacing: -0.4,
-    marginBottom: 4,
+    letterSpacing: -0.6,
+    marginBottom: 6,
+    color: '#FFFFFF',
   },
   guideSubtitle: {
-    fontSize: 15,
+    fontSize: 15.5,
+    color: '#A1A1AA',
+    lineHeight: 23,
   },
-  guideToggleRow: {
+  flatPlatformTabs: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginBottom: Spacing.xl,
+    gap: 8,
+    marginTop: Spacing.md,
+    marginBottom: Spacing.lg,
   },
-  guideToggleBtn: {
+  flatTabBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
     paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: Radius.md,
-    minHeight: 44,
-    minWidth: 44,
+    paddingVertical: 9,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: 'transparent',
+    minHeight: 40,
     justifyContent: 'center',
   },
-  guideToggleText: {
-    fontSize: 14,
+  flatTabBtnActive: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#FFFFFF',
+  },
+  flatTabText: {
+    fontSize: 13,
+    fontWeight: Typography.weights.semibold,
+    color: '#A1A1AA',
+  },
+  flatTabTextActive: {
+    color: '#000000',
     fontWeight: Typography.weights.bold,
   },
-  stepSequence: {
-    gap: Spacing.md,
+  flatStepList: {
+    width: '100%',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
   },
-  stepItem: {
+  flatStepRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 14,
-    paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 20,
+    paddingVertical: 22,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
   },
-  stepDigitBadge: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepDigit: {
-    fontSize: 16,
+  flatStepIndex: {
+    fontSize: 13,
     fontWeight: Typography.weights.bold,
+    color: '#71717A',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    letterSpacing: 1,
+    minWidth: 28,
+    paddingTop: 3,
   },
-  stepDetailCol: {
+  flatStepBodyCol: {
     flex: 1,
-    gap: 4,
+    gap: 6,
   },
-  stepHeader: {
-    fontSize: 17,
+  flatStepTitle: {
+    fontSize: 16.5,
     fontWeight: Typography.weights.bold,
+    color: '#FFFFFF',
+    letterSpacing: -0.2,
   },
-  stepBody: {
+  flatStepText: {
     fontSize: 14.5,
-    lineHeight: 22,
+    lineHeight: 23,
+    color: '#A1A1AA',
   },
-  credibilityNote: {
+  inlineKbd: {
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 13,
+    color: '#FFFFFF',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  flatCredibilityRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 14,
-    marginTop: Spacing.lg,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    alignItems: 'flex-start',
+    gap: 12,
+    marginTop: Spacing.xl,
+    paddingTop: Spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
   },
-  credibilityNoteText: {
+  flatCredibilityText: {
     fontSize: 13.5,
-    lineHeight: 20,
+    lineHeight: 22,
+    color: '#A1A1AA',
     flex: 1,
   },
 
   /* ── FOOTER ── */
   footerOuter: {
     width: '100%',
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
     alignItems: 'center',
   },
   footerInner: {
@@ -2309,10 +2467,12 @@ const styles = StyleSheet.create({
   footerBrandText: {
     fontSize: 16,
     fontWeight: Typography.weights.bold,
+    color: '#FFFFFF',
   },
   footerCopyright: {
     fontSize: 13,
     textAlign: 'center',
+    color: '#71717A',
   },
   footerNavLinks: {
     flexDirection: 'row',
@@ -2329,5 +2489,6 @@ const styles = StyleSheet.create({
   footerLink: {
     fontSize: 14,
     fontWeight: Typography.weights.semibold,
+    color: '#FFFFFF',
   },
 });
