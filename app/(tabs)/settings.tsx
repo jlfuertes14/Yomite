@@ -290,7 +290,6 @@ export default function SettingsScreen() {
                   styles.avatarBox,
                   {
                     backgroundColor: colors.surfaceElevated,
-                    borderColor: colors.border,
                   },
                 ]}
               >
@@ -310,33 +309,23 @@ export default function SettingsScreen() {
                 <Text style={[styles.profileName, { color: colors.text }]} numberOfLines={1}>
                   {getUserDisplayName(user)}
                 </Text>
-                <Text style={[styles.profileHandle, { color: colors.textSecondary }]} numberOfLines={1}>
-                  @{getUserHandle(user)} · {user.email || 'user@yomite.app'}
-                </Text>
-                <View style={styles.syncStatusRow}>
-                  <View style={styles.statusDot} />
-                  <Text style={[styles.statusText, { color: colors.textMuted }]}>
-                    Cloud Sync & Multi-Device Active
-                  </Text>
-                </View>
               </View>
             </View>
 
-            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
           </Pressable>
 
-          <View style={styles.profileActionGrid}>
+          <View style={styles.profileActionRow}>
             <AnimatedPressable
               onPress={() => router.push('/profile' as any)}
               accessibilityRole="button"
               accessibilityLabel="Open profile settings"
               style={[
                 styles.profileActionBtn,
-                { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
                 Platform.OS === 'web' && { cursor: 'pointer' as any },
               ]}
             >
-              <Ionicons name="person-outline" size={14} color={accentColor} />
+              <Ionicons name="person-outline" size={15} color={accentColor} />
               <Text style={[styles.profileActionBtnText, { color: accentColor }]}>
                 Profile
               </Text>
@@ -349,14 +338,13 @@ export default function SettingsScreen() {
               accessibilityLabel="Synchronize library with cloud"
               style={[
                 styles.profileActionBtn,
-                { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
                 Platform.OS === 'web' && { cursor: 'pointer' as any },
               ]}
             >
               {isSyncing ? (
                 <ActivityIndicator size="small" color="#10B981" />
               ) : (
-                <Ionicons name="sync-outline" size={14} color="#10B981" />
+                <Ionicons name="sync-outline" size={15} color="#10B981" />
               )}
               <Text style={[styles.profileActionBtnText, { color: '#10B981' }]}>
                 {isSyncing ? 'Syncing…' : 'Sync Now'}
@@ -369,11 +357,10 @@ export default function SettingsScreen() {
               accessibilityLabel="Sign out of Yomite"
               style={[
                 styles.profileActionBtn,
-                { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
                 Platform.OS === 'web' && { cursor: 'pointer' as any },
               ]}
             >
-              <Ionicons name="log-out-outline" size={14} color={colors.textSecondary} />
+              <Ionicons name="log-out-outline" size={15} color={colors.textSecondary} />
               <Text style={[styles.profileActionBtnText, { color: colors.textSecondary }]}> 
                 Sign out
               </Text>
@@ -383,13 +370,13 @@ export default function SettingsScreen() {
       ) : (
         <View style={styles.flatSectionBody}>
           <View style={styles.signedOutHeader}>
-            <View style={[styles.avatarBox, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-              <Ionicons name="cloud-upload-outline" size={24} color={colors.textSecondary} />
+            <View style={[styles.avatarBox, { backgroundColor: colors.surfaceElevated }]}>
+              <Ionicons name="cloud-upload-outline" size={22} color={colors.textSecondary} />
             </View>
             <View style={styles.profileTextCol}>
               <Text style={[styles.signedOutTitle, { color: colors.text }]}>Cloud Backup & Sync</Text>
               <Text style={[styles.signedOutSubtitle, { color: colors.textSecondary }]}>
-                Sign in with Google or Email to sync library & bookmarks across devices
+                Sign in to sync library & bookmarks across devices
               </Text>
             </View>
           </View>
@@ -1022,31 +1009,30 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingBottom: 14,
+    paddingVertical: 6,
   },
   profileInfoLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 12,
     flex: 1,
   },
   avatarBox: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    borderWidth: 1,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
   avatarImg: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
   },
   profileTextCol: {
     flex: 1,
-    gap: 2,
+    justifyContent: 'center',
   },
   profileName: {
     fontSize: 16,
@@ -1054,47 +1040,22 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     letterSpacing: -0.2,
   },
-  profileHandle: {
-    fontSize: 12,
-    color: '#A1A1AA',
-  },
-  syncStatusRow: {
+  profileActionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginTop: 3,
-  },
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: '#10B981',
-  },
-  statusText: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: '#34D399',
-  },
-  profileActionGrid: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingTop: 4,
+    gap: 20,
+    paddingTop: 8,
+    paddingBottom: 4,
   },
   profileActionBtn: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: 6,
-    paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: 'rgba(39, 39, 42, 0.6)',
-    borderWidth: 1,
-    borderColor: 'rgba(63, 63, 70, 0.5)',
-    minHeight: 44,
+    paddingVertical: 6,
+    minHeight: 36,
   },
   profileActionBtnText: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: '600',
   },
 

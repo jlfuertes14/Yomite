@@ -278,7 +278,7 @@ export function AdvancedSearchModal({
         {/* Title Input */}
         <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Title / Keywords</Text>
         <TextInput
-          style={[styles.input, { color: colors.text, backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+          style={[styles.input, { color: colors.text, backgroundColor: colors.surfaceElevated }]}
           placeholder="Search title or keywords..."
           placeholderTextColor={colors.textMuted}
           value={title}
@@ -306,7 +306,6 @@ export function AdvancedSearchModal({
                   styles.chip,
                   {
                     backgroundColor: active ? colors.text : colors.surfaceElevated,
-                    borderColor: active ? colors.text : colors.border,
                     flexDirection: 'row',
                     alignItems: 'center',
                     gap: 6,
@@ -345,12 +344,11 @@ export function AdvancedSearchModal({
                 style={[
                   styles.chip,
                   {
-                    backgroundColor: active ? colors.surfaceElevated : colors.surface,
-                    borderColor: active ? colors.text : colors.border,
+                    backgroundColor: active ? colors.text : colors.surfaceElevated,
                   },
                 ]}
               >
-                <Text style={[styles.chipText, { color: active ? colors.text : colors.textSecondary }]}>
+                <Text style={[styles.chipText, { color: active ? colors.background : colors.textSecondary }]}>
                   {r.label}
                 </Text>
               </Pressable>
@@ -370,12 +368,11 @@ export function AdvancedSearchModal({
                 style={[
                   styles.chip,
                   {
-                    backgroundColor: active ? colors.surfaceElevated : colors.surface,
-                    borderColor: active ? colors.text : colors.border,
+                    backgroundColor: active ? colors.text : colors.surfaceElevated,
                   },
                 ]}
               >
-                <Text style={[styles.chipText, { color: active ? colors.text : colors.textSecondary }]}>
+                <Text style={[styles.chipText, { color: active ? colors.background : colors.textSecondary }]}>
                   {s.label}
                 </Text>
               </Pressable>
@@ -395,12 +392,11 @@ export function AdvancedSearchModal({
                 style={[
                   styles.chip,
                   {
-                    backgroundColor: active ? colors.surfaceElevated : colors.surface,
-                    borderColor: active ? colors.text : colors.border,
+                    backgroundColor: active ? colors.text : colors.surfaceElevated,
                   },
                 ]}
               >
-                <Text style={[styles.chipText, { color: active ? colors.text : colors.textSecondary }]}>
+                <Text style={[styles.chipText, { color: active ? colors.background : colors.textSecondary }]}>
                   {d.label}
                 </Text>
               </Pressable>
@@ -445,15 +441,10 @@ export function AdvancedSearchModal({
                           styles.tagChip,
                           {
                             backgroundColor: isInc
-                              ? 'rgba(16,185,129,0.18)'
+                              ? 'rgba(16,185,129,0.22)'
                               : isExc
-                                ? 'rgba(244,63,94,0.18)'
+                                ? 'rgba(244,63,94,0.22)'
                                 : colors.surfaceElevated,
-                            borderColor: isInc
-                              ? colors.emerald
-                              : isExc
-                                ? colors.accent
-                                : colors.border,
                           },
                         ]}
                       >
@@ -462,9 +453,9 @@ export function AdvancedSearchModal({
                             styles.tagChipText,
                             {
                               color: isInc
-                                ? colors.emerald
+                                ? '#34D399'
                                 : isExc
-                                  ? colors.accent
+                                  ? '#FB7185'
                                   : colors.textSecondary,
                             },
                           ]}
@@ -491,7 +482,7 @@ export function AdvancedSearchModal({
               onClose();
               onRandomManga();
             }}
-            style={[styles.luckyBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+            style={[styles.luckyBtn, { backgroundColor: colors.surfaceElevated }]}
           >
             <Ionicons name="dice-outline" size={16} color={colors.text} />
             <Text style={[styles.luckyBtnText, { color: colors.text }]}>I'm Feeling Lucky</Text>
@@ -634,7 +625,7 @@ const styles = StyleSheet.create({
   },
   input: {
     height: 44,
-    borderWidth: 1,
+    borderWidth: 0,
     borderRadius: Radius.md,
     paddingHorizontal: Spacing.md,
     fontSize: Typography.sizes.body,
@@ -648,7 +639,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: Radius.full,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   chipText: {
     fontSize: Typography.sizes.caption,
@@ -687,7 +678,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: Radius.full,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   tagChipText: {
     fontSize: 11,
@@ -708,7 +699,7 @@ const styles = StyleSheet.create({
     height: 44,
     paddingHorizontal: Spacing.md,
     borderRadius: Radius.md,
-    borderWidth: 1,
+    borderWidth: 0,
     gap: 6,
   },
   luckyBtnText: {

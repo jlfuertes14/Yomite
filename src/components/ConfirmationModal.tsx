@@ -1,7 +1,6 @@
 /**
- * ConfirmationModal — Modern Premium Dark Glassmorphic Dialog Modal
- * Replaces default OS Alert.alert dialogs with sleek, theme-aware UI
- * Adheres dynamically to the user's preferred app theme accent color
+ * ConfirmationModal — Modern Minimalist Centered Dialog Modal
+ * Flat design, centered across all viewports (Mobile & Web), theme-aware UI.
  */
 import React from 'react';
 import {
@@ -14,10 +13,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { Colors, Radius, Spacing, Typography } from '../../constants/Colors';
+import { Radius, Spacing, Typography } from '../../constants/Colors';
 import { useThemeColors } from '../hooks/useThemeColor';
 import { triggerHaptic } from '../utils/haptics';
-import { MobileModalRoot, MobileSheetPanel } from './MobileBottomSheet';
 
 interface ConfirmationModalProps {
   visible: boolean;
@@ -51,7 +49,7 @@ export function ConfirmationModal({
   if (!visible) return null;
 
   const handleConfirm = () => {
-    triggerHaptic(confirmVariant === 'destructive' ?  Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light);
+    triggerHaptic(confirmVariant === 'destructive' ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light);
     onConfirm();
   };
 
@@ -60,50 +58,51 @@ export function ConfirmationModal({
     onCancel();
   };
 
-  // Button background color adheres to the user's preferred app accent theme
   const getConfirmBgColor = () => {
     switch (confirmVariant) {
       case 'success':
-        return colors.emerald;
+        return colors.emerald || '#10B981';
       case 'destructive':
-        return colors.accent;
+        return '#EF4444';
       default:
         return colors.accent;
     }
   };
 
-  const defaultIconColor = iconColor || colors.accent;
+  const defaultIconColor = iconColor || (confirmVariant === 'destructive' ? '#EF4444' : colors.accent);
 
   return (
     <Modal
       visible={visible}
       transparent
-      animationType={Platform.OS === 'web' ? 'fade' : 'none'}
+      animationType="fade"
       onRequestClose={handleCancel}
+      statusBarTranslucent
     >
-      <MobileModalRoot style={[styles.overlay, Platform.OS !== 'web' && styles.mobileOverlay]}>
-        <Pressable style={styles.backdrop} onPress={handleCancel} />
+      <View style={styles.overlay}>
+        <Pressable
+          style={styles.backdrop}
+          onPress={handleCancel}
+          accessibilityLabel="Dismiss dialog"
+        />
 
-        <MobileSheetPanel
-          visible={visible}
-          onClose={handleCancel}
+        <View
           style={[
             styles.card,
             {
               backgroundColor: colors.surface,
-              borderColor: 'transparent',
+              borderColor: colors.border,
             },
           ]}
-          showHandle={Platform.OS !== 'web'}
         >
-          {/* Top Icon Pill Badge */}
+          {/* Top Icon Badge */}
           <View
             style={[
               styles.iconBadge,
-              { backgroundColor: `${defaultIconColor}1F` },
+              { backgroundColor: `${defaultIconColor}18` },
             ]}
           >
-            <Ionicons name={iconName} size={26} color={defaultIconColor} />
+            <Ionicons name={iconName} size={24} color={defaultIconColor} />
           </View>
 
           {/* Title & Message */}
@@ -119,17 +118,18 @@ export function ConfirmationModal({
             {cancelText ? (
               <Pressable
                 onPress={handleCancel}
-                style={({ pressed }) => [
+                accessibilityRole="button"
+                accessibilityLabel={cancelText}
+                style={({ pressed, hovered }: any) => [
                   styles.btn,
                   {
                     backgroundColor: colors.surfaceElevated,
-                    borderColor: colors.border,
-                    borderWidth: 1,
-                    opacity: pressed ? 0.7 : 1,
+                    opacity: pressed ? 0.7 : hovered ? 0.9 : 1,
                   },
+                  Platform.OS === 'web' && { cursor: 'pointer' as any },
                 ]}
               >
-                <Text style={[styles.cancelBtnText, { color: colors.text }]}>
+                <Text style={[styles.cancelBtnText, { color: colors.textSecondary }]}>
                   {cancelText}
                 </Text>
               </Pressable>
@@ -137,19 +137,22 @@ export function ConfirmationModal({
 
             <Pressable
               onPress={handleConfirm}
-              style={({ pressed }) => [
+              accessibilityRole="button"
+              accessibilityLabel={confirmText}
+              style={({ pressed, hovered }: any) => [
                 styles.btn,
                 {
                   backgroundColor: getConfirmBgColor(),
-                  opacity: pressed ? 0.85 : 1,
+                  opacity: pressed ? 0.85 : hovered ? 0.95 : 1,
                 },
+                Platform.OS === 'web' && { cursor: 'pointer' as any },
               ]}
             >
               <Text style={styles.confirmBtnText}>{confirmText}</Text>
             </Pressable>
           </View>
-        </MobileSheetPanel>
-      </MobileModalRoot>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -157,14 +160,10 @@ export function ConfirmationModal({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    backgroundColor: 'rgba(0, 0, 0, 0.72)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: Spacing.xl,
-  },
-  mobileOverlay: {
-    padding: 0,
-    justifyContent: 'flex-end',
   },
   backdrop: {
     ...StyleSheet.absoluteFill,
@@ -172,17 +171,20 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 340,
-    borderRadius: Radius.xl,
+    borderRadius: Radius.lg,
     borderWidth: 1,
     padding: Spacing.xl,
     alignItems: 'center',
-    boxShadow: '0 8px 16px rgba(0, 0, 0, 0.4)',
-    elevation: 12,
+    elevation: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.35,
+    shadowRadius: 20,
   },
   iconBadge: {
-    width: 54,
-    height: 54,
-    borderRadius: Radius.full,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.md,
@@ -192,17 +194,18 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.bold,
     textAlign: 'center',
     marginBottom: 6,
+    letterSpacing: -0.2,
   },
   message: {
     fontSize: Typography.sizes.footnote,
     textAlign: 'center',
     lineHeight: 18,
-    marginBottom: Spacing.xl,
+    marginBottom: Spacing.lg,
   },
   buttonRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md,
+    gap: Spacing.sm,
     width: '100%',
   },
   btn: {
@@ -211,6 +214,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: Spacing.md,
   },
   cancelBtnText: {
     fontSize: Typography.sizes.footnote,

@@ -4,25 +4,24 @@
  * Features: Interactive Sliding Feature Carousel (space-saving), Authentic Flagship
  * Device Mockups, Perfectly Centered Grid, Direct APK Download & Sideloading Hub.
  */
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  Platform,
-  useWindowDimensions,
-  Linking,
-  Animated,
-  Easing,
-  PanResponder,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Animated,
+  Easing,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Radius, Spacing, Typography } from '../constants/Colors';
 import { useThemeColors } from '../src/hooks/useThemeColor';
 import { triggerHaptic } from '../src/utils/haptics';
@@ -101,7 +100,7 @@ export default function AppDownloadScreen() {
       // Ensure video plays once from start on page load / reload
       if (videoRef.current) {
         videoRef.current.currentTime = 0;
-        videoRef.current.play().catch(() => {});
+        videoRef.current.play().catch(() => { });
       }
     }
 
@@ -238,7 +237,7 @@ export default function AppDownloadScreen() {
           if (promoVideoRef.current) {
             promoVideoRef.current.muted = true;
             setIsPromoMuted(true);
-            promoVideoRef.current.play().then(() => setIsPromoPlaying(true)).catch(() => {});
+            promoVideoRef.current.play().then(() => setIsPromoPlaying(true)).catch(() => { });
           }
         });
       }
@@ -348,7 +347,7 @@ export default function AppDownloadScreen() {
             domNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
           }
         }
-        promoVideoRef.current.play().then(() => setIsPromoPlaying(true)).catch(() => {});
+        promoVideoRef.current.play().then(() => setIsPromoPlaying(true)).catch(() => { });
       } else {
         promoVideoRef.current.pause();
         setIsPromoPlaying(false);
@@ -373,7 +372,7 @@ export default function AppDownloadScreen() {
     }
     setIsPromoLightboxOpen(false);
     if (currentProgressRef.current >= 0.98 && promoVideoRef.current) {
-      promoVideoRef.current.play().catch(() => {});
+      promoVideoRef.current.play().catch(() => { });
     }
   };
 
@@ -393,7 +392,7 @@ export default function AppDownloadScreen() {
     triggerHaptic();
     if (lightboxVideoRef.current) {
       if (lightboxVideoRef.current.paused) {
-        lightboxVideoRef.current.play().then(() => setIsLightboxPlaying(true)).catch(() => {});
+        lightboxVideoRef.current.play().then(() => setIsLightboxPlaying(true)).catch(() => { });
       } else {
         lightboxVideoRef.current.pause();
         setIsLightboxPlaying(false);
@@ -436,9 +435,9 @@ export default function AppDownloadScreen() {
     if (Platform.OS === 'web' && lightboxVideoRef.current) {
       const v = lightboxVideoRef.current as any;
       if (document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
+        document.exitFullscreen().catch(() => { });
       } else if (v.requestFullscreen) {
-        v.requestFullscreen().catch(() => {});
+        v.requestFullscreen().catch(() => { });
       } else if (v.webkitRequestFullscreen) {
         v.webkitRequestFullscreen();
       }
@@ -824,10 +823,10 @@ export default function AppDownloadScreen() {
             styles.promoScrollTrack,
             Platform.OS === 'web'
               ? ({
-                  height: isDesktop ? '185vh' : '160vh',
-                  position: 'relative',
-                  width: '100%',
-                } as any)
+                height: isDesktop ? '185vh' : '160vh',
+                position: 'relative',
+                width: '100%',
+              } as any)
               : {},
           ]}
         >
@@ -837,16 +836,16 @@ export default function AppDownloadScreen() {
               styles.promoStickyViewport,
               Platform.OS === 'web'
                 ? ({
-                    position: 'sticky',
-                    top: 0,
-                    height: '100vh',
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    zIndex: 10,
-                    paddingHorizontal: isDesktop ? 48 : 16,
-                  } as any)
+                  position: 'sticky',
+                  top: 0,
+                  height: '100vh',
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 10,
+                  paddingHorizontal: isDesktop ? 48 : 16,
+                } as any)
                 : {},
             ]}
           >
@@ -855,39 +854,39 @@ export default function AppDownloadScreen() {
                 styles.promoVideoCard,
                 Platform.OS === 'web'
                   ? ({
-                      width: isDesktop ? `${75 + expandProgress * 25}%` : `${88 + expandProgress * 12}%`,
-                      maxWidth: 1600,
-                      borderRadius: promoTargetRadius,
-                      WebkitMaskImage: '-webkit-radial-gradient(white, black)',
-                      maskImage: 'radial-gradient(white, black)',
-                      transform: [
-                        { scale: isDesktop ? 0.78 + expandProgress * 0.22 : 0.86 + expandProgress * 0.14 },
-                      ],
-                      transformOrigin: 'center center',
-                      boxShadow: `0 ${Math.round(24 + expandProgress * 36)}px ${Math.round(56 + expandProgress * 64)}px rgba(0, 0, 0, ${0.80 + expandProgress * 0.18}), 0 0 0 1px rgba(255, 255, 255, ${0.10 + expandProgress * 0.14})`,
-                      borderColor: expandProgress >= 0.98 ? 'rgba(255, 255, 255, 0.32)' : 'rgba(255, 255, 255, 0.15)',
-                      borderWidth: 1.5,
-                      willChange: 'transform, border-radius, width',
-                      transition: 'box-shadow 0.25s ease, border-color 0.25s ease',
-                      cursor: 'pointer',
-                    } as any)
+                    width: isDesktop ? `${75 + expandProgress * 25}%` : `${88 + expandProgress * 12}%`,
+                    maxWidth: 1600,
+                    borderRadius: promoTargetRadius,
+                    WebkitMaskImage: '-webkit-radial-gradient(white, black)',
+                    maskImage: 'radial-gradient(white, black)',
+                    transform: [
+                      { scale: isDesktop ? 0.78 + expandProgress * 0.22 : 0.86 + expandProgress * 0.14 },
+                    ],
+                    transformOrigin: 'center center',
+                    boxShadow: `0 ${Math.round(24 + expandProgress * 36)}px ${Math.round(56 + expandProgress * 64)}px rgba(0, 0, 0, ${0.80 + expandProgress * 0.18}), 0 0 0 1px rgba(255, 255, 255, ${0.10 + expandProgress * 0.14})`,
+                    borderColor: expandProgress >= 0.98 ? 'rgba(255, 255, 255, 0.32)' : 'rgba(255, 255, 255, 0.15)',
+                    borderWidth: 1.5,
+                    willChange: 'transform, border-radius, width',
+                    transition: 'box-shadow 0.25s ease, border-color 0.25s ease',
+                    cursor: 'pointer',
+                  } as any)
                   : {},
               ]}
               {...(Platform.OS === 'web'
                 ? {
-                    onMouseMove: (e: any) => {
-                      const rect = e.currentTarget?.getBoundingClientRect();
-                      if (rect) {
-                        setVideoCursorPos({
-                          x: e.clientX - rect.left,
-                          y: e.clientY - rect.top,
-                        });
-                      }
-                    },
-                    onMouseEnter: () => setIsHoveringVideo(true),
-                    onMouseLeave: () => setIsHoveringVideo(false),
-                    onClick: openPromoLightbox,
-                  }
+                  onMouseMove: (e: any) => {
+                    const rect = e.currentTarget?.getBoundingClientRect();
+                    if (rect) {
+                      setVideoCursorPos({
+                        x: e.clientX - rect.left,
+                        y: e.clientY - rect.top,
+                      });
+                    }
+                  },
+                  onMouseEnter: () => setIsHoveringVideo(true),
+                  onMouseLeave: () => setIsHoveringVideo(false),
+                  onClick: openPromoLightbox,
+                }
                 : {})}
             >
               {/* Floating "Play intro" Hover Rectangular Badge (No Pill) */}
@@ -919,10 +918,10 @@ export default function AppDownloadScreen() {
                   styles.promoScreenArea,
                   Platform.OS === 'web'
                     ? ({
-                        borderRadius: promoTargetRadius,
-                        WebkitMaskImage: '-webkit-radial-gradient(white, black)',
-                        maskImage: 'radial-gradient(white, black)',
-                      } as any)
+                      borderRadius: promoTargetRadius,
+                      WebkitMaskImage: '-webkit-radial-gradient(white, black)',
+                      maskImage: 'radial-gradient(white, black)',
+                    } as any)
                     : {},
                 ]}
               >
@@ -1308,7 +1307,7 @@ export default function AppDownloadScreen() {
               <Text style={styles.footerBrandText}>Yomite Manga Reader</Text>
             </View>
             <Text style={styles.footerCopyright}>
-              Powered by the MangaDex API. 100% Free & Open Source under the MIT License.
+              Powered by the Kotatsu & MangaDex API. 100% Free & Open Source under the MIT License.
             </Text>
             <View style={styles.footerNavLinks}>
               <Pressable

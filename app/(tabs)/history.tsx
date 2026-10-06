@@ -467,7 +467,7 @@ export default function HistoryScreen() {
         {/* Modern Flat Search Input (Directly on screen) */}
         {entries.length > 0 && (
           <View style={[styles.searchWrapper, isDesktop && styles.searchWrapperDesktop]}>
-            <View style={[styles.searchBox, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+            <View style={[styles.searchBox, { backgroundColor: colors.surfaceElevated }]}>
               <Ionicons name="search-outline" size={16} color={colors.textMuted} style={{ marginLeft: 4 }} />
               <TextInput
                 style={[styles.searchInput, { color: colors.text }]}
@@ -715,8 +715,7 @@ const styles = StyleSheet.create({
     height: 42,
     borderRadius: 12,
     backgroundColor: '#18181C',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.07)',
+    borderWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,

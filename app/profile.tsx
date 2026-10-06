@@ -3,7 +3,7 @@
  * Features user display name, preferred @handle, reading statistics,
  * cloud sync controls, inline profile editing, and quick shortcuts.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -34,7 +34,6 @@ import { triggerHaptic } from '../src/utils/haptics';
 
 import { AuthModal } from '../src/components/AuthModal';
 import { ConfirmationModal } from '../src/components/ConfirmationModal';
-import { AnimatedCard } from '../src/components/AnimatedCard';
 import { useDocumentTitle } from '../src/utils/useDocumentTitle';
 
 export default function ProfileScreen() {
@@ -94,6 +93,103 @@ export default function ProfileScreen() {
   const memberSince = user?.created_at
     ? formatChapterDate(user.created_at)
     : 'Recently';
+
+  // Calculate dynamic reading streak in days from history timestamps
+  const userStreak = useMemo(() => {
+    if (!historyEntries || historyEntries.length === 0) return 0;
+    const dateStrings = Array.from(
+      new Set(
+        historyEntries
+          .map((e) => {
+            if (!e.timestamp) return null;
+            const d = new Date(e.timestamp);
+            return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
+          })
+          .filter(Boolean) as string[]
+      )
+    ).sort().reverse();
+
+    if (dateStrings.length === 0) return 0;
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+    // If latest read date is not today or yesterday, streak is broken
+    const latestDate = dateStrings[0];
+    if (latestDate !== todayStr && latestDate !== yesterdayStr) {
+      return 0;
+    }
+
+    let streak = 1;
+    let currentDate = new Date(latestDate);
+
+    for (let i = 1; i < dateStrings.length; i++) {
+      const prevDate = new Date(dateStrings[i]);
+      const diffDays = Math.round((currentDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24));
+      if (diffDays === 1) {
+        streak++;
+        currentDate = prevDate;
+      } else {
+        break;
+      }
+    }
+    return streak;
+  }, [historyEntries]);
+
+  // Weekly Day Streak calculation
+  const weekStreakData = useMemo(() => {
+    const readDatesSet = new Set(
+      (historyEntries || [])
+        .map((e) => {
+          if (!e.timestamp) return null;
+          const d = new Date(e.timestamp);
+          return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
+        })
+        .filter(Boolean) as string[]
+    );
+
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+
+    // Monday-based week (0 = Monday, 6 = Sunday)
+    const currentDayOfWeek = now.getDay();
+    const mondayOffset = (currentDayOfWeek + 6) % 7;
+    const mondayDate = new Date(now);
+    mondayDate.setDate(now.getDate() - mondayOffset);
+
+    const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const days = [];
+    let completedThisWeek = 0;
+
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(mondayDate);
+      d.setDate(mondayDate.getDate() + i);
+      const dStr = d.toISOString().split('T')[0];
+      const hasRead = readDatesSet.has(dStr);
+      const isToday = dStr === todayStr;
+      const isPast = dStr < todayStr;
+      const isFuture = dStr > todayStr;
+
+      if (hasRead) completedThisWeek++;
+
+      days.push({
+        dayName: dayLabels[i],
+        dateNum: d.getDate(),
+        dateStr: dStr,
+        hasRead,
+        isToday,
+        isPast,
+        isFuture,
+      });
+    }
+
+    return {
+      days,
+      completedThisWeek,
+    };
+  }, [historyEntries]);
 
   const handlePickAvatar = async () => {
     if (!user) {
@@ -262,16 +358,24 @@ export default function ProfileScreen() {
       <View style={[{ flex: 1, width: '100%' }, isWeb && styles.webCenteredContent]}>
         {/* Top Header */}
         <View style={styles.header}>
-          <Pressable onPress={handleBack} style={styles.backBtn} hitSlop={8}>
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
+          <Pressable
+            onPress={handleBack}
+            style={styles.headerIconBtn}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Ionicons name="arrow-back" size={22} color={colors.text} />
           </Pressable>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>My Profile</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Profile</Text>
           <Pressable
             onPress={() => router.push('/(tabs)/settings' as any)}
-            style={styles.settingsBtn}
+            style={styles.headerIconBtn}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
           >
-            <Ionicons name="settings-outline" size={22} color={colors.textSecondary} />
+            <Ionicons name="settings-outline" size={21} color={colors.textSecondary} />
           </Pressable>
         </View>
 
@@ -281,289 +385,409 @@ export default function ProfileScreen() {
         >
           {user ? (
             <>
-              {/* Profile Hero Card */}
-              <View style={[styles.profileCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <View style={styles.profileCardTop}>
-                  <View style={styles.avatarContainer}>
-                    <Pressable
-                      onPress={handlePickAvatar}
-                      disabled={isUploadingImage}
-                      style={({ pressed }) => [
-                        styles.avatarLarge,
-                        {
-                          backgroundColor: avatarUrl ? 'transparent' : colors.accent,
-                          borderColor: colors.border,
-                          borderWidth: 2,
-                          opacity: pressed ? 0.85 : 1,
-                        },
-                      ]}
-                    >
-                      {avatarUrl ? (
-                        <Image
-                          source={{ uri: avatarUrl }}
-                          style={styles.avatarLargeImage}
-                          contentFit="cover"
-                          transition={200}
-                        />
-                      ) : (
-                        <Text style={styles.avatarLargeText}>
-                          {displayName.charAt(0).toUpperCase()}
-                        </Text>
-                      )}
+              {/* ── 1. FLAT USER HERO ── */}
+              <View style={styles.userHeroSection}>
+                <View style={styles.avatarWrapper}>
+                  <Pressable
+                    onPress={handlePickAvatar}
+                    disabled={isUploadingImage}
+                    accessibilityRole="button"
+                    accessibilityLabel="Change profile picture"
+                    style={({ pressed, hovered }: any) => [
+                      styles.avatarCircle,
+                      {
+                        backgroundColor: avatarUrl ? 'transparent' : colors.accent,
+                        opacity: pressed ? 0.85 : hovered ? 0.95 : 1,
+                      },
+                      Platform.OS === 'web' && { cursor: 'pointer' as any },
+                    ]}
+                  >
+                    {avatarUrl ? (
+                      <Image
+                        source={{ uri: avatarUrl }}
+                        style={styles.avatarImg}
+                        contentFit="cover"
+                        transition={200}
+                        cachePolicy="memory-disk"
+                      />
+                    ) : (
+                      <Text style={styles.avatarInitials}>
+                        {displayName.charAt(0).toUpperCase()}
+                      </Text>
+                    )}
 
-                      {isUploadingImage && (
-                        <View style={styles.avatarUploadingOverlay}>
-                          <ActivityIndicator size="small" color="#FFFFFF" />
-                        </View>
-                      )}
-                    </Pressable>
+                    {isUploadingImage && (
+                      <View style={styles.avatarLoadingOverlay}>
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      </View>
+                    )}
+                  </Pressable>
 
-                    {/* Camera upload badge */}
+                  {/* Minimal Camera Badge */}
+                  <Pressable
+                    onPress={handlePickAvatar}
+                    disabled={isUploadingImage}
+                    style={[styles.cameraBadge, { backgroundColor: colors.accent }]}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Upload photo"
+                  >
+                    <Ionicons name="camera" size={12} color="#FFFFFF" />
+                  </Pressable>
+                </View>
+
+                {/* User Info & Edit */}
+                <View style={styles.userInfoCol}>
+                  <View style={styles.userNameRow}>
+                    <Text style={[styles.userNameText, { color: colors.text }]} numberOfLines={1}>
+                      {displayName}
+                    </Text>
                     <Pressable
-                      onPress={handlePickAvatar}
-                      disabled={isUploadingImage}
-                      style={({ pressed }) => [
-                        styles.cameraBadge,
-                        {
-                          backgroundColor: colors.accent,
-                          borderColor: colors.surface,
-                          opacity: pressed ? 0.8 : 1,
-                        },
-                      ]}
+                      onPress={handleStartEdit}
+                      style={styles.editBtn}
                       hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel="Edit display name"
                     >
-                      <Ionicons name="camera" size={13} color="#FFFFFF" />
+                      <Ionicons name="pencil" size={13} color={colors.accent} />
                     </Pressable>
                   </View>
 
-                  <View style={styles.profileDetails}>
-                    <View style={styles.nameRow}>
-                      <Text style={[styles.profileName, { color: colors.text }]} numberOfLines={1}>
-                        {displayName}
+                  <Text style={[styles.userHandleText, { color: colors.textMuted }]}>
+                    @{handle}
+                  </Text>
+
+                  {/* Flat Action Buttons Row */}
+                  <View style={styles.profileActionRow}>
+                    <Pressable
+                      onPress={handlePickAvatar}
+                      disabled={isUploadingImage}
+                      style={({ pressed, hovered }: any) => [
+                        styles.flatActionPill,
+                        (pressed || hovered) && { opacity: 0.7 },
+                        Platform.OS === 'web' && { cursor: 'pointer' as any },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Change profile picture"
+                    >
+                      <Ionicons name="image-outline" size={13} color={colors.accent} />
+                      <Text style={[styles.flatActionPillText, { color: colors.accent }]}>
+                        {avatarUrl ? 'Change Photo' : 'Upload Photo'}
                       </Text>
+                    </Pressable>
+
+                    {avatarUrl ? (
                       <Pressable
-                        onPress={handleStartEdit}
-                        style={[styles.editIconBtn, { backgroundColor: colors.surfaceElevated }]}
-                        hitSlop={8}
-                      >
-                        <Ionicons name="pencil" size={14} color={colors.accent} />
-                      </Pressable>
-                    </View>
-
-                    <Text style={[styles.profileHandle, { color: colors.textMuted }]}>
-                      @{handle}
-                    </Text>
-
-                    <View style={styles.emailRow}>
-                      <Ionicons name="mail-outline" size={13} color={colors.textSecondary} />
-                      <Text style={[styles.profileEmail, { color: colors.textSecondary }]} numberOfLines={1}>
-                        {email}
-                      </Text>
-                    </View>
-
-                    <View style={styles.memberSinceRow}>
-                      <Ionicons name="calendar-outline" size={13} color={colors.textMuted} />
-                      <Text style={[styles.memberSinceText, { color: colors.textMuted }]}>
-                        Joined {memberSince}
-                      </Text>
-                    </View>
-
-                    {/* Avatar Actions (Upload / Remove) */}
-                    <View style={styles.avatarActionRow}>
-                      <Pressable
-                        onPress={handlePickAvatar}
+                        onPress={handleRemoveAvatarPrompt}
                         disabled={isUploadingImage}
-                        style={({ pressed }) => [
-                          styles.avatarTextBtn,
-                          {
-                            backgroundColor: colors.surfaceElevated,
-                            borderColor: colors.border,
-                            opacity: isUploadingImage ? 0.6 : pressed ? 0.7 : 1,
-                          },
+                        style={({ pressed, hovered }: any) => [
+                          styles.flatActionPill,
+                          (pressed || hovered) && { opacity: 0.7 },
+                          Platform.OS === 'web' && { cursor: 'pointer' as any },
                         ]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Remove photo"
                       >
-                        <Ionicons name="image-outline" size={12} color={colors.accent} />
-                        <Text style={[styles.avatarTextBtnLabel, { color: colors.accent }]}>
-                          {avatarUrl ? 'Change Photo' : 'Upload Photo'}
+                        <Ionicons name="trash-outline" size={13} color={colors.textMuted} />
+                        <Text style={[styles.flatActionPillText, { color: colors.textMuted }]}>
+                          Remove
                         </Text>
                       </Pressable>
+                    ) : null}
 
-                      {avatarUrl && (
-                        <Pressable
-                          onPress={handleRemoveAvatarPrompt}
-                          disabled={isUploadingImage}
-                          style={({ pressed }) => [
-                            styles.avatarTextBtn,
-                            {
-                              backgroundColor: colors.surfaceElevated,
-                              borderColor: colors.border,
-                              opacity: pressed ? 0.7 : 1,
-                            },
-                          ]}
-                        >
-                          <Ionicons name="trash-outline" size={12} color={colors.textSecondary} />
-                          <Text style={[styles.avatarTextBtnLabel, { color: colors.textSecondary }]}>
-                            Remove
-                          </Text>
-                        </Pressable>
+                    <Pressable
+                      onPress={handleManualSync}
+                      disabled={isSyncing}
+                      style={({ pressed, hovered }: any) => [
+                        styles.flatActionPill,
+                        (pressed || hovered) && { opacity: 0.7 },
+                        Platform.OS === 'web' && { cursor: 'pointer' as any },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Sync library data"
+                    >
+                      {isSyncing ? (
+                        <ActivityIndicator size="small" color={colors.emerald || '#10B981'} />
+                      ) : (
+                        <Ionicons name="sync-outline" size={13} color={colors.emerald || '#10B981'} />
                       )}
-                    </View>
+                      <Text style={[styles.flatActionPillText, { color: colors.emerald || '#10B981' }]}>
+                        {isSyncing ? 'Syncing…' : 'Sync Now'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </View>
+
+              {/* ── 2. FLAT COLLECTION & READING STATS ── */}
+              <View style={styles.sectionWrapper}>
+                <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+                  Reading Overview
+                </Text>
+                <View style={styles.statsRow}>
+                  <View style={styles.statTile}>
+                    <Text style={[styles.statNumber, { color: colors.text }]}>
+                      {Object.keys(libraryEntries).length}
+                    </Text>
+                    <Text style={[styles.statLabel, { color: colors.textMuted }]}>
+                      Library Titles
+                    </Text>
+                  </View>
+
+                  <View style={styles.statDivider} />
+
+                  <View style={styles.statTile}>
+                    <Text style={[styles.statNumber, { color: colors.text }]}>
+                      {historyEntries.length}
+                    </Text>
+                    <Text style={[styles.statLabel, { color: colors.textMuted }]}>
+                      Chapters Read
+                    </Text>
+                  </View>
+
+                  <View style={styles.statDivider} />
+
+                  <View style={styles.statTile}>
+                    <Text style={[styles.statNumber, { color: colors.text }]}>
+                      {Object.keys(downloadEntries).length}
+                    </Text>
+                    <Text style={[styles.statLabel, { color: colors.textMuted }]}>
+                      Downloads
+                    </Text>
+                  </View>
+
+                  <View style={styles.statDivider} />
+
+                  <View style={styles.statTile}>
+                    <Text style={[styles.statNumber, { color: colors.text }]}>
+                      {userThreads.length}
+                    </Text>
+                    <Text style={[styles.statLabel, { color: colors.textMuted }]}>
+                      Discussions
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* ── 3. FLAT WEEKLY DAY STREAK ── */}
+              <View style={styles.sectionWrapper}>
+                <View style={styles.streakHeaderRow}>
+                  <View style={styles.streakTitleCol}>
+                    <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+                      Daily Reading Streak
+                    </Text>
+                    <Text style={[styles.streakSubtitleText, { color: colors.textMuted }]}>
+                      {weekStreakData.completedThisWeek} of 7 days active this week
+                    </Text>
+                  </View>
+
+                  <View style={[styles.userStreakBadge, { backgroundColor: `${colors.accent}18` }]}>
+                    <Ionicons name="flame" size={15} color={colors.accent} />
+                    <Text style={[styles.userStreakBadgeText, { color: colors.accent }]}>
+                      {userStreak} Day Streak
+                    </Text>
                   </View>
                 </View>
 
-                {/* Cloud Sync Status Badge */}
-                <View style={[styles.syncStatusBanner, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-                  <View style={styles.syncStatusLeft}>
-                    <View style={[styles.statusDot, { backgroundColor: colors.emerald }]} />
-                    <Text style={[styles.syncStatusText, { color: colors.textSecondary }]}>
-                      Cloud Sync & Multi-Device Active
-                    </Text>
-                  </View>
+                {/* 7-Day Flat Tracker Row */}
+                <View style={styles.weekDaysRow}>
+                  {weekStreakData.days.map((item) => {
+                    return (
+                      <View key={item.dateStr} style={styles.dayCol}>
+                        <Text
+                          style={[
+                            styles.dayLabelText,
+                            { color: item.isToday ? colors.text : colors.textMuted },
+                            item.isToday && { fontWeight: '700' },
+                          ]}
+                        >
+                          {item.dayName}
+                        </Text>
+
+                        {/* Day Status Circle */}
+                        <View
+                          style={[
+                            styles.dayStatusCircle,
+                            {
+                              backgroundColor: item.hasRead
+                                ? colors.accent
+                                : item.isToday
+                                ? `${colors.accent}20`
+                                : colors.surfaceElevated,
+                            },
+                            item.isToday && !item.hasRead && {
+                              borderWidth: 1.5,
+                              borderColor: colors.accent,
+                            },
+                          ]}
+                        >
+                          {item.hasRead ? (
+                            <Ionicons name="flame" size={16} color="#FFFFFF" />
+                          ) : item.isToday ? (
+                            <View style={[styles.todayCenterDot, { backgroundColor: colors.accent }]} />
+                          ) : item.isPast ? (
+                            <View style={[styles.missedDot, { backgroundColor: colors.textMuted }]} />
+                          ) : (
+                            <Text style={[styles.futureDateNum, { color: colors.textMuted }]}>
+                              {item.dateNum}
+                            </Text>
+                          )}
+                        </View>
+
+                        <Text
+                          style={[
+                            styles.dayDateNumText,
+                            { color: item.isToday ? colors.accent : colors.textMuted },
+                            item.isToday && { fontWeight: '700' },
+                          ]}
+                        >
+                          {item.dateNum}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
+
+                {/* Motivational Status Micro-Text */}
+                <Text style={[styles.streakMotivationText, { color: colors.textMuted }]}>
+                  {userStreak > 0
+                    ? `🔥 ${userStreak}-day reading streak! Read daily to keep your momentum going.`
+                    : 'Read a chapter today to start your weekly reading streak!'}
+                </Text>
+              </View>
+
+              {/* ── 4. FLAT QUICK ACCESS LIST ── */}
+              <View style={styles.sectionWrapper}>
+                <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+                  Quick Access
+                </Text>
+                <View style={styles.flatDividedList}>
                   <Pressable
-                    onPress={handleManualSync}
-                    disabled={isSyncing}
-                    style={[styles.syncActionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                    onPress={() => router.push('/(tabs)/library' as any)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Go to library"
+                    style={({ pressed, hovered }: any) => [
+                      styles.flatListItem,
+                      (pressed || hovered) && { opacity: 0.7 },
+                      Platform.OS === 'web' && { cursor: 'pointer' as any },
+                    ]}
                   >
-                    {isSyncing ? (
-                      <ActivityIndicator size="small" color={colors.accent} />
-                    ) : (
-                      <>
-                        <Ionicons name="sync-outline" size={13} color={colors.accent} />
-                        <Text style={[styles.syncActionBtnText, { color: colors.accent }]}>Sync Now</Text>
-                      </>
-                    )}
+                    <View style={styles.flatListItemLeft}>
+                      <Ionicons name="library-outline" size={18} color={colors.accent} />
+                      <Text style={[styles.flatListItemText, { color: colors.text }]}>
+                        My Manga Library
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                  </Pressable>
+
+                  <View style={[styles.flatSeparator, { backgroundColor: colors.border }]} />
+
+                  <Pressable
+                    onPress={() => router.push('/(tabs)/history' as any)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Go to reading history"
+                    style={({ pressed, hovered }: any) => [
+                      styles.flatListItem,
+                      (pressed || hovered) && { opacity: 0.7 },
+                      Platform.OS === 'web' && { cursor: 'pointer' as any },
+                    ]}
+                  >
+                    <View style={styles.flatListItemLeft}>
+                      <Ionicons name="time-outline" size={18} color={colors.accent} />
+                      <Text style={[styles.flatListItemText, { color: colors.text }]}>
+                        Reading History
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                  </Pressable>
+
+                  <View style={[styles.flatSeparator, { backgroundColor: colors.border }]} />
+
+                  <Pressable
+                    onPress={() => router.push('/(tabs)/community' as any)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Go to community discussions"
+                    style={({ pressed, hovered }: any) => [
+                      styles.flatListItem,
+                      (pressed || hovered) && { opacity: 0.7 },
+                      Platform.OS === 'web' && { cursor: 'pointer' as any },
+                    ]}
+                  >
+                    <View style={styles.flatListItemLeft}>
+                      <Ionicons name="chatbubbles-outline" size={18} color={colors.accent} />
+                      <Text style={[styles.flatListItemText, { color: colors.text }]}>
+                        Community Discussions
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                  </Pressable>
+
+                  <View style={[styles.flatSeparator, { backgroundColor: colors.border }]} />
+
+                  <Pressable
+                    onPress={() => router.push('/(tabs)/settings' as any)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Go to settings"
+                    style={({ pressed, hovered }: any) => [
+                      styles.flatListItem,
+                      (pressed || hovered) && { opacity: 0.7 },
+                      Platform.OS === 'web' && { cursor: 'pointer' as any },
+                    ]}
+                  >
+                    <View style={styles.flatListItemLeft}>
+                      <Ionicons name="settings-outline" size={18} color={colors.accent} />
+                      <Text style={[styles.flatListItemText, { color: colors.text }]}>
+                        App & Reader Preferences
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
                   </Pressable>
                 </View>
               </View>
 
-              {/* Statistics Grid */}
-              <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>
-                COLLECTION & READING STATS
-              </Text>
-              <View style={styles.statsGrid}>
-                <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <View style={[styles.statIconBox, { backgroundColor: `${colors.accent}18` }]}>
-                    <Ionicons name="library-outline" size={20} color={colors.accent} />
-                  </View>
-                  <Text style={[styles.statNumber, { color: colors.text }]}>{Object.keys(libraryEntries).length}</Text>
-                  <Text style={[styles.statLabel, { color: colors.textMuted }]}>Library Titles</Text>
-                </View>
-
-                <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <View style={[styles.statIconBox, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
-                    <Ionicons name="book-outline" size={20} color={colors.emerald} />
-                  </View>
-                  <Text style={[styles.statNumber, { color: colors.text }]}>{historyEntries.length}</Text>
-                  <Text style={[styles.statLabel, { color: colors.textMuted }]}>Chapters Read</Text>
-                </View>
-
-                <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <View style={[styles.statIconBox, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
-                    <Ionicons name="download-outline" size={20} color="#3B82F6" />
-                  </View>
-                  <Text style={[styles.statNumber, { color: colors.text }]}>{Object.keys(downloadEntries).length}</Text>
-                  <Text style={[styles.statLabel, { color: colors.textMuted }]}>Offline Chapters</Text>
-                </View>
-
-                <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <View style={[styles.statIconBox, { backgroundColor: 'rgba(234, 179, 8, 0.15)' }]}>
-                    <Ionicons name="chatbubbles-outline" size={20} color="#EAB308" />
-                  </View>
-                  <Text style={[styles.statNumber, { color: colors.text }]}>{userThreads.length}</Text>
-                  <Text style={[styles.statLabel, { color: colors.textMuted }]}>Community Topics</Text>
-                </View>
-              </View>
-
-              {/* Quick Navigation Links */}
-              <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>
-                QUICK ACCESS
-              </Text>
-              <View style={[styles.menuCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              {/* ── 5. FLAT SIGN OUT ── */}
+              <View style={styles.signOutSection}>
                 <Pressable
-                  onPress={() => router.push('/(tabs)/library' as any)}
-                  style={({ pressed }) => [styles.menuItem, { opacity: pressed ? 0.7 : 1 }]}
+                  onPress={handleLogoutPrompt}
+                  accessibilityRole="button"
+                  accessibilityLabel="Sign out of Yomite"
+                  style={({ pressed, hovered }: any) => [
+                    styles.flatSignOutBtn,
+                    (pressed || hovered) && { opacity: 0.7 },
+                    Platform.OS === 'web' && { cursor: 'pointer' as any },
+                  ]}
                 >
-                  <View style={styles.menuItemLeft}>
-                    <Ionicons name="library-outline" size={20} color={colors.accent} />
-                    <Text style={[styles.menuItemText, { color: colors.text }]}>My Manga Library</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-                </Pressable>
-
-                <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
-
-                <Pressable
-                  onPress={() => router.push('/(tabs)/history' as any)}
-                  style={({ pressed }) => [styles.menuItem, { opacity: pressed ? 0.7 : 1 }]}
-                >
-                  <View style={styles.menuItemLeft}>
-                    <Ionicons name="time-outline" size={20} color={colors.accent} />
-                    <Text style={[styles.menuItemText, { color: colors.text }]}>Reading History</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-                </Pressable>
-
-                <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
-
-                <Pressable
-                  onPress={() => router.push('/(tabs)/community' as any)}
-                  style={({ pressed }) => [styles.menuItem, { opacity: pressed ? 0.7 : 1 }]}
-                >
-                  <View style={styles.menuItemLeft}>
-                    <Ionicons name="chatbubbles-outline" size={20} color={colors.accent} />
-                    <Text style={[styles.menuItemText, { color: colors.text }]}>Community Discussions</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-                </Pressable>
-
-                <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
-
-                <Pressable
-                  onPress={() => router.push('/(tabs)/settings' as any)}
-                  style={({ pressed }) => [styles.menuItem, { opacity: pressed ? 0.7 : 1 }]}
-                >
-                  <View style={styles.menuItemLeft}>
-                    <Ionicons name="settings-outline" size={20} color={colors.accent} />
-                    <Text style={[styles.menuItemText, { color: colors.text }]}>App & Reader Preferences</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                  <Ionicons name="log-out-outline" size={16} color="#EF4444" />
+                  <Text style={styles.flatSignOutText}>Sign out</Text>
                 </Pressable>
               </View>
-
-              {/* Sign Out Button */}
-              <Pressable
-                onPress={handleLogoutPrompt}
-                style={({ pressed }) => [
-                  styles.logoutCardBtn,
-                  {
-                    backgroundColor: colors.surface,
-                    borderColor: 'rgba(244, 63, 94, 0.3)',
-                    opacity: pressed ? 0.7 : 1,
-                  },
-                ]}
-              >
-                <Ionicons name="log-out-outline" size={20} color={colors.accent} />
-                <Text style={[styles.logoutCardBtnText, { color: colors.accent }]}>
-                  Sign Out of Account
-                </Text>
-              </Pressable>
             </>
           ) : (
-            /* Logged Out Guest Banner */
-            <View style={[styles.guestCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <View style={[styles.guestIconCircle, { backgroundColor: `${colors.accent}18` }]}>
-                <Ionicons name="person-circle-outline" size={64} color={colors.accent} />
+            /* ── LOGGED OUT GUEST VIEW (FLAT) ── */
+            <View style={styles.guestSection}>
+              <View style={[styles.guestIconCircle, { backgroundColor: colors.surfaceElevated }]}>
+                <Ionicons name="person-outline" size={36} color={colors.accent} />
               </View>
-              <Text style={[styles.guestTitle, { color: colors.text }]}>Sign In to Yomite</Text>
+              <Text style={[styles.guestTitle, { color: colors.text }]}>Account & Cloud Sync</Text>
               <Text style={[styles.guestSubtitle, { color: colors.textMuted }]}>
-                Create an account or sign in with Google to sync your bookmarks, record reading progress across all devices, and participate in community discussions.
+                Sign in to sync your bookmarks, record reading progress across devices, and participate in discussions.
               </Text>
 
               <Pressable
                 onPress={() => setAuthModalVisible(true)}
-                style={[styles.guestSignInBtn, { backgroundColor: colors.accent }]}
+                accessibilityRole="button"
+                accessibilityLabel="Sign in or create account"
+                style={({ pressed, hovered }: any) => [
+                  styles.guestSignInBtn,
+                  {
+                    backgroundColor: colors.accent,
+                    opacity: pressed ? 0.85 : hovered ? 0.95 : 1,
+                  },
+                  Platform.OS === 'web' && { cursor: 'pointer' as any },
+                ]}
               >
-                <Ionicons name="log-in-outline" size={20} color="#FFFFFF" />
+                <Ionicons name="log-in-outline" size={18} color="#FFFFFF" />
                 <Text style={styles.guestSignInBtnText}>Sign In / Create Account</Text>
               </Pressable>
             </View>
@@ -630,7 +854,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   webCenteredContent: {
-    maxWidth: 820,
+    maxWidth: 720,
     width: '100%',
     alignSelf: 'center',
   },
@@ -640,62 +864,53 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
   },
-  backBtn: {
-    padding: 4,
+  headerIconBtn: {
+    padding: 6,
+    borderRadius: Radius.full,
   },
   headerTitle: {
     fontSize: Typography.sizes.title2,
     fontWeight: Typography.weights.bold,
-  },
-  settingsBtn: {
-    padding: 4,
+    letterSpacing: -0.3,
   },
   scrollContent: {
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.lg,
-    gap: Spacing.lg,
+    paddingTop: Spacing.sm,
+    gap: 28,
   },
-  profileCard: {
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    padding: Spacing.lg,
-    gap: Spacing.md,
-  },
-  profileCardTop: {
+
+  /* 1. Flat User Hero Section */
+  userHeroSection: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md,
+    gap: 16,
+    paddingVertical: 8,
   },
-  avatarContainer: {
+  avatarWrapper: {
     position: 'relative',
   },
-  avatarLarge: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+  avatarCircle: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  avatarLargeImage: {
+  avatarImg: {
     width: '100%',
     height: '100%',
+    borderRadius: 34,
   },
-  avatarLargeText: {
+  avatarInitials: {
     color: '#FFFFFF',
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: Typography.weights.bold,
   },
-  avatarUploadingOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+  avatarLoadingOverlay: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -703,225 +918,255 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: -2,
     right: -2,
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    borderWidth: 2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: '0 2px 3px rgba(0, 0, 0, 0.3)',
-    elevation: 3,
   },
-  avatarActionRow: {
+  userInfoCol: {
+    flex: 1,
+    gap: 2,
+  },
+  userNameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.xs,
-    marginTop: 6,
+    gap: 6,
   },
-  avatarTextBtn: {
+  userNameText: {
+    fontSize: 18,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: -0.3,
+  },
+  editBtn: {
+    padding: 4,
+  },
+  userHandleText: {
+    fontSize: 13,
+    fontWeight: Typography.weights.medium,
+    marginBottom: 4,
+  },
+  profileActionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
+    flexWrap: 'wrap',
+    gap: 14,
+    marginTop: 2,
+  },
+  flatActionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
     paddingVertical: 4,
-    borderRadius: Radius.sm,
-    borderWidth: 1,
+    paddingHorizontal: 0,
+    minHeight: 28,
   },
-  avatarTextBtnLabel: {
-    fontSize: 11,
+  flatActionPillText: {
+    fontSize: 12,
     fontWeight: Typography.weights.semibold,
   },
-  profileDetails: {
-    flex: 1,
-    gap: 3,
+
+  /* 2. Flat Stats Overview */
+  sectionWrapper: {
+    gap: 10,
   },
-  nameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+    paddingHorizontal: 2,
   },
-  profileName: {
-    fontSize: Typography.sizes.title3,
-    fontWeight: Typography.weights.bold,
-  },
-  editIconBtn: {
-    padding: 5,
-    borderRadius: Radius.full,
-  },
-  profileHandle: {
-    fontSize: Typography.sizes.footnote,
-    fontWeight: Typography.weights.medium,
-  },
-  emailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    marginTop: 2,
-  },
-  profileEmail: {
-    fontSize: Typography.sizes.caption,
-  },
-  memberSinceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    marginTop: 2,
-  },
-  memberSinceText: {
-    fontSize: Typography.sizes.caption,
-  },
-  syncStatusBanner: {
+  statsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    gap: Spacing.xs,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
   },
-  syncStatusLeft: {
+  statTile: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 2,
+  },
+  statDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  statNumber: {
+    fontSize: 20,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: -0.5,
+  },
+  statLabel: {
+    fontSize: 11,
+    fontWeight: Typography.weights.medium,
+  },
+
+  /* 3. Flat Weekly Day Streak */
+  streakHeaderRow: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 2,
+  },
+  streakTitleCol: {
+    gap: 2,
+  },
+  streakSubtitleText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  userStreakBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: Radius.full,
+  },
+  userStreakBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  weekDaysRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 2,
+  },
+  dayCol: {
     alignItems: 'center',
     gap: 6,
     flex: 1,
   },
-  statusDot: {
+  dayLabelText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+  },
+  dayStatusCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  todayCenterDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
   },
-  syncStatusText: {
-    fontSize: 11,
-    fontWeight: Typography.weights.semibold,
+  missedDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    opacity: 0.4,
   },
-  syncActionBtn: {
+  futureDateNum: {
+    fontSize: 11,
+    fontWeight: '500',
+    opacity: 0.6,
+  },
+  dayDateNumText: {
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  streakMotivationText: {
+    fontSize: 12,
+    lineHeight: 16,
+    paddingHorizontal: 2,
+  },
+
+  /* 4. Flat Divided List for Quick Access */
+  flatDividedList: {
+    paddingVertical: 2,
+  },
+  flatListItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: Spacing.sm + 2,
-    paddingVertical: 5,
-    borderRadius: Radius.sm,
-    borderWidth: 1,
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 4,
   },
-  syncActionBtnText: {
-    fontSize: 11,
-    fontWeight: Typography.weights.bold,
-  },
-  sectionHeading: {
-    fontSize: 11,
-    fontWeight: Typography.weights.bold,
-    letterSpacing: 0.8,
-    marginTop: Spacing.xs,
-  },
-  statsGrid: {
+  flatListItemLeft: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.md,
+    alignItems: 'center',
+    gap: 14,
   },
-  statCard: {
-    flex: 1,
-    minWidth: '45%',
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    padding: Spacing.md,
-    gap: 4,
+  flatListItemText: {
+    fontSize: 14,
+    fontWeight: Typography.weights.medium,
   },
-  statIconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: Radius.md,
+  flatSeparator: {
+    height: 1,
+    opacity: 0.4,
+    marginLeft: 32,
+  },
+
+  /* 5. Flat Sign Out */
+  signOutSection: {
+    paddingTop: 8,
+  },
+  flatSignOutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    alignSelf: 'flex-start',
+  },
+  flatSignOutText: {
+    color: '#EF4444',
+    fontSize: 14,
+    fontWeight: Typography.weights.semibold,
+  },
+
+  /* 6. Flat Guest State */
+  guestSection: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  guestIconCircle: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 4,
   },
-  statNumber: {
-    fontSize: Typography.sizes.title1,
-    fontWeight: Typography.weights.bold,
-  },
-  statLabel: {
-    fontSize: Typography.sizes.caption,
-  },
-  menuCard: {
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-  },
-  menuItemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-  },
-  menuItemText: {
-    fontSize: Typography.sizes.body,
-    fontWeight: Typography.weights.medium,
-  },
-  menuDivider: {
-    height: 1,
-    marginLeft: Spacing.lg + 20 + Spacing.md,
-  },
-  logoutCardBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 48,
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    gap: Spacing.xs,
-  },
-  logoutCardBtnText: {
-    fontSize: Typography.sizes.body,
-    fontWeight: Typography.weights.bold,
-  },
-  guestCard: {
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    padding: Spacing.xl,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.md,
-    marginTop: Spacing.xl,
-  },
-  guestIconCircle: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   guestTitle: {
-    fontSize: Typography.sizes.title2,
+    fontSize: 20,
     fontWeight: Typography.weights.bold,
     textAlign: 'center',
+    letterSpacing: -0.3,
   },
   guestSubtitle: {
-    fontSize: Typography.sizes.footnote,
+    fontSize: 13,
     textAlign: 'center',
-    lineHeight: 20,
-    maxWidth: 380,
+    lineHeight: 19,
+    maxWidth: 340,
   },
   guestSignInBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 46,
-    paddingHorizontal: Spacing.xl,
-    borderRadius: Radius.full,
-    gap: Spacing.xs,
-    marginTop: Spacing.sm,
+    height: 42,
+    paddingHorizontal: 24,
+    borderRadius: Radius.md,
+    gap: 8,
+    marginTop: 8,
   },
   guestSignInBtnText: {
     color: '#FFFFFF',
-    fontSize: Typography.sizes.body,
+    fontSize: 14,
     fontWeight: Typography.weights.bold,
   },
+
+  /* Edit Name Modal Input */
   editInputWrapper: {
     marginVertical: Spacing.sm,
     width: '100%',

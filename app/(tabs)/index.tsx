@@ -285,12 +285,12 @@ const WebHeader: React.FC<WebHeaderProps> = ({
                   isMobile && { height: 34, paddingHorizontal: 8, gap: 4 },
                   {
                     borderColor: isSearchFocused
-                      ? 'rgba(255, 255, 255, 0.3)'
-                      : 'rgba(255, 255, 255, 0.14)',
+                      ? 'transparent'
+                      : 'transparent',
                     ...(Platform.OS === 'web'
                       ? ({
                           boxShadow: isSearchFocused
-                            ? '0 0 0 2px rgba(255, 255, 255, 0.12)'
+                            ? 'none'
                             : 'none',
                           transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
                         } as any)
@@ -490,7 +490,7 @@ const WebHeader: React.FC<WebHeaderProps> = ({
                 styles.webFilterBtn,
                 isMobile && { width: 34, height: 34, flexShrink: 0 },
                 {
-                  backgroundColor: isTransparentAtTop ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0,0,0,0.06)',
+                  backgroundColor: isTransparentAtTop ? 'rgba(255, 255, 255, 0.12)' : colors.surfaceElevated,
                   opacity: pressed ? 0.6 : 1,
                 },
               ]}
@@ -1395,7 +1395,7 @@ export default function DiscoverScreen() {
                     style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1 }]}
                     hitSlop={8}
                   >
-                    <Ionicons name="options-outline" size={24} color="#F59E0B" />
+                    <Ionicons name="options-outline" size={24} color={colors.text} />
                   </Pressable>
                 </View>
               </View>
@@ -1418,7 +1418,12 @@ export default function DiscoverScreen() {
                   autoCorrect={false}
                 />
                 {searchQuery.length > 0 && (
-                  <Pressable onPress={() => setSearchQuery('')}>
+                  <Pressable
+                    onPress={() => setSearchQuery('')}
+                    hitSlop={8}
+                    style={{ padding: 4, backgroundColor: 'transparent', borderWidth: 0 }}
+                    accessibilityLabel="Clear search"
+                  >
                     <Ionicons name="close-circle" size={16} color={colors.textMuted} />
                   </Pressable>
                 )}
@@ -1469,8 +1474,8 @@ export default function DiscoverScreen() {
                           accessibilityRole="button"
                           accessibilityLabel="Edit Advanced Filters"
                         >
-                          <Ionicons name="options-outline" size={13} color="#FAFAFA" />
-                          <Text style={styles.activeFilterText}>
+                          <Ionicons name="options-outline" size={13} color={colors.text} />
+                          <Text style={[styles.activeFilterText, { color: colors.text }]}>
                             Advanced Filters Active
                           </Text>
                         </Pressable>
@@ -1486,7 +1491,7 @@ export default function DiscoverScreen() {
                           accessibilityRole="button"
                           accessibilityLabel="Clear filters"
                         >
-                          <Ionicons name="close" size={14} color="#94A3B8" />
+                          <Ionicons name="close" size={14} color={colors.textMuted} />
                         </Pressable>
                       </View>
                     </View>
@@ -1590,7 +1595,7 @@ export default function DiscoverScreen() {
                           String(activeNavId) === 'latest' && styles.feedSegmentPillActive,
                           {
                             backgroundColor: String(activeNavId) === 'latest' ? colors.accent : colors.surfaceElevated,
-                            borderColor: String(activeNavId) === 'latest' ? colors.accent : colors.border,
+                            borderWidth: 0,
                           },
                         ]}
                         accessibilityRole="tab"
@@ -1619,7 +1624,7 @@ export default function DiscoverScreen() {
                           String(activeNavId) === 'recently_added' && styles.feedSegmentPillActive,
                           {
                             backgroundColor: String(activeNavId) === 'recently_added' ? colors.accent : colors.surfaceElevated,
-                            borderColor: String(activeNavId) === 'recently_added' ? colors.accent : colors.border,
+                            borderWidth: 0,
                           },
                         ]}
                         accessibilityRole="tab"
@@ -1752,7 +1757,7 @@ export default function DiscoverScreen() {
                       <Animated.View
                         style={[
                           styles.heroBannerFrame,
-                          isLightTheme && { backgroundColor: colors.surface, borderColor: colors.border },
+                          isLightTheme && { backgroundColor: colors.surface, borderWidth: 0 },
                           Platform.OS === 'web' && styles.webHeroBannerFrame,
                           Platform.OS === 'web' && {
                             transform: [{ translateX: heroSlideAnim }],
@@ -1915,7 +1920,7 @@ export default function DiscoverScreen() {
                                 {currentHeroTags.map((t) => {
                                   const tagLabel = (t.attributes.name.en ?? Object.values(t.attributes.name)[0]);
                                   return (
-                                    <View key={t.id} style={[styles.heroTagPill, isLightTheme && { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
+                                    <View key={t.id} style={[styles.heroTagPill, isLightTheme && { backgroundColor: colors.cardBackground, borderWidth: 0 }]}>
                                       <Text style={[styles.heroTagText, isLightTheme && { color: colors.text }]} numberOfLines={1}>
                                         {tagLabel}
                                       </Text>
@@ -1953,7 +1958,7 @@ export default function DiscoverScreen() {
                           activeNavId === 'latest' && styles.feedSegmentPillActive,
                           {
                             backgroundColor: activeNavId === 'latest' ? colors.accent : colors.surfaceElevated,
-                            borderColor: activeNavId === 'latest' ? colors.accent : colors.border,
+                            borderWidth: 0,
                           },
                         ]}
                         accessibilityRole="tab"
@@ -1982,7 +1987,7 @@ export default function DiscoverScreen() {
                           activeNavId === 'recently_added' && styles.feedSegmentPillActive,
                           {
                             backgroundColor: activeNavId === 'recently_added' ? colors.accent : colors.surfaceElevated,
-                            borderColor: activeNavId === 'recently_added' ? colors.accent : colors.border,
+                            borderWidth: 0,
                           },
                         ]}
                         accessibilityRole="tab"
@@ -2231,7 +2236,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: Radius.xs,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   badgeText: {
     fontSize: 9,
@@ -2288,8 +2293,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm + 2,
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 0,
     gap: Spacing.sm,
   },
   searchInput: {
@@ -2315,7 +2319,7 @@ const styles = StyleSheet.create({
     paddingRight: Spacing.sm,
     paddingVertical: 3,
     borderRadius: Radius.full,
-    borderWidth: 1,
+    borderWidth: 0,
     gap: 4,
   },
   activeFilterPillBody: {
@@ -2328,6 +2332,8 @@ const styles = StyleSheet.create({
     marginLeft: 2,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 0,
   },
   activeFilterText: {
     fontSize: Typography.sizes.footnote,
@@ -2346,8 +2352,7 @@ const styles = StyleSheet.create({
   },
   heroBannerFrame: {
     borderRadius: Radius.xl,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 0,
     backgroundColor: '#12141A',
     overflow: Platform.OS === 'web' ? 'visible' : 'hidden',
     position: 'relative',
@@ -2381,8 +2386,7 @@ const styles = StyleSheet.create({
     width: 135,
     height: 200,
     borderRadius: Radius.sm,
-    borderWidth: 1,
-    borderColor: '#FFFFFF',
+    borderWidth: 0,
     overflow: 'hidden',
   },
   heroCoverImage: {
@@ -2407,8 +2411,7 @@ const styles = StyleSheet.create({
   },
   heroTagPill: {
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    borderColor: 'rgba(255, 255, 255, 0.04)',
-    borderWidth: 1,
+    borderWidth: 0,
     paddingHorizontal: Platform.OS === 'web' ? 10 : 6,
     paddingVertical: Platform.OS === 'web' ? 4 : 2,
     borderRadius: Radius.sm,
@@ -2640,8 +2643,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(28, 28, 32, 0.85)',
-    borderColor: 'rgba(255, 255, 255, 0.14)',
-    borderWidth: 1,
+    borderColor: 'transparent',
+    borderWidth: 0,
     borderRadius: 20,
     height: 36,
     paddingHorizontal: 12,
@@ -2856,13 +2859,12 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: Spacing.md,
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 0,
     backgroundColor: '#14161D',
   },
   feedSegmentPillActive: {
     backgroundColor: '#F59E0B',
-    borderColor: '#F59E0B',
+    borderWidth: 0,
   },
   feedSegmentText: {
     fontSize: Typography.sizes.footnote,
@@ -2975,7 +2977,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.sm,
     paddingVertical: 4,
     borderRadius: Radius.full,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   popularEyebrowText: {
     fontSize: 10,
@@ -2999,7 +3001,7 @@ const styles = StyleSheet.create({
   popularRankCard: {
     minHeight: 132,
     borderRadius: Radius.lg,
-    borderWidth: 1,
+    borderWidth: 0,
     padding: Spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
@@ -3051,7 +3053,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     borderRadius: Radius.full,
-    borderWidth: 1,
+    borderWidth: 0,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },

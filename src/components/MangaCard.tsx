@@ -85,7 +85,7 @@ function MangaCardComponent({
           cardHeight ? { height: cardHeight } : null,
           {
             backgroundColor: colors.surface,
-            borderColor: colors.border,
+            borderWidth: 0,
           },
         ]}
       >
@@ -161,7 +161,7 @@ const styles = StyleSheet.create({
     aspectRatio: 1 / 1.44,
     borderRadius: Radius.md,
     overflow: 'hidden',
-    borderWidth: 1,
+    borderWidth: 0,
     position: 'relative',
   },
   coverImage: {
@@ -213,8 +213,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Platform.OS === 'web' ? 8 : 6,
     paddingVertical: Platform.OS === 'web' ? 3 : 2,
     borderRadius: Radius.xs,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 0,
   },
   ratingText: {
     color: '#FAFAFA',
@@ -231,8 +230,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 5,
-    borderWidth: 1.5,
-    borderColor: '#09090B',
+    borderWidth: 0,
     boxShadow: '0 1px 2px rgba(0, 0, 0, 0.4)',
     elevation: 3,
   },

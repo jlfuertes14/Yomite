@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { CacheManager } from '../utils/cacheManager';
 import { getMangaDexApiBase } from './mangadex';
+import { supabase } from '../lib/supabase';
 
 export interface ForumComment {
   id: string;
@@ -10,6 +11,8 @@ export interface ForumComment {
   body: string;
   likes: number;
   isSpoiler?: boolean;
+  imageUrls?: string[];
+  replyTo?: string;
 }
 
 export interface ForumThread {
@@ -17,9 +20,11 @@ export interface ForumThread {
   title: string;
   category: string;
   author: string;
+  authorAvatarUrl?: string;
   repliesCount: number;
   createdAt: string;
   lastReplyAt: string;
+  imageUrls?: string[];
 }
 
 export interface AnimeNewsItem {
@@ -85,6 +90,80 @@ export async function getAnimeNewsArticle(url: string): Promise<AnimeNewsArticle
 }
 
 /**
+ * Merge freshly-fetched article covers back into the cached news feed so list
+ * thumbnails persist after opening an article or background hydration runs.
+ */
+export async function mergeNewsCoversIntoFeedCache(
+  updates: Array<
+    Pick<AnimeNewsItem, 'url'> &
+      Partial<Pick<AnimeNewsItem, 'imageUrl' | 'images' | 'trailerUrl' | 'trailerUrls'>>
+  >
+): Promise<void> {
+  try {
+    const cached = await CacheManager.get<AnimeNewsItem[]>('community_anime_news_v1');
+    if (!cached) return;
+    const byUrl = new Map(updates.map((u) => [u.url, u]));
+    const merged = cached.map((item) => {
+      const u = byUrl.get(item.url);
+      if (!u) return item;
+      const cover = u.imageUrl || u.images?.[0];
+      return {
+        ...item,
+        imageUrl: item.imageUrl || cover || item.imageUrl,
+        images: item.images || u.images,
+        trailerUrl: item.trailerUrl || u.trailerUrl,
+        trailerUrls: item.trailerUrls || u.trailerUrls,
+      };
+    });
+    await CacheManager.set('community_anime_news_v1', merged, 15 * 60 * 1000);
+  } catch {
+    // Cache is best-effort only
+  }
+}
+
+/**
+ * Look up stored profile photos by author username from the public community
+ * tables. SELECT is public, so this resolves for signed-in and signed-out
+ * viewers alike. Returns username → avatar URL (missing columns / offline
+ * yield an empty map; callers fall back to letter avatars).
+ */
+export async function fetchAuthorAvatarMap(usernames: string[]): Promise<Record<string, string>> {
+  const map: Record<string, string> = {};
+  const uniq = [...new Set((usernames || []).filter((n) => n && n.trim()))].slice(0, 60);
+  if (uniq.length === 0) return map;
+
+  try {
+    const { data: threads } = await supabase
+      .from('community_threads')
+      .select('author,author_avatar_url')
+      .in('author', uniq);
+    for (const row of threads || []) {
+      const url = (row as any)?.author_avatar_url;
+      const name = (row as any)?.author;
+      if (name && url && !map[name]) map[name] = url;
+    }
+  } catch {
+    // Column not migrated yet or offline — fall through to replies lookup
+  }
+
+  try {
+    const { data: replies } = await supabase
+      .from('thread_replies')
+      .select('username,avatar_url')
+      .in('username', uniq);
+    for (const row of replies || []) {
+      const url = (row as any)?.avatar_url;
+      const name = (row as any)?.username;
+      if (name && url && !map[name]) map[name] = url;
+    }
+  } catch {
+    // Column not migrated yet or offline
+  }
+
+  return map;
+}
+
+/**
  * Fetch comments for a specific chapter
  */
 export async function getChapterComments(chapterId: string): Promise<ForumComment[]> {
@@ -106,9 +185,11 @@ export async function getChapterComments(chapterId: string): Promise<ForumCommen
           username: p.attributes?.username || 'MangaDex Reader',
           avatarUrl: p.attributes?.avatarUrl,
           postedAt: p.attributes?.createdAt || new Date().toISOString(),
-          body: p.attributes?.body || '',
-          likes: p.attributes?.voteCount || 0,
-          isSpoiler: p.attributes?.isSpoiler || false,
+            body: p.attributes?.body || '',
+            likes: p.attributes?.voteCount || 0,
+            isSpoiler: p.attributes?.isSpoiler || false,
+            imageUrls: p.attributes?.imageUrls,
+            replyTo: p.attributes?.replyTo,
         }));
         await CacheManager.set(cacheKey, comments, 10 * 60 * 1000);
         return comments;

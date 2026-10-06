@@ -2,7 +2,7 @@
   "expo": {
     "name": "Yomite",
     "slug": "yomite",
-    "version": "1.2.2",
+    "version": "1.2.3",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "yomite",
@@ -68,6 +68,12 @@
       "expo-system-ui",
       "expo-image",
       "expo-sharing",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Yomite to attach photos to community topics and replies."
+        }
+      ],
       "@react-native-google-signin/google-signin"
     ],
     "experiments": {

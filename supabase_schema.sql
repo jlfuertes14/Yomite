@@ -99,6 +99,17 @@ DROP POLICY IF EXISTS "Anyone can insert thread replies" ON public.thread_replie
 CREATE POLICY "Anyone can insert thread replies" ON public.thread_replies
     FOR INSERT WITH CHECK (true);
 
+-- 9. COMMUNITY AVATARS & ATTACHMENTS (safe to re-run; run once in SQL Editor,
+-- then public profile photos resolve for signed-in and signed-out viewers alike)
+ALTER TABLE public.community_threads ADD COLUMN IF NOT EXISTS author_avatar_url TEXT;
+ALTER TABLE public.community_threads ADD COLUMN IF NOT EXISTS image_urls TEXT[];
+ALTER TABLE public.thread_replies ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+ALTER TABLE public.thread_replies ADD COLUMN IF NOT EXISTS image_urls TEXT[];
+ALTER TABLE public.thread_replies ADD COLUMN IF NOT EXISTS reply_to TEXT;
+
+-- Notify PostgREST to reload its schema cache
+NOTIFY pgrst, 'reload schema';
+
 -- 8. STORAGE BUCKET FOR AVATARS (Run to create public avatars bucket)
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('avatars', 'avatars', true)

@@ -284,12 +284,12 @@ const WebHeader: React.FC<WebHeaderProps> = ({
                   isMobile && { height: 34, paddingHorizontal: 8, gap: 4 },
                   {
                     borderColor: isSearchFocused
-                      ? (colors.accent || '#8B5CF6')
-                      : 'rgba(255, 255, 255, 0.14)',
+                      ? 'transparent'
+                      : 'transparent',
                     ...(Platform.OS === 'web'
                       ? ({
                           boxShadow: isSearchFocused
-                            ? `0 0 0 2px ${colors.accent || '#8B5CF6'}50`
+                            ? 'none'
                             : 'none',
                           transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
                         } as any)
@@ -300,7 +300,7 @@ const WebHeader: React.FC<WebHeaderProps> = ({
                 <Ionicons
                   name="search-outline"
                   size={isMobile ? 15 : 16}
-                  color={isSearchFocused ? (colors.accent || '#8B5CF6') : 'rgba(255,255,255,0.55)'}
+                  color={isSearchFocused ? '#FAFAFA' : 'rgba(255,255,255,0.55)'}
                   style={{ marginRight: 2 }}
                 />
                 <TextInput
@@ -489,7 +489,7 @@ const WebHeader: React.FC<WebHeaderProps> = ({
                 styles.webFilterBtn,
                 isMobile && { width: 34, height: 34, flexShrink: 0 },
                 {
-                  backgroundColor: isTransparentAtTop ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0,0,0,0.06)',
+                  backgroundColor: isTransparentAtTop ? 'rgba(255, 255, 255, 0.12)' : colors.surfaceElevated,
                   opacity: pressed ? 0.6 : 1,
                 },
               ]}
@@ -1380,7 +1380,7 @@ export default function DiscoverScreen() {
                     style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1 }]}
                     hitSlop={8}
                   >
-                    <Ionicons name="options-outline" size={24} color={colors.accent} />
+                    <Ionicons name="options-outline" size={24} color={colors.text} />
                   </Pressable>
                 </View>
               </View>
@@ -1389,7 +1389,7 @@ export default function DiscoverScreen() {
               <View
                 style={[
                   styles.searchContainer,
-                  { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+                  { backgroundColor: colors.surfaceElevated },
                 ]}
               >
                 <Ionicons name="search-outline" size={16} color={colors.textMuted} />
@@ -1441,7 +1441,7 @@ export default function DiscoverScreen() {
                           styles.activeFilterPill,
                           {
                             backgroundColor: colors.accentSubtle,
-                            borderColor: colors.accent,
+                            borderWidth: 0,
                           },
                         ]}
                       >
@@ -1455,8 +1455,8 @@ export default function DiscoverScreen() {
                           accessibilityRole="button"
                           accessibilityLabel="Edit Advanced Filters"
                         >
-                          <Ionicons name="options" size={13} color={colors.accent} />
-                          <Text style={[styles.activeFilterText, { color: colors.accent }]}>
+                          <Ionicons name="options" size={13} color={colors.text} />
+                          <Text style={[styles.activeFilterText, { color: colors.text }]}>
                             Advanced Filters Active
                           </Text>
                         </Pressable>
@@ -1472,7 +1472,7 @@ export default function DiscoverScreen() {
                           accessibilityRole="button"
                           accessibilityLabel="Clear filters"
                         >
-                          <Ionicons name="close" size={14} color={colors.accent} />
+                          <Ionicons name="close" size={14} color={colors.textMuted} />
                         </Pressable>
                       </View>
                     </View>
@@ -1560,7 +1560,7 @@ export default function DiscoverScreen() {
                 <View style={styles.section}>
                   <View style={styles.popularListHeader}>
                     <View style={styles.popularHeaderCopy}>
-                      <View style={[styles.popularEyebrowPill, { backgroundColor: colors.accentSubtle, borderColor: colors.accent }]}>
+                      <View style={[styles.popularEyebrowPill, { backgroundColor: colors.accentSubtle, borderWidth: 0 }]}>
                         <Ionicons name="trending-up-outline" size={13} color={colors.accent} />
                         <Text style={[styles.popularEyebrowText, { color: colors.accent }]}>Top Ranked</Text>
                       </View>
@@ -1593,7 +1593,7 @@ export default function DiscoverScreen() {
                               styles.popularRankCard,
                               {
                                 backgroundColor: colors.surface,
-                                borderColor: colors.border,
+                                borderWidth: 0,
                                 opacity: pressed ? 0.82 : 1,
                               },
                             ]}
@@ -1624,21 +1624,21 @@ export default function DiscoverScreen() {
                               </Text>
 
                               <View style={styles.popularRankMetaRow}>
-                                <View style={[styles.popularMetaPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                                <View style={[styles.popularMetaPill, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}>
                                   <Ionicons name="people-outline" size={12} color={colors.accent} />
                                   <Text style={[styles.popularMetaText, { color: colors.textSecondary }]}>
                                     {stat?.follows != null ? `${stat.follows.toLocaleString()} follows` : 'Follows loading'}
                                   </Text>
                                 </View>
                                 {ratingVal != null && (
-                                  <View style={[styles.popularMetaPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                                  <View style={[styles.popularMetaPill, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}>
                                     <Ionicons name="star" size={12} color="#F59E0B" />
                                     <Text style={[styles.popularMetaText, { color: colors.textSecondary }]}>
                                       {ratingVal.toFixed(1)}
                                     </Text>
                                   </View>
                                 )}
-                                <View style={[styles.popularMetaPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                                <View style={[styles.popularMetaPill, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}>
                                   <Ionicons name="calendar-outline" size={12} color={colors.textMuted} />
                                   <Text style={[styles.popularMetaText, { color: colors.textSecondary }]}>
                                     Added {formatChapterDate(manga.attributes.createdAt)}
@@ -1672,7 +1672,7 @@ export default function DiscoverScreen() {
                       <Animated.View
                         style={[
                           styles.heroBannerFrame,
-                          { borderColor: colors.border },
+                          { borderWidth: 0 },
                           Platform.OS === 'web' && styles.webHeroBannerFrame,
                           Platform.OS === 'web' && {
                             transform: [{ translateX: heroSlideAnim }],
@@ -1763,7 +1763,7 @@ export default function DiscoverScreen() {
                                       key={t.id}
                                       style={[
                                         styles.heroTagPill,
-                                        isSuggestive && { backgroundColor: '#EA580C', borderColor: '#F97316' },
+                                        isSuggestive && { backgroundColor: '#EA580C', borderWidth: 0 },
                                       ]}
                                     >
                                       <Text style={styles.heroTagText}>{tagLabel}</Text>
@@ -2111,7 +2111,7 @@ const styles = StyleSheet.create({
     paddingRight: Spacing.sm,
     paddingVertical: 3,
     borderRadius: Radius.full,
-    borderWidth: 1,
+    borderWidth: 0,
     gap: 4,
   },
   activeFilterPillBody: {
@@ -2142,7 +2142,7 @@ const styles = StyleSheet.create({
   },
   heroBannerFrame: {
     borderRadius: Radius.md,
-    borderWidth: 1,
+    borderWidth: 0,
     overflow: Platform.OS === 'web' ? 'visible' : 'hidden',
     position: 'relative',
     minHeight: 250,
@@ -2175,8 +2175,7 @@ const styles = StyleSheet.create({
     width: 135,
     height: 200,
     borderRadius: Radius.sm,
-    borderWidth: 1,
-    borderColor: '#FFFFFF',
+    borderWidth: 0,
     overflow: 'hidden',
   },
   heroCoverImage: {
@@ -2201,8 +2200,7 @@ const styles = StyleSheet.create({
   },
   heroTagPill: {
     backgroundColor: 'rgba(255, 255, 255, 0.12)',
-    borderColor: 'rgba(255, 255, 255, 0.25)',
-    borderWidth: 1,
+    borderWidth: 0,
     paddingHorizontal: Platform.OS === 'web' ? 10 : 6,
     paddingVertical: Platform.OS === 'web' ? 4 : 2,
     borderRadius: Radius.xs,
@@ -2433,8 +2431,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(28, 28, 32, 0.85)',
-    borderColor: 'rgba(255, 255, 255, 0.14)',
-    borderWidth: 1,
+    borderColor: 'transparent',
+    borderWidth: 0,
     borderRadius: 20,
     height: 36,
     paddingHorizontal: 12,
@@ -2658,7 +2656,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.sm,
     paddingVertical: 4,
     borderRadius: Radius.full,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   popularEyebrowText: {
     fontSize: 10,
@@ -2682,7 +2680,7 @@ const styles = StyleSheet.create({
   popularRankCard: {
     minHeight: 132,
     borderRadius: Radius.lg,
-    borderWidth: 1,
+    borderWidth: 0,
     padding: Spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
@@ -2734,7 +2732,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     borderRadius: Radius.full,
-    borderWidth: 1,
+    borderWidth: 0,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },

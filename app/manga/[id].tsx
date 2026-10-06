@@ -492,7 +492,7 @@ export default function MangaDetailScreen() {
                 onHoverOut={() => setIsCoverHovered(false)}
                 style={({ pressed }) => [
                   styles.coverContainer,
-                  { borderColor: colors.border },
+                  { borderWidth: 0 },
                   Platform.OS === 'web' && coverUrl && ({ cursor: 'pointer' } as any),
                   pressed && coverUrl && { opacity: 0.85, transform: [{ scale: 0.98 }] },
                 ]}
@@ -520,7 +520,7 @@ export default function MangaDetailScreen() {
                 </Text>
                 <View style={styles.statusRow}>
                   {stats?.rating?.bayesian || stats?.rating?.average ? (
-                    <View style={[styles.statusPill, { backgroundColor: 'transparent', borderColor: 'transparent', flexDirection: 'row', alignItems: 'center', gap: 3 }]}>
+                    <View style={[styles.statusPill, { backgroundColor: 'transparent', borderWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 3 }]}>
                       <Ionicons name="star" size={10} color="#F59E0B" />
                       <Text style={[styles.statusPillText, { color: colors.text }]}>
                         {(stats.rating.bayesian || stats.rating.average!).toFixed(2)}
@@ -528,13 +528,13 @@ export default function MangaDetailScreen() {
                     </View>
                   ) : null}
 
-                  <View style={[styles.statusPill, { backgroundColor: 'transparent', borderColor: 'transparent' }]}>
+                  <View style={[styles.statusPill, { backgroundColor: 'transparent', borderWidth: 0 }]}>
                     <Text style={[styles.statusPillText, { color: colors.accent }]}>
                       {manga.attributes.status?.toLowerCase()}
                     </Text>
                   </View>
                   {manga.attributes.publicationDemographic && (
-                    <View style={[styles.statusPill, { backgroundColor: 'transparent', borderColor: 'transparent' }]}>
+                    <View style={[styles.statusPill, { backgroundColor: 'transparent', borderWidth: 0 }]}>
                       <Text style={[styles.statusPillText, { color: colors.textSecondary }]}>
                         {manga.attributes.publicationDemographic.toLowerCase()}
                       </Text>
@@ -558,8 +558,7 @@ export default function MangaDetailScreen() {
               styles.actionButton,
               {
                 backgroundColor: isInLibrary ? colors.surfaceElevated : colors.surface,
-                borderColor: colors.border,
-                borderWidth: 1,
+                borderWidth: 0,
                 flex: 1,
               },
             ]}
@@ -593,8 +592,7 @@ export default function MangaDetailScreen() {
               styles.actionButton,
               {
                 backgroundColor: colors.surfaceElevated,
-                borderColor: colors.border,
-                borderWidth: 1,
+                borderWidth: 0,
                 flex: 1,
               },
             ]}
@@ -646,7 +644,7 @@ export default function MangaDetailScreen() {
           {tags.map((tag) => (
             <View
               key={tag.id}
-              style={[styles.tagChip, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              style={[styles.tagChip, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}
             >
               <Text style={[styles.tagText, { color: colors.textSecondary }]}>
                 {tag.attributes.name.en ?? Object.values(tag.attributes.name)[0]}
@@ -694,7 +692,7 @@ export default function MangaDetailScreen() {
                     styles.languagePickerBtn,
                     {
                       backgroundColor: colors.surfaceElevated,
-                      borderColor: isLanguageDropdownOpen ? 'rgba(255, 255, 255, 0.28)' : colors.border,
+                      borderWidth: 0,
                       opacity: pressed ? 0.7 : 1,
                     },
                   ]}
@@ -732,7 +730,7 @@ export default function MangaDetailScreen() {
                         styles.languageDropdownMenu,
                         {
                           backgroundColor: colors.surface,
-                          borderColor: colors.border,
+                          borderWidth: 0,
                         },
                       ]}
                     >
@@ -809,7 +807,7 @@ export default function MangaDetailScreen() {
               }}
               style={[
                 styles.sortButton,
-                { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+                { backgroundColor: colors.surfaceElevated, borderWidth: 0 },
               ]}
             >
               <Ionicons
@@ -884,7 +882,7 @@ export default function MangaDetailScreen() {
                 style={[
                   styles.chapterRow,
                   {
-                    borderBottomColor: colors.borderSubtle,
+                    borderBottomWidth: 0,
                     opacity: isRead ? 0.52 : 1,
                     backgroundColor: isCurrentReading
                       ? colors.accent + '14'
@@ -913,14 +911,14 @@ export default function MangaDetailScreen() {
 
                     {/* Status Badges: In-Progress Reading vs Completed Read */}
                     {isCurrentReading ? (
-                      <View style={[styles.readingBadge, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}>
+                      <View style={[styles.readingBadge, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}>
                         <Ionicons name="book" size={11} color={colors.text} />
                         <Text style={[styles.readingBadgeText, { color: colors.text }]}>
                           Reading · p. {(lastProgress?.pageIndex || 0) + 1}/{lastProgress?.totalPages || chapter.attributes.pages || 1}
                         </Text>
                       </View>
                     ) : isRead ? (
-                      <View style={[styles.readBadge, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}>
+                      <View style={[styles.readBadge, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}>
                         <Ionicons name="checkmark-done" size={11} color={colors.emerald} />
                         <Text style={[styles.readBadgeText, { color: colors.emerald }]}>Read</Text>
                       </View>
@@ -1035,7 +1033,7 @@ export default function MangaDetailScreen() {
                             : pressed
                             ? colors.surfaceElevated
                             : 'transparent',
-                          borderColor: isSelected ? 'rgba(255, 255, 255, 0.22)' : colors.borderSubtle,
+                          borderWidth: 0,
                         },
                       ]}
                     >
@@ -1091,7 +1089,7 @@ export default function MangaDetailScreen() {
               styles.modalContent,
               {
                 backgroundColor: colors.surface,
-                borderColor: colors.border,
+                borderWidth: 0,
               },
             ]}
           >
@@ -1107,7 +1105,7 @@ export default function MangaDetailScreen() {
             </View>
 
             {/* Quick Actions Row */}
-            <View style={[styles.modalQuickActions, { borderBottomColor: colors.border, backgroundColor: colors.surfaceElevated }]}>
+            <View style={[styles.modalQuickActions, { borderBottomWidth: 0, backgroundColor: colors.surfaceElevated }]}>
               <Pressable
                 onPress={handleSelectAllDownloads}
                 style={({ pressed }) => [
@@ -1149,7 +1147,7 @@ export default function MangaDetailScreen() {
                       styles.downloadRow,
                       {
                         backgroundColor: isSelected ? colors.surfaceElevated : colors.surface,
-                        borderColor: isSelected ? 'rgba(255, 255, 255, 0.22)' : colors.border,
+                        borderWidth: 0,
                         opacity: pressed ? 0.8 : 1,
                       },
                       Platform.OS === 'web' && { cursor: 'pointer' },
@@ -1185,7 +1183,7 @@ export default function MangaDetailScreen() {
             />
 
             {/* Bottom Download Trigger CTA */}
-            <View style={[styles.modalFooter, { borderTopColor: colors.border, backgroundColor: colors.surface }]}>
+            <View style={[styles.modalFooter, { borderTopWidth: 0, backgroundColor: colors.surface }]}>
               <Pressable
                 onPress={handleStartBatchDownload}
                 disabled={selectedDownloadIds.size === 0}
@@ -1284,7 +1282,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: Radius.sm,
-    borderWidth: 1,
+    borderWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1299,7 +1297,7 @@ const styles = StyleSheet.create({
     height: Platform.OS === 'web' ? 260 : 148,
     borderRadius: Platform.OS === 'web' ? Radius.lg : Radius.md,
     overflow: 'hidden',
-    borderWidth: 1,
+    borderWidth: 0,
     position: 'relative',
   },
   coverImage: {
@@ -1313,8 +1311,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.65)',
     padding: 4,
     borderRadius: Radius.xs,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.25)',
+    borderWidth: 0,
   },
   coverHoverOverlay: {
     position: 'absolute',
@@ -1331,8 +1328,7 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 8,
     backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.35)',
+    borderWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1366,7 +1362,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Platform.OS === 'web' ? 8 : 4,
     paddingVertical: Platform.OS === 'web' ? 4 : 2,
     borderRadius: Radius.xs,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   statusPillText: {
     fontSize: Platform.OS === 'web' ? 12 : 10,
@@ -1404,7 +1400,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Platform.OS === 'web' ? 12 : Spacing.sm,
     paddingVertical: Platform.OS === 'web' ? 6 : 4,
     borderRadius: Radius.xs,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   tagText: {
     fontSize: Platform.OS === 'web' ? 13 : Typography.sizes.caption,
@@ -1459,7 +1455,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: Radius.md,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   languagePickerFlagImage: {
     width: 18,
@@ -1485,7 +1481,7 @@ const styles = StyleSheet.create({
     right: 0,
     width: 220,
     borderRadius: Radius.lg,
-    borderWidth: 1,
+    borderWidth: 0,
     padding: 8,
     boxShadow: '0 8px 16px rgba(0, 0, 0, 0.45)',
     elevation: 20,
@@ -1533,7 +1529,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: 12,
     borderRadius: Radius.md,
-    borderWidth: 1,
+    borderWidth: 0,
     gap: 12,
   },
   mobileLanguageFlagImage: {
@@ -1551,7 +1547,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: Radius.md,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   sortText: {
     fontSize: Platform.OS === 'web' ? 12 : 10,
@@ -1563,7 +1559,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: Platform.OS === 'web' ? Spacing.md + 4 : Spacing.md,
     paddingHorizontal: Spacing.lg,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: 0,
   },
   chapterActiveDot: {
     width: 6,
@@ -1594,7 +1590,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: Radius.xs,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   readBadgeText: {
     fontSize: 10,
@@ -1608,7 +1604,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: Radius.xs,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   readingBadgeText: {
     fontSize: 10,
@@ -1633,8 +1629,8 @@ const styles = StyleSheet.create({
     borderRadius: Platform.OS === 'web' ? Radius.xl : undefined,
     borderTopLeftRadius: Radius.xl,
     borderTopRightRadius: Radius.xl,
-    borderWidth: Platform.OS === 'web' ? 1 : 0,
-    borderTopWidth: 1,
+    borderWidth: 0,
+    borderTopWidth: 0,
     overflow: 'hidden',
     boxShadow: '0 12px 28px rgba(0, 0, 0, 0.5)',
     elevation: 12,
@@ -1645,7 +1641,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.lg,
     paddingBottom: Spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: 0,
   },
   modalTitle: {
     fontSize: Typography.sizes.headline,
@@ -1664,7 +1660,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: 0,
   },
   quickActionBtn: {
     flexDirection: 'row',
@@ -1689,7 +1685,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.md,
     borderRadius: Radius.md,
-    borderWidth: 1,
+    borderWidth: 0,
     gap: Spacing.md,
   },
   downloadRowTitle: {
@@ -1714,7 +1710,7 @@ const styles = StyleSheet.create({
   modalFooter: {
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 0,
   },
   batchDownloadBtn: {
     flexDirection: 'row',

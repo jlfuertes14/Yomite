@@ -3,21 +3,21 @@
  * Branding: Yomite (with Anime Mascot Logo)
  * Contains both Main Navigation Links and Discover Quick Filters.
  */
+import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
+import { usePathname, useRouter } from 'expo-router';
 import React from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  Pressable,
   Modal,
-  ScrollView,
   Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Image } from 'expo-image';
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter, usePathname } from 'expo-router';
-import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
+import { Radius, Spacing, Typography } from '../../constants/Colors';
 import { useThemeColors } from '../hooks/useThemeColor';
 
 type VectorIcon = React.ComponentProps<typeof Ionicons>['name'];
@@ -289,7 +289,7 @@ export function SidebarDrawer({
           {/* Drawer Footer */}
           <View style={[styles.drawerFooter, { borderTopColor: colors.border }]}>
             <Text style={[styles.footerText, { color: colors.textMuted }]}>
-              Yomite v1.0.0 · MangaDex v5
+              Yomite v1.2.3 · Powered by MangaDex v5 & Kotatsu
             </Text>
           </View>
         </SafeAreaView>

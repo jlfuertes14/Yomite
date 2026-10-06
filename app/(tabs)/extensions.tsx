@@ -14,6 +14,10 @@ import {
   useWindowDimensions,
   BackHandler,
   AppState,
+  Animated,
+  Easing,
+  LayoutAnimation,
+  UIManager,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -419,6 +423,415 @@ export function resolveSourceWebsiteUrl(
   return `https://${sourceId}.com`;
 }
 
+// Enable LayoutAnimation on Android for the grid collapse
+if (Platform.OS === 'android' && (UIManager as any)?.setLayoutAnimationEnabledExperimental) {
+  (UIManager as any).setLayoutAnimationEnabledExperimental(true);
+}
+
+const EXPLOSION_PARTICLE_COUNT = 22;
+// Tile background shatter grid (6x6 shards covering the 62px squircle)
+const BG_SHARD_ROWS = 6;
+const BG_SHARD_COLS = 6;
+const BG_SHARD_SPAN = 62;
+
+interface ExplosionParticle {
+  dx: number;
+  dy: number;
+  size: number;
+  color: string;
+  delay: number;
+  // Static origin offset from tile center (so shards start where the bg actually was)
+  ox: number;
+  oy: number;
+  square: boolean;
+  x: Animated.Value;
+  y: Animated.Value;
+  opacity: Animated.Value;
+  scale: Animated.Value;
+}
+
+function makeExplosionParticles(
+  accentColor: string,
+  letterColor: string,
+  bgGray: string
+): ExplosionParticle[] {
+  const bgLight = '#E4E4E7';
+  // ~40% of shards are chunks of the gray tile background (incl. light-gray flash),
+  // the rest are icon/accent fragments — like the HyperOS tile shatter.
+  const palette = [letterColor, bgGray, accentColor, bgLight, '#FFFFFF', bgGray, letterColor, bgLight];
+  return Array.from({ length: EXPLOSION_PARTICLE_COUNT }, (_, i) => {
+    const angle = (i / EXPLOSION_PARTICLE_COUNT) * Math.PI * 2 + Math.random() * 0.5;
+    const distance = 42 + Math.random() * 52;
+    const isBgChunk = i % 4 === 1 || i % 4 === 5;
+    return {
+      dx: Math.cos(angle) * distance,
+      // Slight upward bias + gravity pull applied during animation
+      dy: Math.sin(angle) * distance - 8,
+      // Background chunks fly as slightly larger shards
+      size: isBgChunk ? 5 + Math.random() * 6 : 3.5 + Math.random() * 5,
+      color: palette[i % palette.length],
+      delay: Math.random() * 45,
+      ox: 0,
+      oy: 0,
+      square: isBgChunk,
+      x: new Animated.Value(0),
+      y: new Animated.Value(0),
+      opacity: new Animated.Value(1),
+      scale: new Animated.Value(1),
+    };
+  });
+}
+
+/**
+ * Breaks the gray squircle fill itself into shards: each shard starts at its
+ * real position on the tile (ox/oy from center) and bursts outward, so the
+ * background visibly disintegrates instead of fading as one block.
+ */
+function makeBgShatterShards(bgGray: string): ExplosionParticle[] {
+  const shards: ExplosionParticle[] = [];
+  const cellW = BG_SHARD_SPAN / BG_SHARD_COLS;
+  const cellH = BG_SHARD_SPAN / BG_SHARD_ROWS;
+  const tones = [bgGray, '#E4E4E7', bgGray, '#D4D4D8', bgGray, '#E4E4E7'];
+  for (let row = 0; row < BG_SHARD_ROWS; row++) {
+    for (let col = 0; col < BG_SHARD_COLS; col++) {
+      const ox = col * cellW + cellW / 2 - BG_SHARD_SPAN / 2;
+      const oy = row * cellH + cellH / 2 - BG_SHARD_SPAN / 2;
+      // Outward direction follows the shard's position + jitter
+      const dist = 26 + Math.random() * 46;
+      const len = Math.max(1, Math.hypot(ox, oy));
+      const jx = (Math.random() - 0.5) * 22;
+      const jy = (Math.random() - 0.5) * 22;
+      shards.push({
+        dx: (ox / len) * dist + jx,
+        dy: (oy / len) * dist + jy - 6,
+        size: Math.min(cellW, cellH) - 1.5,
+        color: tones[(row + col) % tones.length],
+        delay: Math.random() * 40,
+        ox,
+        oy,
+        square: true,
+        x: new Animated.Value(0),
+        y: new Animated.Value(0),
+        opacity: new Animated.Value(1),
+        scale: new Animated.Value(1),
+      });
+    }
+  }
+  return shards;
+}
+
+/**
+ * Grid cell with Xiaomi HyperOS (Poco X7 Pro) style delete animation:
+ * icon implodes while shattering into particles + shockwave ring,
+ * then the grid collapses with a spring via LayoutAnimation.
+ */
+function SourceGridCell({
+  source,
+  colors,
+  exploding,
+  onPress,
+  onLongPress,
+}: {
+  source: {
+    id: string;
+    name: string;
+    displayName: string;
+    domain: string;
+    icon?: string;
+    letter?: string;
+    letterColor?: string;
+  };
+  colors: any;
+  exploding: boolean;
+  onPress: () => void;
+  onLongPress: () => void;
+}) {
+  const iconScale = useRef(new Animated.Value(1)).current;
+  const iconOpacity = useRef(new Animated.Value(1)).current;
+  const labelOpacity = useRef(new Animated.Value(1)).current;
+  const ringScale = useRef(new Animated.Value(0.4)).current;
+  const ringOpacity = useRef(new Animated.Value(0)).current;
+  // Gray tile background fill animation (flash light-gray, then dissolve with the burst)
+  const bgScale = useRef(new Animated.Value(1)).current;
+  const bgOpacity = useRef(new Animated.Value(1)).current;
+  const bgFlashOpacity = useRef(new Animated.Value(0)).current;
+
+  const particles = useMemo(
+    () =>
+      makeExplosionParticles(
+        colors.accent,
+        source.letterColor || colors.accent,
+        colors.surfaceElevated
+      ),
+    // Generate once per cell mount so vectors stay stable during the burst
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
+  // Shards of the gray tile background itself, positioned across the tile surface
+  const bgShards = useMemo(
+    () => makeBgShatterShards(colors.surfaceElevated),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
+  const runBurst = useCallback((list: ExplosionParticle[], gravityDrop: number) => {
+    list.forEach((p) => {
+      Animated.parallel([
+        Animated.timing(p.x, {
+          toValue: p.dx,
+          duration: 520,
+          delay: p.delay,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.sequence([
+          Animated.timing(p.y, {
+            toValue: p.dy,
+            duration: 300,
+            delay: p.delay,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+          // Gravity drop after the outward burst
+          Animated.timing(p.y, {
+            toValue: p.dy + gravityDrop,
+            duration: 260,
+            easing: Easing.in(Easing.quad),
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.timing(p.opacity, {
+          toValue: 0,
+          duration: 480,
+          delay: p.delay + 60,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(p.scale, {
+          toValue: 0.2,
+          duration: 540,
+          delay: p.delay,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]).start();
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!exploding) return;
+    // Icon implosion: quick shrink + fade (HyperOS squash before shatter)
+    Animated.parallel([
+      Animated.timing(iconScale, {
+        toValue: 0.35,
+        duration: 200,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(iconOpacity, {
+        toValue: 0,
+        duration: 230,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(labelOpacity, {
+        toValue: 0,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      // Gray background fill: light-gray flash on impact, then the solid fill
+      // vanishes fast so the bg shards ARE the background disintegrating
+      Animated.sequence([
+        Animated.timing(bgFlashOpacity, {
+          toValue: 0.85,
+          duration: 90,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(bgFlashOpacity, {
+          toValue: 0,
+          duration: 320,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.timing(bgScale, {
+        toValue: 0.55,
+        duration: 320,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(bgOpacity, {
+        toValue: 0,
+        duration: 120,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // Background fill shatters into its grid shards + icon fragments burst
+    runBurst(bgShards, 30);
+    runBurst(particles, 34);
+
+    // Shockwave ring expanding outward
+    Animated.parallel([
+      Animated.timing(ringScale, {
+        toValue: 2.1,
+        duration: 480,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.sequence([
+        Animated.timing(ringOpacity, {
+          toValue: 0.55,
+          duration: 90,
+          useNativeDriver: true,
+        }),
+        Animated.timing(ringOpacity, {
+          toValue: 0,
+          duration: 390,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start();
+
+  }, [exploding, iconScale, iconOpacity, labelOpacity, ringScale, ringOpacity, bgScale, bgOpacity, bgFlashOpacity, particles, bgShards, runBurst]);
+
+  return (
+    <Pressable
+      onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={350}
+      disabled={exploding}
+      {...{
+        onContextMenu: (e: any) => {
+          e?.preventDefault?.();
+          if (!exploding) onLongPress();
+        },
+      }}
+      style={({ pressed, hovered }: any) => [
+        styles.sourceGridCell,
+        {
+          transform: [{ scale: exploding ? 1 : pressed ? 0.94 : hovered ? 1.02 : 1 }],
+          opacity: pressed && !exploding ? 0.85 : 1,
+        },
+        Platform.OS === 'web' && { cursor: 'pointer' as any },
+      ]}
+      aria-label={`Open ${source.name} series. Hold to manage.`}
+    >
+      {/* Flat Squircle App Icon Container (gray fill dissolves with the burst) */}
+      <Animated.View
+        style={[
+          styles.squircleContainer,
+          {
+            backgroundColor: colors.surfaceElevated,
+            transform: [{ scale: bgScale }],
+            opacity: bgOpacity,
+          },
+        ]}
+      >
+        <Animated.View
+          style={{
+            alignItems: 'center',
+            justifyContent: 'center',
+            transform: [{ scale: iconScale }],
+            opacity: iconOpacity,
+          }}
+        >
+          {source.icon ? (
+            <Image
+              source={{ uri: source.icon }}
+              style={styles.sourceGridFavicon}
+              contentFit="contain"
+              transition={150}
+            />
+          ) : (
+            <Text
+              style={[
+                styles.monogramLetter,
+                { color: source.letterColor || colors.accent },
+              ]}
+            >
+              {source.letter || source.name.charAt(0)}
+            </Text>
+          )}
+        </Animated.View>
+
+        {/* Light-gray impact flash washing over the tile background */}
+        {exploding && (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.explosionFlash,
+              { backgroundColor: '#E4E4E7', opacity: bgFlashOpacity },
+            ]}
+          />
+        )}
+      </Animated.View>
+
+      {/* Xiaomi-style shatter: gray bg shards + icon fragments + shockwave */}
+      {exploding && (
+        <View style={styles.explosionOverlay} pointerEvents="none">
+          <Animated.View
+            style={[
+              styles.explosionRing,
+              { borderColor: colors.accent, transform: [{ scale: ringScale }], opacity: ringOpacity },
+            ]}
+          />
+          {/* Background fill disintegrating: shards start at their real tile position */}
+          {bgShards.map((p, i) => (
+            <Animated.View
+              key={`bg-${i}`}
+              style={{
+                position: 'absolute',
+                left: '50%',
+                top: '50%',
+                width: p.size,
+                height: p.size,
+                marginLeft: p.ox - p.size / 2,
+                marginTop: p.oy - p.size / 2,
+                borderRadius: 2,
+                backgroundColor: p.color,
+                opacity: p.opacity,
+                transform: [{ translateX: p.x }, { translateY: p.y }, { scale: p.scale }],
+              }}
+            />
+          ))}
+          {/* Icon / accent fragments bursting from the center */}
+          {particles.map((p, i) => (
+            <Animated.View
+              key={`fg-${i}`}
+              style={{
+                position: 'absolute',
+                left: '50%',
+                top: '50%',
+                width: p.size,
+                height: p.size,
+                marginLeft: p.ox - p.size / 2,
+                marginTop: p.oy - p.size / 2,
+                borderRadius: p.square ? 2 : p.size / 2,
+                backgroundColor: p.color,
+                opacity: p.opacity,
+                transform: [{ translateX: p.x }, { translateY: p.y }, { scale: p.scale }],
+              }}
+            />
+          ))}
+        </View>
+      )}
+
+      {/* Truncated Name */}
+      <Animated.Text
+        numberOfLines={1}
+        style={[styles.sourceGridTitle, { color: colors.text, opacity: labelOpacity }]}
+      >
+        {source.displayName}
+      </Animated.Text>
+    </Pressable>
+  );
+}
+
 export default function ExtensionsScreen() {
   const router = useRouter();
   const colors = useThemeColors();
@@ -444,6 +857,16 @@ export default function ExtensionsScreen() {
     icon?: string;
     displayName?: string;
   } | null>(null);
+
+  // Xiaomi HyperOS style delete: which grid cell is currently shattering
+  const [explodingId, setExplodingId] = useState<string | null>(null);
+  const pendingRemovalTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pendingRemovalTimeout.current) clearTimeout(pendingRemovalTimeout.current);
+    };
+  }, []);
 
   // Sources Catalog Modal state (New Screenshot)
   const [sourcesCatalogVisible, setSourcesCatalogVisible] = useState(false);
@@ -541,18 +964,34 @@ export default function ExtensionsScreen() {
   );
 
   const handleRemoveSourceFromGrid = useCallback(async () => {
-    if (!selectedSourceForAction) return;
+    if (!selectedSourceForAction || explodingId) return;
     const sourceId = selectedSourceForAction.id;
-    triggerHaptic();
-    setInstalledIds((prev) => {
-      const updated = prev.filter((id) => id !== sourceId);
-      SourceManager.setSourceEnabled(sourceId, false);
-      AsyncStorage.setItem(STORAGE_KEY_INSTALLED_SOURCES, JSON.stringify(updated)).catch(() => {});
-      return updated;
-    });
+    // Close the action sheet first so the shatter plays on the grid behind it
     setSourceActionModalVisible(false);
+    // Heavy impact at the moment of shatter, like HyperOS app uninstall
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
+    setExplodingId(sourceId);
     setSelectedSourceForAction(null);
-  }, [selectedSourceForAction]);
+    if (pendingRemovalTimeout.current) clearTimeout(pendingRemovalTimeout.current);
+    // Let the particle burst (~550ms) finish, then collapse the layout with a spring
+    pendingRemovalTimeout.current = setTimeout(() => {
+      LayoutAnimation.configureNext(
+        LayoutAnimation.create(
+          380,
+          LayoutAnimation.Types.spring,
+          LayoutAnimation.Properties.scaleXY
+        )
+      );
+      setInstalledIds((prev) => {
+        const updated = prev.filter((id) => id !== sourceId);
+        SourceManager.setSourceEnabled(sourceId, false);
+        AsyncStorage.setItem(STORAGE_KEY_INSTALLED_SOURCES, JSON.stringify(updated)).catch(() => {});
+        return updated;
+      });
+      setExplodingId(null);
+      pendingRemovalTimeout.current = null;
+    }, 600);
+  }, [selectedSourceForAction, explodingId]);
 
   // All 1,223 catalog items
   const allCatalog = useMemo(() => SourceManager.getCatalog(), []);
@@ -1002,57 +1441,20 @@ export default function ExtensionsScreen() {
             <View style={styles.fourColumnGrid}>
               {displayGridSources.map((source) => {
                 return (
-                  <Pressable
+                  <SourceGridCell
                     key={source.id}
-                    onPress={() => handleOpenMangaModal(source)}
-                    onLongPress={() => handleSourceLongPress(source)}
-                    delayLongPress={350}
-                    {...{
-                      onContextMenu: (e: any) => {
-                        e?.preventDefault?.();
-                        handleSourceLongPress(source);
-                      },
+                    source={source}
+                    colors={colors}
+                    exploding={explodingId === source.id}
+                    onPress={() => {
+                      if (explodingId) return;
+                      handleOpenMangaModal(source);
                     }}
-                    style={({ pressed }) => [
-                      styles.sourceGridCell,
-                      { transform: [{ scale: pressed ? 0.95 : 1 }] },
-                    ]}
-                    aria-label={`Open ${source.name} series. Hold to manage.`}
-                  >
-                    {/* Squircle App Icon Container */}
-                    <View
-                      style={[
-                        styles.squircleContainer,
-                        {
-                          backgroundColor: colors.surface,
-                          borderColor: colors.border,
-                        },
-                      ]}
-                    >
-                      {source.icon ? (
-                        <Image
-                          source={{ uri: source.icon }}
-                          style={styles.sourceGridFavicon}
-                          contentFit="contain"
-                          transition={150}
-                        />
-                      ) : (
-                        <Text
-                          style={[
-                            styles.monogramLetter,
-                            { color: source.letterColor || colors.accent },
-                          ]}
-                        >
-                          {source.letter || source.name.charAt(0)}
-                        </Text>
-                      )}
-                    </View>
-
-                    {/* Truncated Name matching Image 1 */}
-                    <Text numberOfLines={1} style={[styles.sourceGridTitle, { color: colors.text }]}>
-                      {source.displayName}
-                    </Text>
-                  </Pressable>
+                    onLongPress={() => {
+                      if (explodingId) return;
+                      handleSourceLongPress(source);
+                    }}
+                  />
                 );
               })}
             </View>
@@ -1078,7 +1480,7 @@ export default function ExtensionsScreen() {
                 styles.actionModalCard,
                 {
                   backgroundColor: colors.surface,
-                  borderColor: colors.border,
+                  borderWidth: 0,
                 },
               ]}
             >
@@ -1087,11 +1489,11 @@ export default function ExtensionsScreen() {
                 <View style={styles.actionModalHeader}>
                   <View
                     style={[
-                      styles.actionModalIconBox,
-                      {
-                        backgroundColor: colors.surfaceElevated,
-                        borderColor: colors.border,
-                      },
+                    styles.actionModalIconBox,
+                    {
+                      backgroundColor: colors.surfaceElevated,
+                      borderWidth: 0,
+                    },
                     ]}
                   >
                     {selectedSourceForAction.icon ? (
@@ -1250,14 +1652,14 @@ export default function ExtensionsScreen() {
                 <Ionicons
                   name="search-outline"
                   size={22}
-                  color={isCatalogSearchOpen ? colors.accent : colors.text}
+                  color={colors.text}
                 />
               </Pressable>
             </View>
 
             {/* In-Catalog Search Bar (when expanded) */}
             {isCatalogSearchOpen && (
-              <View style={[styles.catalogSearchBar, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View style={[styles.catalogSearchBar, { backgroundColor: colors.surfaceElevated }]}>
                 <Ionicons name="search" size={18} color={colors.textMuted} />
                 <TextInput
                   style={[styles.catalogSearchInput, { color: colors.text }]}
@@ -1292,7 +1694,7 @@ export default function ExtensionsScreen() {
                   }}
                   style={[
                     styles.langDropdownChip,
-                    { backgroundColor: colors.surface, borderColor: colors.border },
+                    { backgroundColor: colors.surface, borderWidth: 0 },
                   ]}
                 >
                   <Ionicons name="language-outline" size={15} color={colors.text} />
@@ -1316,7 +1718,7 @@ export default function ExtensionsScreen() {
                         styles.typeFilterChip,
                         {
                           backgroundColor: isSelected ? colors.surfaceElevated : colors.surface,
-                          borderColor: isSelected ? 'rgba(255, 255, 255, 0.22)' : colors.border,
+                          borderWidth: 0,
                         },
                       ]}
                     >
@@ -1363,7 +1765,7 @@ export default function ExtensionsScreen() {
                 return (
                   <View style={[styles.sourceRowItem, { borderBottomColor: colors.border }]}>
                     {/* Left: Squircle Icon */}
-                    <View style={[styles.sourceListSquircle, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    <View style={[styles.sourceListSquircle, { backgroundColor: colors.surface, borderWidth: 0 }]}>
                       {item.icon ? (
                         <Image
                           source={{ uri: item.icon }}
@@ -1493,7 +1895,7 @@ export default function ExtensionsScreen() {
                           styles.langOptionRow,
                           {
                             backgroundColor: isSelected ? `${colors.accent}18` : 'transparent',
-                            borderColor: colors.border,
+                            borderWidth: 0,
                           },
                         ]}
                       >
@@ -1569,7 +1971,7 @@ export default function ExtensionsScreen() {
                   <Ionicons
                     name="search-outline"
                     size={22}
-                    color={isMangaSearchOpen ? colors.accent : colors.text}
+                    color={colors.text}
                   />
                 </Pressable>
 
@@ -1601,7 +2003,7 @@ export default function ExtensionsScreen() {
 
             {/* In-Modal Search Bar (when expanded) */}
             {isMangaSearchOpen && (
-              <View style={[styles.modalSearchBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View style={[styles.modalSearchBox, { backgroundColor: colors.surfaceElevated }]}>
                 <Ionicons name="search" size={18} color={colors.textMuted} />
                 <TextInput
                   style={[styles.modalSearchInput, { color: colors.text }]}
@@ -1642,12 +2044,11 @@ export default function ExtensionsScreen() {
                   setSortPickerVisible((prev) => !prev);
                 }}
                 style={[
-                  styles.sortFilterBtn,
-                  {
-                    backgroundColor: sortPickerVisible ? colors.surfaceElevated : colors.surface,
-                    borderColor: sortPickerVisible ? 'rgba(255, 255, 255, 0.22)' : colors.border,
-                    borderWidth: 1,
-                  },
+                    styles.sortFilterBtn,
+                    {
+                      backgroundColor: sortPickerVisible ? colors.surfaceElevated : colors.surface,
+                      borderWidth: 0,
+                    },
                 ]}
                 aria-label="Change Sort Order"
               >
@@ -1683,7 +2084,7 @@ export default function ExtensionsScreen() {
                         styles.genreChip,
                         {
                           backgroundColor: isSelected ? colors.surfaceElevated : colors.surface,
-                          borderColor: isSelected ? 'rgba(255, 255, 255, 0.22)' : colors.border,
+                          borderWidth: 0,
                         },
                       ]}
                     >
@@ -1745,7 +2146,7 @@ export default function ExtensionsScreen() {
                         style={[
                           styles.modalVisitBtn,
                           {
-                            borderColor: colors.border,
+                            borderWidth: 0,
                             backgroundColor: colors.surface,
                             width: '100%',
                             justifyContent: 'center',
@@ -1779,7 +2180,7 @@ export default function ExtensionsScreen() {
                         onPress={handleSolveCloudflare}
                         style={[
                           styles.modalVisitBtn,
-                          { borderColor: colors.border, backgroundColor: colors.surface, flex: 1, justifyContent: 'center' },
+                          { borderWidth: 0, backgroundColor: colors.surface, flex: 1, justifyContent: 'center' },
                         ]}
                         aria-label="Visit Source Website"
                       >
@@ -1902,7 +2303,7 @@ export default function ExtensionsScreen() {
                             ? Math.max(16, (windowWidth - 1200) / 2 + 16)
                             : 16,
                         backgroundColor: colors.surfaceElevated || colors.surface,
-                        borderColor: colors.border,
+                        borderWidth: 0,
                       },
                     ]}
                   >
@@ -1972,8 +2373,7 @@ export default function ExtensionsScreen() {
                     style={{
                       backgroundColor: colors.surfaceElevated || colors.surface,
                       color: colors.text,
-                      borderColor: colors.border,
-                      borderWidth: 1,
+                      borderWidth: 0,
                       borderRadius: Radius.md,
                       padding: 10,
                       fontSize: 12,
@@ -2055,42 +2455,61 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingBottom: 120,
   },
-  // 4-Column Grid matching Image 1
+  // Flat 4-Column Grid matching clean design
   fourColumnGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    rowGap: 20,
+    rowGap: 24,
     columnGap: 8,
-    marginTop: Spacing.xs,
+    marginTop: Spacing.sm,
   },
   sourceGridCell: {
     width: '22%',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
     cursor: 'pointer' as any,
   },
   squircleContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 18,
-    borderWidth: 1.5,
+    width: 62,
+    height: 62,
+    borderRadius: 16,
+    borderWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
   },
   sourceGridFavicon: {
-    width: 38,
-    height: 38,
+    width: 36,
+    height: 36,
     borderRadius: 8,
   },
+  explosionOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 62,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  explosionFlash: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: 16,
+  },
+  explosionRing: {
+    position: 'absolute',
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    borderWidth: 2,
+  },
   serifB: {
-    fontSize: 34,
+    fontSize: 30,
     fontWeight: '700',
     fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
   },
@@ -2142,7 +2561,7 @@ const styles = StyleSheet.create({
     marginTop: -4,
   },
   monogramLetter: {
-    fontSize: 32,
+    fontSize: 26,
     fontWeight: '700',
     letterSpacing: -0.5,
   },
@@ -2151,6 +2570,7 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.medium,
     textAlign: 'center',
     width: '100%',
+    letterSpacing: -0.2,
   },
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2181,7 +2601,7 @@ const styles = StyleSheet.create({
     marginVertical: Spacing.xs,
     height: 40,
     borderRadius: Radius.md,
-    borderWidth: 1,
+    borderWidth: 0,
     paddingHorizontal: Spacing.sm,
     gap: Spacing.xs,
   },
@@ -2205,7 +2625,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 8,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   langDropdownText: {
     fontSize: 13,
@@ -2215,7 +2635,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 7,
     borderRadius: 8,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   typeFilterText: {
     fontSize: 13,
@@ -2234,7 +2654,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 10,
-    borderWidth: 1,
+    borderWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -2342,7 +2762,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xs,
     height: 40,
     borderRadius: Radius.md,
-    borderWidth: 1,
+    borderWidth: 0,
     paddingHorizontal: Spacing.sm,
     gap: Spacing.xs,
   },
@@ -2387,7 +2807,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 7,
     borderRadius: 8,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   genreChipText: {
     fontSize: 13,
@@ -2408,8 +2828,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: 'hidden',
     position: 'relative',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0,0,0,0.08)',
+    borderWidth: 0,
   },
   mangaCoverImage: {
     width: '100%',
@@ -2505,7 +2924,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 10,
     borderRadius: Radius.full,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   modalVisitBtnText: {
     fontSize: 13,
@@ -2568,15 +2987,15 @@ const styles = StyleSheet.create({
   actionModalCard: {
     width: Platform.OS === 'web' ? '100%' : '78%',
     maxWidth: Platform.OS === 'web' ? 320 : 260,
-    borderRadius: Radius.xl,
-    borderWidth: 1,
+    borderRadius: Radius.lg,
+    borderWidth: 0,
     paddingVertical: Spacing.md,
     paddingHorizontal: Spacing.md,
-    elevation: 20,
+    elevation: 10,
     shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.45,
-    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
   },
   actionModalHeader: {
     flexDirection: 'row',
@@ -2585,10 +3004,10 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.xs,
   },
   actionModalIconBox: {
-    width: 42,
-    height: 42,
+    width: 40,
+    height: 40,
     borderRadius: 12,
-    borderWidth: 1,
+    borderWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -2644,7 +3063,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 190,
     borderRadius: Radius.lg,
-    borderWidth: 1,
+    borderWidth: 0,
     paddingVertical: 6,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 8 },

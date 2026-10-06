@@ -3,7 +3,8 @@
  * Features rich category tabs, live thread discussions, responsive web grid layout,
  * centered web dialog modals, and hidden scrollbars.
  */
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import * as ImagePicker from 'expo-image-picker';
 import {
   View,
   Text,
@@ -25,13 +26,15 @@ import {
   getAnimeNews,
   getAnimeNewsArticle,
   getThreadReplies,
+  fetchAuthorAvatarMap,
+  mergeNewsCoversIntoFeedCache,
   ForumThread,
   ForumComment,
   AnimeNewsItem,
   AnimeNewsArticle,
 } from '../../src/api/community';
 import { useCommunityStore } from '../../src/store/communityStore';
-import { useUserStore, getUserDisplayName } from '../../src/store/userStore';
+import { useUserStore, getUserDisplayName, getUserAvatarUrl } from '../../src/store/userStore';
 import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { formatChapterDate } from '../../src/utils/date';
@@ -43,6 +46,108 @@ import { AuthModal } from '../../src/components/AuthModal';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 import * as WebBrowser from 'expo-web-browser';
+
+const MAX_UPLOAD_IMAGES = 4;
+
+/**
+ * Opens the system photo library and returns the selected image URIs,
+ * appended after any already-attached ones (capped at MAX_UPLOAD_IMAGES).
+ */
+async function pickCommunityImages(existing: string[]): Promise<string[]> {
+  const remaining = MAX_UPLOAD_IMAGES - existing.length;
+  if (remaining <= 0) return existing;
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ['images'],
+    allowsMultipleSelection: true,
+    selectionLimit: remaining,
+    quality: 0.7,
+  });
+  if (result.canceled) return existing;
+  const uris = result.assets.map((a) => a.uri).filter(Boolean);
+  return [...existing, ...uris].slice(0, MAX_UPLOAD_IMAGES);
+}
+
+/**
+ * Renders reply/topic body text with @mentions highlighted in accent color.
+ */
+function MentionText({ body, textColor, accentColor }: { body: string; textColor: string; accentColor: string }) {
+  const parts = body.split(/(@[\w.]+)/g);
+  return (
+    <Text style={[styles.replyBody, { color: textColor }]}>
+      {parts.map((part, i) =>
+        /^@[\w.]+$/.test(part) ? (
+          <Text key={i} style={{ color: accentColor, fontWeight: '700' }}>
+            {part}
+          </Text>
+        ) : (
+          <Text key={i}>{part}</Text>
+        )
+      )}
+    </Text>
+  );
+}
+
+/**
+ * Real user photo with letter fallback. Shows the user's actual profile
+ * image when one is available, otherwise the initial-letter avatar.
+ */
+/**
+ * Guest/unsigned-in fallback identities never get a photo — letter avatar only,
+ * even if a stale avatar URL was persisted from an earlier session.
+ */
+function isAnonymousIdentity(name?: string | null): boolean {
+  if (!name) return true;
+  return /^(guest|anonymous reader|yomite reader|mangadex reader)$/i.test(name.trim());
+}
+
+/**
+ * Resolves which avatar URI (if any) a post is allowed to show:
+ * stored photo → current user's live photo (own older posts) — never for anonymous names.
+ */
+function resolvePostAvatar(
+  storedUrl: string | null | undefined,
+  authorName: string,
+  myName: string,
+  myAvatarUrl: string | null,
+  dbAvatarUrl?: string | null
+): string | null {
+  if (isAnonymousIdentity(authorName)) return null;
+  if (storedUrl) return storedUrl;
+  if (dbAvatarUrl) return dbAvatarUrl;
+  if (authorName === myName && myAvatarUrl) return myAvatarUrl;
+  return null;
+}
+
+function UserAvatar({
+  uri,
+  name,
+  size,
+  bgColor,
+  textColor,
+}: {
+  uri?: string | null;
+  name: string;
+  size: number;
+  bgColor: string;
+  textColor: string;
+}) {
+  if (uri) {
+    return (
+      <Image
+        source={{ uri }}
+        style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: bgColor }}
+        resizeMode="cover"
+      />
+    );
+  }
+  return (
+    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: bgColor, alignItems: 'center', justifyContent: 'center' }}>
+      <Text style={{ color: textColor, fontSize: size * 0.5, fontWeight: '700' }}>
+        {(name || '?').charAt(0).toUpperCase()}
+      </Text>
+    </View>
+  );
+}
 
 function getYomiteTrailerEmbedUrl(url: string) {
   try {
@@ -65,7 +170,9 @@ export default function CommunityScreen() {
     userThreads,
     threadReplies,
     createThread,
+    deleteThread,
     addReply,
+    deleteReply,
   } = useCommunityStore();
 
   const [animeNews, setAnimeNews] = useState<AnimeNewsItem[]>([]);
@@ -90,6 +197,36 @@ export default function CommunityScreen() {
   const [authModalVisible, setAuthModalVisible] = useState(false);
   const [topicTitle, setTopicTitle] = useState('');
   const [topicBody, setTopicBody] = useState('');
+  const [topicImages, setTopicImages] = useState<string[]>([]);
+
+  // Reply composer attachments + @mention target
+  const [replyImages, setReplyImages] = useState<string[]>([]);
+  const [replyTo, setReplyTo] = useState<string | null>(null);
+  const replyInputRef = useRef<TextInput>(null);
+
+  // Current user's real profile photo (Google/Supabase avatar) + display name,
+  // used to backfill avatars on threads/replies created before avatars were stored.
+  const myAvatarUrl = getUserAvatarUrl(user);
+  const myDisplayName = user ? getUserDisplayName(user) : '';
+
+  // Profile photos resolved from the public community tables — readable whether
+  // the viewer is signed in or not. Cached per username for the session.
+  const [dbAvatars, setDbAvatars] = useState<Record<string, string>>({});
+  const fetchedAvatarNames = useRef<Set<string>>(new Set());
+  const ensureDbAvatars = useMemo(
+    () => async (names: string[]) => {
+      const fresh = names.filter(
+        (n) => n && !isAnonymousIdentity(n) && !fetchedAvatarNames.current.has(n)
+      );
+      if (fresh.length === 0) return;
+      fresh.forEach((n) => fetchedAvatarNames.current.add(n));
+      const map = await fetchAuthorAvatarMap(fresh);
+      if (Object.keys(map).length > 0) {
+        setDbAvatars((prev) => ({ ...prev, ...map }));
+      }
+    },
+    []
+  );
 
   // Custom Confirmation Dialog State
   const [confirmModalConfig, setConfirmModalConfig] = useState<{
@@ -128,8 +265,42 @@ export default function CommunityScreen() {
     setRefreshing(false);
   };
 
+  const applyCoverUpdates = (
+    updates: Array<{
+      id: string;
+      url: string;
+      imageUrl?: string;
+      images?: string[];
+      trailerUrl?: string;
+      trailerUrls?: string[];
+    }>
+  ) => {
+    const withCover = updates.filter((u) => u.imageUrl || u.images?.[0]);
+    if (withCover.length === 0) return;
+    setAnimeNews((current) =>
+      current.map((item) => {
+        const update = withCover.find(
+          (candidate) => candidate.id === item.id || candidate.url === item.url
+        );
+        if (!update) return item;
+        const cover = update.imageUrl || update.images?.[0];
+        return {
+          ...item,
+          imageUrl: item.imageUrl || cover,
+          images: item.images || update.images,
+          trailerUrl: item.trailerUrl || update.trailerUrl,
+          trailerUrls: item.trailerUrls || update.trailerUrls,
+        };
+      })
+    );
+    // Persist so covers survive remounts / tab switches within the cache window
+    mergeNewsCoversIntoFeedCache(withCover);
+  };
+
   const hydrateNewsImages = (items: AnimeNewsItem[]) => {
-    const missingImages = items.filter((item) => !item.imageUrl).slice(0, 12);
+    const missingImages = items
+      .filter((item) => !item.imageUrl && !(item.images && item.images.length > 0))
+      .slice(0, 12);
     if (missingImages.length === 0) return;
 
     Promise.all(
@@ -137,6 +308,7 @@ export default function CommunityScreen() {
         const article = await getAnimeNewsArticle(item.url);
         return {
           id: item.id,
+          url: item.url,
           imageUrl: article?.imageUrl,
           images: article?.images,
           trailerUrl: article?.trailerUrl,
@@ -144,18 +316,7 @@ export default function CommunityScreen() {
         };
       })
     ).then((updates) => {
-      setAnimeNews((current) => current.map((item) => {
-        const update = updates.find((candidate) => candidate.id === item.id);
-        return update?.imageUrl
-          ? {
-              ...item,
-              imageUrl: update.imageUrl,
-              images: update.images,
-              trailerUrl: update.trailerUrl,
-              trailerUrls: update.trailerUrls,
-            }
-          : item;
-      }));
+      applyCoverUpdates(updates);
     });
   };
 
@@ -163,7 +324,21 @@ export default function CommunityScreen() {
     setSelectedNews({ ...item, content: [] });
     setIsNewsArticleLoading(true);
     const article = await getAnimeNewsArticle(item.url);
-    if (article) setSelectedNews(article);
+    if (article) {
+      setSelectedNews(article);
+      // Write the loaded cover back into the feed list + cache so going back
+      // shows the thumbnail instead of the placeholder.
+      applyCoverUpdates([
+        {
+          id: item.id,
+          url: item.url,
+          imageUrl: article.imageUrl,
+          images: article.images,
+          trailerUrl: article.trailerUrl,
+          trailerUrls: article.trailerUrls,
+        },
+      ]);
+    }
     setIsNewsArticleLoading(false);
   };
 
@@ -186,6 +361,10 @@ export default function CommunityScreen() {
     });
   }, [combinedThreads, searchQuery, topicSort]);
 
+  useEffect(() => {
+    ensureDbAvatars(combinedThreads.map((t) => t.author));
+  }, [combinedThreads, ensureDbAvatars]);
+
   const handleOpenThread = async (thread: ForumThread) => {
     setSelectedThread(thread);
     setIsRepliesLoading(true);
@@ -198,6 +377,7 @@ export default function CommunityScreen() {
       fetchedReplies = await getThreadReplies(thread.id);
     }
     setReplies(fetchedReplies);
+    ensureDbAvatars([thread.author, ...fetchedReplies.map((r) => r.username)]);
     setSelectedThread((prev) => (prev ? { ...prev, repliesCount: fetchedReplies.length } : null));
     setIsRepliesLoading(false);
   };
@@ -240,28 +420,81 @@ export default function CommunityScreen() {
       return;
     }
 
-    if (!newReplyText.trim() || !selectedThread) return;
+    if ((!newReplyText.trim() && replyImages.length === 0) || !selectedThread) return;
     const authorName = getUserDisplayName(user);
     const newReply = await addReply({
       threadId: selectedThread.id,
       body: newReplyText.trim(),
       author: authorName,
+      imageUrls: replyImages,
+      replyTo: replyTo ?? undefined,
+      avatarUrl: isAnonymousIdentity(authorName) ? undefined : myAvatarUrl ?? undefined,
     });
 
     setReplies((prev) => [...prev, newReply]);
     setNewReplyText('');
+    setReplyImages([]);
+    setReplyTo(null);
     setSelectedThread({
       ...selectedThread,
       repliesCount: selectedThread.repliesCount + 1,
     });
   };
 
+  const handleMentionUser = (username: string) => {
+    // No self-mentions — mentioning yourself is a no-op
+    if (username === myDisplayName) return;
+    setReplyTo(username);
+    setNewReplyText((prev) => {
+      const mention = `@${username} `;
+      if (prev.startsWith(mention) || prev.includes(mention)) return prev;
+      return `${mention}${prev}`;
+    });
+    replyInputRef.current?.focus();
+  };
+
+  const handleDeleteTopic = (threadId: string) => {
+    setConfirmModalConfig({
+      visible: true,
+      title: 'Delete Topic',
+      message: 'Are you sure you want to delete this discussion topic? This action cannot be undone.',
+      iconName: 'trash-outline',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      confirmVariant: 'destructive',
+      onConfirm: () => {
+        setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
+        deleteThread(threadId);
+        setSelectedThread(null);
+      },
+    });
+  };
+
+  const handleDeleteReply = (replyId: string) => {
+    if (!selectedThread) return;
+    setConfirmModalConfig({
+      visible: true,
+      title: 'Delete Reply',
+      message: 'Are you sure you want to delete this reply?',
+      iconName: 'trash-outline',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      confirmVariant: 'destructive',
+      onConfirm: () => {
+        setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
+        deleteReply(selectedThread.id, replyId);
+        setReplies((prev) => prev.filter((r) => r.id !== replyId));
+        setSelectedThread((prev) => (prev ? { ...prev, repliesCount: Math.max(0, prev.repliesCount - 1) } : null));
+      },
+    });
+  };
+
   const handleCreateTopic = async () => {
-    if (!topicTitle.trim() || !topicBody.trim()) {
+    if (!topicTitle.trim() || (!topicBody.trim() && topicImages.length === 0)) {
       setConfirmModalConfig({
         visible: true,
         title: 'Missing Details',
-        message: 'Please enter a title and description for your topic.',
+        message: 'Please enter a title and a description or photo for your topic.',
         iconName: 'document-text-outline',
         confirmText: 'OK',
         cancelText: '',
@@ -276,11 +509,14 @@ export default function CommunityScreen() {
       category: 'Discussion',
       body: topicBody.trim(),
       author: authorName,
+      imageUrls: topicImages,
+      authorAvatarUrl: isAnonymousIdentity(authorName) ? undefined : myAvatarUrl ?? undefined,
     });
 
     setShowCreateModal(false);
     setTopicTitle('');
     setTopicBody('');
+    setTopicImages([]);
     handleOpenThread(created);
   };
 
@@ -311,7 +547,7 @@ export default function CommunityScreen() {
 
         {/* Search stays above the feed switcher so it never competes with Topics, Popular, Latest, or News. */}
         {feedMode !== 'news' && <View style={styles.toolbarWrapper}>
-          <View style={[styles.searchBar, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+          <View style={[styles.searchBar, { backgroundColor: colors.surfaceElevated }]}>
             <Ionicons name="search" size={16} color={colors.textMuted} />
             <TextInput
               style={[styles.searchInput, { color: colors.text }]}
@@ -367,7 +603,7 @@ export default function CommunityScreen() {
             <View style={styles.newsViewDropdownWrap}>
               <Pressable
                 onPress={() => setNewsViewMenuVisible((visible) => !visible)}
-                style={[styles.newsViewDropdown, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+                style={[styles.newsViewDropdown, { backgroundColor: colors.surfaceElevated }]}
                 accessibilityLabel="Change news view"
               >
                 <Ionicons
@@ -381,7 +617,7 @@ export default function CommunityScreen() {
                 <Ionicons name="chevron-down" size={14} color={colors.textMuted} />
               </Pressable>
               {newsViewMenuVisible && (
-                <View style={[styles.newsViewMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <View style={[styles.newsViewMenu, { backgroundColor: colors.surfaceElevated }]}>
                   {(['column', 'list'] as const).map((layout) => (
                     <Pressable
                       key={layout}
@@ -432,13 +668,13 @@ export default function CommunityScreen() {
                 style={[
                   styles.newsCard,
                   newsLayout === 'list' && styles.newsCardList,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
+                  { borderBottomColor: colors.border },
                 ]}
               >
                 <View style={newsLayout === 'list' ? styles.newsListRow : styles.newsColumnContent}>
-                  {item.imageUrl ? (
+                  {item.imageUrl || item.images?.[0] ? (
                     <Image
-                      source={{ uri: item.imageUrl }}
+                      source={{ uri: (item.imageUrl || (item.images as string[])[0]) as string }}
                       style={[styles.newsImage, newsLayout === 'list' && styles.newsImageList]}
                       resizeMode="cover"
                     />
@@ -496,24 +732,15 @@ export default function CommunityScreen() {
                 <AnimatedCard
                   index={index}
                   onPress={() => handleOpenThread(item)}
-                  style={[styles.threadCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                  style={[styles.threadCard, { borderBottomColor: colors.border }]}
                 >
                   <View style={styles.cardTopRow}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                      <View style={[styles.modeBadge, { backgroundColor: colors.surfaceElevated }]}>
-                        <Text
-                          style={[
-                            styles.modeBadgeText,
-                            { color: colors.accent },
-                          ]}
-                        >
-                          Live Discussion
-                        </Text>
-                      </View>
+                    <View style={styles.timeBadgeRow}>
+                      <Ionicons name="time-outline" size={12} color={colors.textMuted} />
+                      <Text style={[styles.timeText, { color: colors.textMuted }]}>
+                        {formatChapterDate(item.createdAt)}
+                      </Text>
                     </View>
-                    <Text style={[styles.timeText, { color: colors.textMuted }]}>
-                      {formatChapterDate(item.createdAt)}
-                    </Text>
                   </View>
 
                   <Text style={[styles.threadTitle, { color: colors.text }]} numberOfLines={2}>
@@ -524,13 +751,15 @@ export default function CommunityScreen() {
                     Share your theories, reactions, and recommendations with the community.
                   </Text>
 
-                  <View style={[styles.cardFooter, { borderTopColor: colors.border }]}>
+                  <View style={styles.cardFooter}>
                     <View style={styles.authorRow}>
-                      <View style={[styles.authorAvatar, { backgroundColor: colors.accentSubtle }]}>
-                        <Text style={[styles.authorAvatarText, { color: colors.accent }]}>
-                          {item.author.charAt(0).toUpperCase()}
-                        </Text>
-                      </View>
+                      <UserAvatar
+                        uri={resolvePostAvatar(item.authorAvatarUrl, item.author, myDisplayName, myAvatarUrl, dbAvatars[item.author])}
+                        name={item.author}
+                        size={20}
+                        bgColor={colors.accentSubtle}
+                        textColor={colors.accent}
+                      />
                       <Text style={[styles.authorText, { color: colors.textSecondary }]} numberOfLines={1}>
                         {item.author}
                       </Text>
@@ -673,14 +902,15 @@ export default function CommunityScreen() {
         <Modal
           visible={!!selectedThread}
           transparent={true}
-          animationType={isWeb ? 'fade' : 'slide'}
+          animationType="fade"
           onRequestClose={() => setSelectedThread(null)}
+          statusBarTranslucent
         >
           <View style={styles.modalOverlay}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={() => setSelectedThread(null)} />
-            <View style={[styles.modalCard, { backgroundColor: colors.surface, borderColor: 'transparent' }]}>
+            <Pressable style={styles.backdrop} onPress={() => setSelectedThread(null)} />
+            <View style={[styles.modalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               {/* Modal Header */}
-              <View style={[styles.modalHeader, { borderBottomColor: 'transparent' }]}>
+              <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
                 <View style={{ flex: 1, gap: 4 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <View
@@ -704,11 +934,40 @@ export default function CommunityScreen() {
                   <Text style={[styles.modalThreadTitle, { color: colors.text }]} numberOfLines={2}>
                     {selectedThread?.title}
                   </Text>
-                  <Text style={[styles.modalSub, { color: colors.textMuted }]}>
-                    Started by {selectedThread?.author} · {selectedThread ? formatChapterDate(selectedThread.createdAt) : ''}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <Text style={[styles.modalSub, { color: colors.textSecondary }]}>
+                      Started by <Text style={{ color: colors.text, fontWeight: '600' }}>{selectedThread?.author}</Text>
+                    </Text>
+                    <Text style={{ color: colors.textMuted }}>•</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                      <Ionicons name="time-outline" size={11} color={colors.textMuted} />
+                      <Text style={[styles.modalSub, { color: colors.textMuted }]}>
+                        {selectedThread ? formatChapterDate(selectedThread.createdAt) : ''}
+                      </Text>
+                    </View>
+                  </View>
                 </View>
 
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  {user && (selectedThread?.author === getUserDisplayName(user) || selectedThread?.id?.startsWith('custom_')) && (
+                    <Pressable
+                      onPress={() => selectedThread && handleDeleteTopic(selectedThread.id)}
+                      hitSlop={8}
+                      style={styles.closeBtn}
+                      accessibilityLabel="Delete topic"
+                    >
+                      <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                    </Pressable>
+                  )}
+                  <Pressable
+                    onPress={() => setSelectedThread(null)}
+                    hitSlop={8}
+                    style={styles.closeBtn}
+                    accessibilityLabel="Close discussion"
+                  >
+                    <Ionicons name="close" size={22} color={colors.textSecondary} />
+                  </Pressable>
+                </View>
               </View>
 
               {/* Replies List */}
@@ -729,22 +988,72 @@ export default function CommunityScreen() {
                     <View style={[styles.replyCard, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
                       <View style={styles.replyHeaderRow}>
                         <View style={styles.replyUserCol}>
-                          <View style={[styles.avatarCircle, { backgroundColor: colors.accent }]}>
-                            <Text style={styles.avatarText}>{item.username.charAt(0).toUpperCase()}</Text>
-                          </View>
-                          <View>
+                          <UserAvatar
+                            uri={resolvePostAvatar(item.avatarUrl, item.username, myDisplayName, myAvatarUrl, dbAvatars[item.username])}
+                            name={item.username}
+                            size={28}
+                            bgColor={colors.accentSubtle}
+                            textColor={colors.accent}
+                          />
+                          <View style={{ gap: 1 }}>
                             <Text style={[styles.replyUsername, { color: colors.text }]}>{item.username}</Text>
-                            <Text style={[styles.replyTime, { color: colors.textMuted }]}>{formatChapterDate(item.postedAt)}</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                              <Ionicons name="time-outline" size={11} color={colors.textMuted} />
+                              <Text style={[styles.replyTime, { color: colors.textMuted }]}>
+                                {formatChapterDate(item.postedAt)}
+                              </Text>
+                            </View>
                           </View>
                         </View>
 
-                        <View style={styles.likesRow}>
-                          <Ionicons name="heart-outline" size={14} color={colors.accent} />
-                          <Text style={[styles.likesText, { color: colors.textMuted }]}>{item.likes}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                          {item.username !== myDisplayName ? (
+                            <Pressable
+                              onPress={() => handleMentionUser(item.username)}
+                              hitSlop={6}
+                              accessibilityLabel={`Mention ${item.username}`}
+                            >
+                              <Ionicons name="at" size={15} color={colors.accent} />
+                            </Pressable>
+                          ) : null}
+                          {user && (item.username === getUserDisplayName(user) || item.id.startsWith('reply_')) && (
+                            <Pressable
+                              onPress={() => handleDeleteReply(item.id)}
+                              hitSlop={6}
+                              accessibilityLabel="Delete reply"
+                            >
+                              <Ionicons name="trash-outline" size={14} color={colors.textMuted} />
+                            </Pressable>
+                          )}
+                          <View style={styles.likesRow}>
+                            <Ionicons name="heart-outline" size={14} color={colors.accent} />
+                            <Text style={[styles.likesText, { color: colors.textMuted }]}>{item.likes}</Text>
+                          </View>
                         </View>
                       </View>
 
-                      <Text style={[styles.replyBody, { color: colors.text }]}>{item.body}</Text>
+                      {item.replyTo ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <Ionicons name="return-up-forward" size={11} color={colors.accent} />
+                          <Text style={[styles.replyToText, { color: colors.accent }]} numberOfLines={1}>
+                            {item.replyTo === myDisplayName && myDisplayName
+                              ? 'Replying to yourself'
+                              : `Replying to @${item.replyTo}`}
+                          </Text>
+                        </View>
+                      ) : null}
+
+                      {item.body ? (
+                        <MentionText body={item.body} textColor={colors.text} accentColor={colors.accent} />
+                      ) : null}
+
+                      {item.imageUrls && item.imageUrls.length > 0 ? (
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.replyImagesRow}>
+                          {item.imageUrls.map((uri) => (
+                            <Image key={uri} source={{ uri }} style={styles.replyImageThumb} resizeMode="cover" />
+                          ))}
+                        </ScrollView>
+                      ) : null}
                     </View>
                   )}
                   ListEmptyComponent={
@@ -761,22 +1070,67 @@ export default function CommunityScreen() {
                 />
               )}
 
-              {/* Post Reply Input Footer */}
-              <View style={[styles.replyInputRow, { backgroundColor: colors.surfaceElevated, borderTopColor: colors.border }]}>
+              {/* Post Reply Composer — single container growing upward, no seams */}
+              <View style={[styles.composerBox, { backgroundColor: colors.surfaceElevated }]}>
+                {replyTo ? (
+                  <View style={styles.replyingToBar}>
+                    <Ionicons name="at" size={13} color={colors.accent} />
+                    <Text style={[styles.replyingToText, { color: colors.textSecondary }]} numberOfLines={1}>
+                      {replyTo === myDisplayName && myDisplayName ? (
+                        <>Replying to <Text style={{ color: colors.accent, fontWeight: '700' }}>yourself</Text></>
+                      ) : (
+                        <>Replying to <Text style={{ color: colors.accent, fontWeight: '700' }}>@{replyTo}</Text></>
+                      )}
+                    </Text>
+                    <Pressable onPress={() => setReplyTo(null)} hitSlop={8} accessibilityLabel="Clear mention">
+                      <Ionicons name="close-circle" size={15} color={colors.textMuted} />
+                    </Pressable>
+                  </View>
+                ) : null}
+                {replyImages.length > 0 ? (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.composerPreviewRow}>
+                    {replyImages.map((uri) => (
+                      <View key={uri} style={styles.composerPreviewWrap}>
+                        <Image source={{ uri }} style={styles.composerPreviewThumb} resizeMode="cover" />
+                        <Pressable
+                          onPress={() => setReplyImages((prev) => prev.filter((u) => u !== uri))}
+                          hitSlop={6}
+                          style={styles.composerPreviewRemove}
+                          accessibilityLabel="Remove photo"
+                        >
+                          <Ionicons name="close-circle" size={18} color="#FFFFFF" />
+                        </Pressable>
+                      </View>
+                    ))}
+                  </ScrollView>
+                ) : null}
+                <View style={[styles.replyInputRow, { backgroundColor: 'transparent', borderTopWidth: 0 }]}>
+                  <Pressable
+                    onPress={async () => setReplyImages(await pickCommunityImages(replyImages))}
+                    hitSlop={6}
+                    accessibilityLabel="Attach photos to reply"
+                  >
+                    <Ionicons name="image-outline" size={20} color={replyImages.length > 0 ? colors.accent : colors.textMuted} />
+                  </Pressable>
                   <TextInput
+                    ref={replyInputRef}
                     style={[styles.replyInput, { color: colors.text }]}
                     placeholder="Join the discussion..."
                     placeholderTextColor={colors.textMuted}
                     value={newReplyText}
                     onChangeText={setNewReplyText}
+                    multiline
                   />
                   <Pressable
                     onPress={handleSendReply}
-                    disabled={!newReplyText.trim()}
-                    style={[styles.sendBtn, { backgroundColor: colors.accent, opacity: newReplyText.trim() ? 1 : 0.4 }]}
+                    disabled={!newReplyText.trim() && replyImages.length === 0}
+                    style={[styles.sendBtn, { backgroundColor: colors.accent, opacity: newReplyText.trim() || replyImages.length > 0 ? 1 : 0.4 }]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Send reply"
                   >
                     <Ionicons name="send" size={16} color="#FFFFFF" />
                   </Pressable>
+                </View>
               </View>
             </View>
           </View>
@@ -786,12 +1140,13 @@ export default function CommunityScreen() {
         <Modal
           visible={showCreateModal}
           transparent={true}
-          animationType={isWeb ? 'fade' : 'slide'}
+          animationType="fade"
           onRequestClose={() => setShowCreateModal(false)}
+          statusBarTranslucent
         >
           <View style={styles.modalOverlay}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowCreateModal(false)} />
-            <View style={[styles.createModalCard, { backgroundColor: colors.surface, borderColor: 'transparent' }]}>
+            <Pressable style={styles.backdrop} onPress={() => setShowCreateModal(false)} />
+            <View style={[styles.createModalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.modalThreadTitle, { color: colors.text }]}>Start a New Topic</Text>
@@ -799,6 +1154,14 @@ export default function CommunityScreen() {
                     Post a question, theory, or review for the community
                   </Text>
                 </View>
+                <Pressable
+                  onPress={() => setShowCreateModal(false)}
+                  hitSlop={8}
+                  style={styles.closeBtn}
+                  accessibilityLabel="Close modal"
+                >
+                  <Ionicons name="close" size={22} color={colors.textSecondary} />
+                </Pressable>
               </View>
 
               <ScrollView style={{ flexGrow: 1 }} contentContainerStyle={styles.createFormGroup} showsVerticalScrollIndicator={false}>
@@ -827,11 +1190,46 @@ export default function CommunityScreen() {
                 />
 
                 <Pressable
+                  onPress={async () => setTopicImages(await pickCommunityImages(topicImages))}
+                  style={({ pressed }) => [
+                    styles.attachPhotosBtn,
+                    { backgroundColor: colors.surfaceElevated, opacity: pressed ? 0.7 : 1 },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Attach photos to topic"
+                >
+                  <Ionicons name="image-outline" size={18} color={topicImages.length > 0 ? colors.accent : colors.textSecondary} />
+                  <Text style={[styles.attachPhotosText, { color: colors.textSecondary }]}>
+                    {topicImages.length > 0 ? `${topicImages.length}/${MAX_UPLOAD_IMAGES} photos attached` : 'Add photos'}
+                  </Text>
+                </Pressable>
+
+                {topicImages.length > 0 ? (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.composerPreviewRow}>
+                    {topicImages.map((uri) => (
+                      <View key={uri} style={styles.composerPreviewWrap}>
+                        <Image source={{ uri }} style={styles.composerPreviewThumb} resizeMode="cover" />
+                        <Pressable
+                          onPress={() => setTopicImages((prev) => prev.filter((u) => u !== uri))}
+                          hitSlop={6}
+                          style={styles.composerPreviewRemove}
+                          accessibilityLabel="Remove photo"
+                        >
+                          <Ionicons name="close-circle" size={18} color="#FFFFFF" />
+                        </Pressable>
+                      </View>
+                    ))}
+                  </ScrollView>
+                ) : null}
+
+                <Pressable
                   onPress={handleCreateTopic}
                   style={({ pressed }) => [
                     styles.publishBtn,
                     { backgroundColor: colors.accent, opacity: pressed ? 0.8 : 1 },
                   ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Publish topic"
                 >
                   <Ionicons name="create" size={18} color="#FFFFFF" />
                   <Text style={styles.publishBtnText}>Publish Topic</Text>
@@ -933,7 +1331,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     height: 40,
     borderRadius: Radius.md,
-    borderWidth: 1,
+    borderWidth: 0,
     paddingHorizontal: Spacing.md,
     gap: Spacing.xs,
   },
@@ -979,19 +1377,21 @@ const styles = StyleSheet.create({
   threadCard: {
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
-    borderWidth: 1,
-    borderRadius: Radius.md,
-    marginHorizontal: Spacing.lg,
-    marginBottom: Spacing.sm,
+    borderWidth: 0,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRadius: 0,
+    marginHorizontal: 0,
+    marginBottom: 0,
     gap: Spacing.xs,
   },
   newsCard: {
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
-    borderWidth: 1,
-    borderRadius: Radius.md,
-    marginHorizontal: Spacing.lg,
-    marginBottom: Spacing.sm,
+    borderWidth: 0,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRadius: 0,
+    marginHorizontal: 0,
+    marginBottom: 0,
     gap: Spacing.xs,
   },
   newsCardList: {
@@ -1007,13 +1407,13 @@ const styles = StyleSheet.create({
   newsImage: {
     width: '100%',
     height: 150,
-    borderRadius: Radius.sm,
+    borderRadius: Radius.md,
     marginBottom: Spacing.xs,
   },
   newsImagePlaceholder: {
     width: '100%',
     height: 150,
-    borderRadius: Radius.sm,
+    borderRadius: Radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.xs,
@@ -1139,7 +1539,7 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
     paddingHorizontal: Spacing.sm,
     paddingVertical: 7,
-    borderWidth: 1,
+    borderWidth: 0,
     borderRadius: Radius.md,
   },
   newsViewMenu: {
@@ -1147,7 +1547,7 @@ const styles = StyleSheet.create({
     top: 42,
     right: 0,
     minWidth: 140,
-    borderWidth: 1,
+    borderWidth: 0,
     borderRadius: Radius.md,
     padding: 4,
     shadowColor: '#000000',
@@ -1292,36 +1692,46 @@ const styles = StyleSheet.create({
   },
 
   /* Modals */
+  timeBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFill,
+  },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    justifyContent: Platform.OS === 'web' ? 'center' : 'flex-end',
-    alignItems: Platform.OS === 'web' ? 'center' : undefined,
-    padding: Platform.OS === 'web' ? Spacing.md : 0,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing.md,
   },
   modalCard: {
     width: '100%',
-    maxWidth: Platform.OS === 'web' ? 820 : undefined,
-    height: Platform.OS === 'web' ? ('85vh' as any) : '82%',
-    borderRadius: Platform.OS === 'web' ? Radius.lg : 0,
-    borderTopLeftRadius: Radius.xl,
-    borderTopRightRadius: Radius.xl,
-    borderWidth: 1,
+    maxWidth: Platform.OS === 'web' ? 820 : 600,
+    height: Platform.OS === 'web' ? ('85vh' as any) : '85%',
+    borderRadius: Radius.lg,
+    borderWidth: 0,
     overflow: 'hidden',
-    boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
-    elevation: 10,
+    elevation: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.35,
+    shadowRadius: 20,
   },
   createModalCard: {
     width: '100%',
-    maxWidth: Platform.OS === 'web' ? 640 : undefined,
-    maxHeight: Platform.OS === 'web' ? ('85vh' as any) : '88%',
-    borderRadius: Platform.OS === 'web' ? Radius.lg : 0,
-    borderTopLeftRadius: Radius.xl,
-    borderTopRightRadius: Radius.xl,
-    borderWidth: 1,
+    maxWidth: 540,
+    maxHeight: Platform.OS === 'web' ? ('85vh' as any) : '85%',
+    borderRadius: Radius.lg,
+    borderWidth: 0,
     overflow: 'hidden',
-    boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
-    elevation: 10,
+    elevation: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.35,
+    shadowRadius: 20,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1329,7 +1739,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   modalThreadTitle: {
     fontSize: Typography.sizes.headline,
@@ -1350,7 +1760,7 @@ const styles = StyleSheet.create({
   replyCard: {
     padding: Spacing.md,
     borderRadius: Radius.md,
-    borderWidth: 1,
+    borderWidth: 0,
     gap: Spacing.xs,
   },
   replyHeaderRow: {
@@ -1395,6 +1805,73 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginTop: 2,
   },
+  replyToText: {
+    fontSize: 11,
+    fontWeight: Typography.weights.semibold,
+  },
+  replyImagesRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 6,
+    paddingRight: Spacing.md,
+  },
+  replyImageThumb: {
+    width: 112,
+    height: 84,
+    borderRadius: Radius.sm,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  composerBox: {
+    gap: 4,
+    paddingTop: 6,
+    paddingBottom: 6,
+  },
+  replyingToBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 2,
+  },
+  replyingToText: {
+    flex: 1,
+    fontSize: Typography.sizes.caption,
+  },
+  composerPreviewRow: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: Spacing.md,
+    paddingTop: 6,
+    paddingBottom: 2,
+  },
+  composerPreviewWrap: {
+    position: 'relative',
+  },
+  composerPreviewThumb: {
+    width: 54,
+    height: 54,
+    borderRadius: Radius.sm,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  composerPreviewRemove: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 10,
+  },
+  attachPhotosBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 11,
+    borderRadius: Radius.md,
+  },
+  attachPhotosText: {
+    fontSize: Typography.sizes.footnote,
+    fontWeight: Typography.weights.semibold,
+  },
   emptyRepliesContainer: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -1406,13 +1883,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
-    borderTopWidth: 1,
+    borderTopWidth: StyleSheet.hairlineWidth,
     gap: Spacing.xs,
   },
   replyInput: {
     flex: 1,
     fontSize: Typography.sizes.footnote,
     paddingVertical: Spacing.xs,
+    maxHeight: 110,
   },
   sendBtn: {
     width: 36,
@@ -1426,7 +1904,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm + 2,
-    borderTopWidth: 1,
+    borderTopWidth: StyleSheet.hairlineWidth,
     gap: Spacing.xs,
   },
   readOnlyText: {
@@ -1446,7 +1924,7 @@ const styles = StyleSheet.create({
   },
   modalInput: {
     borderRadius: Radius.md,
-    borderWidth: 1,
+    borderWidth: 0,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     fontSize: Typography.sizes.footnote,

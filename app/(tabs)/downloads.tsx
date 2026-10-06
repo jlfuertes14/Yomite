@@ -385,16 +385,13 @@ export default function DownloadsScreen() {
 
   const renderMangaGroup = ({ item: group, index }: { item: MangaDownloadGroup; index: number }) => {
     const isExpanded = expandedMangaIds.has(group.mangaId) || group.downloadingCount > 0;
-    const sizeMB = (group.totalSizeBytes / (1024 * 1024)).toFixed(1);
 
     return (
-      <AnimatedCard
-        index={index}
+      <View
         style={[
           styles.groupCard,
           {
-            backgroundColor: colors.surface,
-            borderColor: colors.border,
+            borderBottomColor: colors.border,
           },
         ]}
       >
@@ -402,12 +399,14 @@ export default function DownloadsScreen() {
         <Pressable
           onPress={() => toggleMangaExpand(group.mangaId)}
           style={styles.groupHeader}
+          accessibilityRole="button"
+          accessibilityLabel={`Toggle chapters for ${group.mangaTitle}`}
         >
-          <View style={[styles.coverContainer, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+          <View style={[styles.coverContainer, { backgroundColor: colors.surfaceElevated }]}>
             {group.coverUrl ? (
               <Image source={{ uri: group.coverUrl }} style={styles.coverImage} contentFit="cover" transition={150} />
             ) : (
-              <Ionicons name="book-outline" size={22} color={colors.textMuted} />
+              <Ionicons name="book-outline" size={20} color={colors.textMuted} />
             )}
           </View>
 
@@ -418,10 +417,10 @@ export default function DownloadsScreen() {
 
             <View style={styles.groupMetaRow}>
               <Text style={[styles.groupMetaText, { color: colors.textSecondary }]}>
-                {group.chapters.length} {group.chapters.length === 1 ? 'Chapter' : 'Chapters'} · {sizeMB} MB
+                {group.chapters.length} {group.chapters.length === 1 ? 'Chapter' : 'Chapters'}
               </Text>
               {group.downloadingCount > 0 && (
-                <View style={[styles.downloadingBadge, { backgroundColor: colors.surfaceElevated }]}>
+                <View style={[styles.downloadingBadge, { backgroundColor: `${colors.accent}18` }]}>
                   <Text style={[styles.downloadingBadgeText, { color: colors.accent }]}>
                     Downloading ({group.downloadingCount})
                   </Text>
@@ -445,7 +444,7 @@ export default function DownloadsScreen() {
             <View style={[styles.chevronBtn, { backgroundColor: colors.surfaceElevated }]}>
               <Ionicons
                 name={isExpanded ? 'chevron-up' : 'chevron-down'}
-                size={16}
+                size={15}
                 color={colors.textSecondary}
               />
             </View>
@@ -454,7 +453,7 @@ export default function DownloadsScreen() {
 
         {/* Dropdown Chapter List Accordion */}
         {isExpanded && (
-          <View style={[styles.chapterDropdown, { borderTopColor: colors.border }]}>
+          <View style={styles.chapterDropdown}>
             {group.chapters.map((ch) => {
               const isCompleted = ch.status === 'completed';
               const isError = ch.status === 'error';
@@ -513,12 +512,6 @@ export default function DownloadsScreen() {
                       </View>
                     )}
 
-                    {isCompleted && (
-                      <Text style={[styles.subMetaText, { color: colors.emerald || '#10B981' }]}>
-                        Saved Offline · {(ch.sizeBytes / (1024 * 1024)).toFixed(1)} MB
-                      </Text>
-                    )}
-
                     {isError && (
                       <Text style={[styles.subMetaText, { color: '#EF4444' }]}>
                         Error: {ch.errorMessage || 'Failed'}
@@ -570,7 +563,7 @@ export default function DownloadsScreen() {
             })}
           </View>
         )}
-      </AnimatedCard>
+      </View>
     );
   };
 
@@ -1000,7 +993,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: Radius.full,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   storagePillText: {
     fontSize: 12,
@@ -1013,7 +1006,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: Radius.full,
-    borderWidth: 1,
+    borderWidth: 0,
     marginRight: 6,
   },
   headerActionPillText: {
@@ -1042,7 +1035,7 @@ const styles = StyleSheet.create({
   },
   tabPillActive: {},
   tabPillInactive: {
-    borderWidth: 1,
+    borderWidth: 0,
   },
   tabPillText: {
     fontSize: 12.5,
@@ -1062,26 +1055,23 @@ const styles = StyleSheet.create({
   listContainer: {
     paddingHorizontal: Spacing.lg,
     paddingBottom: 100,
-    gap: Spacing.sm,
   },
 
   /* Group Card */
   groupCard: {
-    borderRadius: 14,
-    borderWidth: 1,
-    overflow: 'hidden',
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   groupHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: Spacing.md,
+    paddingVertical: 14,
     gap: Spacing.md,
   },
   coverContainer: {
     width: 44,
     height: 62,
     borderRadius: 8,
-    borderWidth: 1,
+    borderWidth: 0,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1131,15 +1121,15 @@ const styles = StyleSheet.create({
 
   /* Sub Chapter Dropdown */
   chapterDropdown: {
-    borderTopWidth: 1,
-    paddingHorizontal: Spacing.md,
+    borderTopWidth: 0,
+    paddingLeft: 56,
     paddingBottom: Spacing.xs,
   },
   subChapterItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     gap: Spacing.sm,
   },
   selectionCheck: {
@@ -1340,7 +1330,7 @@ const styles = StyleSheet.create({
   },
   currentPathCard: {
     borderRadius: 14,
-    borderWidth: 1,
+    borderWidth: 0,
     padding: 14,
     gap: 10,
   },
@@ -1366,7 +1356,7 @@ const styles = StyleSheet.create({
     gap: 7,
     paddingVertical: 9,
     borderRadius: 10,
-    borderWidth: 1,
+    borderWidth: 0,
     marginTop: 2,
   },
   browseStorageBtnText: {
@@ -1393,7 +1383,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 11,
     paddingVertical: 7,
     borderRadius: 10,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   presetPillText: {
     fontSize: 12,
@@ -1401,7 +1391,7 @@ const styles = StyleSheet.create({
   customPathInput: {
     height: 44,
     borderRadius: 12,
-    borderWidth: 1,
+    borderWidth: 0,
     paddingHorizontal: 14,
     fontSize: 13,
   },
@@ -1411,11 +1401,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 3,
   },
   saveLocationBtnText: {
     color: '#000000',

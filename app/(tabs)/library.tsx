@@ -178,9 +178,9 @@ function LibraryGridCard({
       <View
         style={[
           styles.coverWrapper,
-          { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+          { backgroundColor: colors.surfaceElevated, borderWidth: 0 },
           {
-            borderColor: hovered ? colors.border : colors.border,
+            borderWidth: 0,
             backgroundColor: colors.surface,
           },
         ]}
@@ -213,7 +213,7 @@ function LibraryGridCard({
 
         {/* Read Percentage Badge on Bottom Right */}
         {progressPercent > 0 && (
-          <View style={[styles.percentBadge, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View style={[styles.percentBadge, { backgroundColor: colors.surface, borderWidth: 0 }]}>
             <Text
               style={[
                 styles.percentText,
@@ -329,7 +329,7 @@ function LibraryDetailsCard({
             </View>
           )}
           {progressPercent > 0 && (
-            <View style={[styles.detailsProgressPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+            <View style={[styles.detailsProgressPill, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}>
               <Text
                 style={[
                   styles.detailsProgressText,
@@ -349,7 +349,7 @@ function LibraryDetailsCard({
       </View>
 
       {/* Left side: Manga Cover */}
-      <View style={[styles.detailsCoverWrapper, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+      <View style={[styles.detailsCoverWrapper, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}>
         {entry.coverUrl ? (
           <Image
             source={{ uri: entry.coverUrl }}
@@ -430,7 +430,7 @@ function LibraryCompactCard({
       accessibilityLabel={`${entry.title}, ${chapterMeta}, ${timeLabel}`}
     >
       {/* Left: Mini Cover Thumbnail */}
-      <View style={[styles.compactCoverWrapper, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+      <View style={[styles.compactCoverWrapper, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}>
         {entry.coverUrl ? (
           <Image
             source={{ uri: entry.coverUrl }}
@@ -707,7 +707,7 @@ export default function LibraryScreen() {
             )}
             <View style={styles.titleWithBadge}>
               <Text style={[styles.headerTitle, { color: colors.text }]}>Library</Text>
-              <View style={[styles.titleBadge, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+              <View style={[styles.titleBadge, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}>
                 <Text style={[styles.titleBadgeText, { color: colors.textMuted }]}>
                   {filteredEntries.length} {filteredEntries.length === 1 ? 'title' : 'titles'}
                 </Text>
@@ -732,7 +732,7 @@ export default function LibraryScreen() {
               }}
               style={({ pressed }) => [
                 styles.actionButton,
-                isSearchOpen && { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+                isSearchOpen && { backgroundColor: colors.surfaceElevated },
                 { opacity: pressed ? 0.7 : 1 },
               ]}
               accessibilityRole="button"
@@ -742,7 +742,7 @@ export default function LibraryScreen() {
               <Ionicons
                 name={isSearchOpen ? 'close' : 'search-outline'}
                 size={20}
-                color={isSearchOpen ? colors.accent : '#94A3B8'}
+                color={isSearchOpen ? colors.text : colors.textMuted}
               />
             </Pressable>
 
@@ -772,7 +772,7 @@ export default function LibraryScreen() {
         {/* Collapsible Search Input Bar */}
         {isSearchOpen && (
           <View style={[styles.searchBarWrapper, { paddingHorizontal: horizontalPadding }]}>
-            <View style={[styles.searchInputContainer, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+            <View style={[styles.searchInputContainer, { backgroundColor: colors.surfaceElevated }]}>
               <Ionicons name="search" size={18} color={colors.textMuted} style={styles.searchIcon} />
               <TextInput
                 value={searchQuery}
@@ -818,8 +818,8 @@ export default function LibraryScreen() {
                   style={({ pressed }) => [
                     styles.tabPill,
                     isActive
-                      ? [styles.tabPillActive, { backgroundColor: colors.accent }]
-                      : [styles.tabPillInactive, { backgroundColor: colors.surface, borderColor: colors.border }],
+                      ? [styles.tabPillActive, { backgroundColor: colors.text }]
+                      : [styles.tabPillInactive, { backgroundColor: colors.surfaceElevated }],
                     { transform: [{ scale: pressed ? 0.96 : 1 }] },
                   ]}
                   accessibilityRole="button"
@@ -828,12 +828,12 @@ export default function LibraryScreen() {
                   <Ionicons
                     name={cat.icon}
                     size={15}
-                    color={isActive ? getContrastTextColor(colors.accent) : colors.textMuted}
+                    color={isActive ? colors.background : colors.textMuted}
                   />
                   <Text
                     style={[
                       styles.tabLabel,
-                      isActive ? [styles.tabLabelActive, { color: getContrastTextColor(colors.accent) }] : [styles.tabLabelInactive, { color: colors.textSecondary }],
+                      isActive ? [styles.tabLabelActive, { color: colors.background }] : [styles.tabLabelInactive, { color: colors.textSecondary }],
                     ]}
                   >
                     {cat.label}
@@ -843,15 +843,15 @@ export default function LibraryScreen() {
                       style={[
                         styles.tabCountBadge,
                         isActive
-                          ? [styles.tabCountBadgeActive, { backgroundColor: `${getContrastTextColor(colors.accent)}26` }]
-                          : [styles.tabCountBadgeInactive, { backgroundColor: colors.surfaceElevated }],
+                          ? [styles.tabCountBadgeActive, { backgroundColor: `${colors.background}30` }]
+                          : [styles.tabCountBadgeInactive, { backgroundColor: colors.surface }],
                       ]}
                     >
                       <Text
                         style={[
                           styles.tabCountText,
                           isActive
-                            ? [styles.tabCountTextActive, { color: getContrastTextColor(colors.accent) }]
+                            ? [styles.tabCountTextActive, { color: colors.background }]
                             : [styles.tabCountTextInactive, { color: colors.textMuted }],
                         ]}
                       >
@@ -879,7 +879,7 @@ export default function LibraryScreen() {
             }
           >
             <View style={styles.emptyContent}>
-              <View style={[styles.emptyIconCircle, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+              <View style={[styles.emptyIconCircle, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}>
                 <Ionicons
                   name={searchQuery ? 'search-outline' : activeCategoryObj.icon}
                   size={36}
@@ -1061,8 +1061,7 @@ const styles = StyleSheet.create({
   },
   titleBadge: {
     backgroundColor: '#1B1E28',
-    borderColor: '#1F2330',
-    borderWidth: 1,
+    borderWidth: 0,
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -1093,8 +1092,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: 'transparent',
+    borderWidth: 0,
   },
 
   /* Collapsible Search Bar */
@@ -1104,10 +1102,8 @@ const styles = StyleSheet.create({
   searchInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#161820',
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#1F2330',
+    borderWidth: 0,
     paddingHorizontal: 12,
     height: 42,
   },
@@ -1122,6 +1118,8 @@ const styles = StyleSheet.create({
   },
   searchClearBtn: {
     padding: 4,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
   },
 
   /* Horizontal Category Tabs */
@@ -1145,9 +1143,8 @@ const styles = StyleSheet.create({
     borderWidth: 0,
   },
   tabPillInactive: {
-    backgroundColor: '#151821',
-    borderColor: '#1F2330',
-    borderWidth: 1,
+    backgroundColor: '#18181C',
+    borderWidth: 0,
   },
   tabLabel: {
     fontSize: 13,
@@ -1206,8 +1203,7 @@ const styles = StyleSheet.create({
     height: 68,
     borderRadius: 34,
     backgroundColor: '#161820',
-    borderWidth: 1,
-    borderColor: '#1F2330',
+    borderWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
@@ -1257,7 +1253,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     backgroundColor: '#151821',
-    borderWidth: 1,
+    borderWidth: 0,
     position: 'relative',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
@@ -1286,8 +1282,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.25)',
+    borderWidth: 0,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.4,
@@ -1307,8 +1302,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000000',
@@ -1395,7 +1389,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 6,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   detailsUnreadText: {
     fontSize: 11,
@@ -1403,8 +1397,7 @@ const styles = StyleSheet.create({
   },
   detailsProgressPill: {
     backgroundColor: '#161820',
-    borderColor: '#1F2330',
-    borderWidth: 1,
+    borderWidth: 0,
     paddingHorizontal: 7,
     paddingVertical: 2,
     borderRadius: 6,
@@ -1424,8 +1417,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: '#151821',
-    borderWidth: 1,
-    borderColor: '#1F2330',
+    borderWidth: 0,
     position: 'relative',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
@@ -1457,8 +1449,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5,
     paddingVertical: 1.5,
     borderRadius: 5,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderWidth: 0,
   },
   percentTextMini: {
     color: '#F3F4F6',
@@ -1486,8 +1477,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: 'hidden',
     backgroundColor: '#151821',
-    borderWidth: 1,
-    borderColor: '#1F2330',
+    borderWidth: 0,
   },
   compactCenter: {
     flex: 1,
