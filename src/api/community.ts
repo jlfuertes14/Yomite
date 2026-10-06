@@ -29,7 +29,9 @@ export interface AnimeNewsItem {
   publishedAt: string;
   url: string;
   imageUrl?: string;
+  images?: string[];
   trailerUrl?: string;
+  trailerUrls?: string[];
   source: 'Anime News Network';
 }
 

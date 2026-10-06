@@ -20,6 +20,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { WebView } from 'react-native-webview';
 import {
   getAnimeNews,
   getAnimeNewsArticle,
@@ -43,6 +44,17 @@ import { SidebarDrawer } from '../../src/components/SidebarDrawer';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 import * as WebBrowser from 'expo-web-browser';
 
+function getYomiteTrailerEmbedUrl(url: string) {
+  try {
+    const embedUrl = new URL(url);
+    embedUrl.searchParams.set('origin', 'https://yomite.vercel.app');
+    embedUrl.searchParams.set('enablejsapi', '1');
+    return embedUrl.toString();
+  } catch {
+    return url;
+  }
+}
+
 export default function CommunityScreen() {
   useDocumentTitle('Community');
   const colors = useThemeColors();
@@ -64,6 +76,8 @@ export default function CommunityScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [feedMode, setFeedMode] = useState<'home' | 'news'>('home');
   const [topicSort, setTopicSort] = useState<'popular' | 'latest'>('latest');
+  const [newsLayout, setNewsLayout] = useState<'column' | 'list'>('column');
+  const [newsViewMenuVisible, setNewsViewMenuVisible] = useState(false);
 
   // Thread Discussion Modal State
   const [selectedThread, setSelectedThread] = useState<ForumThread | null>(null);
@@ -102,6 +116,7 @@ export default function CommunityScreen() {
     setIsLoading(true);
     const news = await getAnimeNews();
     setAnimeNews(news);
+    hydrateNewsImages(news);
     setIsLoading(false);
   };
 
@@ -109,7 +124,39 @@ export default function CommunityScreen() {
     setRefreshing(true);
     const news = await getAnimeNews(true);
     setAnimeNews(news);
+    hydrateNewsImages(news);
     setRefreshing(false);
+  };
+
+  const hydrateNewsImages = (items: AnimeNewsItem[]) => {
+    const missingImages = items.filter((item) => !item.imageUrl).slice(0, 12);
+    if (missingImages.length === 0) return;
+
+    Promise.all(
+      missingImages.map(async (item) => {
+        const article = await getAnimeNewsArticle(item.url);
+        return {
+          id: item.id,
+          imageUrl: article?.imageUrl,
+          images: article?.images,
+          trailerUrl: article?.trailerUrl,
+          trailerUrls: article?.trailerUrls,
+        };
+      })
+    ).then((updates) => {
+      setAnimeNews((current) => current.map((item) => {
+        const update = updates.find((candidate) => candidate.id === item.id);
+        return update?.imageUrl
+          ? {
+              ...item,
+              imageUrl: update.imageUrl,
+              images: update.images,
+              trailerUrl: update.trailerUrl,
+              trailerUrls: update.trailerUrls,
+            }
+          : item;
+      }));
+    });
   };
 
   const handleOpenNews = async (item: AnimeNewsItem) => {
@@ -248,16 +295,18 @@ export default function CommunityScreen() {
           <Text style={[styles.headerTitle, { color: colors.text }]}>Community</Text>
         </View>
 
-          <AnimatedPressable
-            onPress={handleOpenCreateTopic}
-            style={[
-              styles.createBtn,
-              { backgroundColor: colors.accent },
-            ]}
-          >
-            <Ionicons name="add" size={18} color="#FFFFFF" />
-            <Text style={styles.createBtnText}>Create post</Text>
-          </AnimatedPressable>
+          {feedMode === 'home' && (
+            <AnimatedPressable
+              onPress={handleOpenCreateTopic}
+              style={[
+                styles.createBtn,
+                { backgroundColor: colors.accent },
+              ]}
+            >
+              <Ionicons name="add" size={18} color="#FFFFFF" />
+              <Text style={styles.createBtnText}>Create post</Text>
+            </AnimatedPressable>
+          )}
         </View>
 
         {/* Search stays above the feed switcher so it never competes with Topics, Popular, Latest, or News. */}
@@ -313,6 +362,47 @@ export default function CommunityScreen() {
           ))}
         </View>
 
+        {feedMode === 'news' && (
+          <View style={styles.newsViewToolbar}>
+            <View style={styles.newsViewDropdownWrap}>
+              <Pressable
+                onPress={() => setNewsViewMenuVisible((visible) => !visible)}
+                style={[styles.newsViewDropdown, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+                accessibilityLabel="Change news view"
+              >
+                <Ionicons
+                  name={newsLayout === 'column' ? 'grid-outline' : 'list-outline'}
+                  size={16}
+                  color={colors.textSecondary}
+                />
+                <Text style={[styles.sortOptionText, { color: colors.text }]}>
+                  {newsLayout === 'column' ? 'Column' : 'List'}
+                </Text>
+                <Ionicons name="chevron-down" size={14} color={colors.textMuted} />
+              </Pressable>
+              {newsViewMenuVisible && (
+                <View style={[styles.newsViewMenu, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  {(['column', 'list'] as const).map((layout) => (
+                    <Pressable
+                      key={layout}
+                      onPress={() => {
+                        setNewsLayout(layout);
+                        setNewsViewMenuVisible(false);
+                      }}
+                      style={[styles.newsViewMenuItem, newsLayout === layout && { backgroundColor: colors.accentSubtle }]}
+                    >
+                      <Ionicons name={layout === 'column' ? 'grid-outline' : 'list-outline'} size={15} color={colors.textSecondary} />
+                      <Text style={[styles.sortOptionText, { color: colors.text }]}>
+                        {layout === 'column' ? 'Column' : 'List'}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </View>
+          </View>
+        )}
+
         {/* Threads Grid / List */}
         {isLoading ? (
           <View style={styles.centerLoading}>
@@ -339,32 +429,44 @@ export default function CommunityScreen() {
               <AnimatedCard
                 index={index}
                 onPress={() => handleOpenNews(item)}
-                style={[styles.newsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                style={[
+                  styles.newsCard,
+                  newsLayout === 'list' && styles.newsCardList,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
               >
-                {item.imageUrl ? (
-                  <Image source={{ uri: item.imageUrl }} style={styles.newsImage} resizeMode="cover" />
-                ) : (
-                  <View style={[styles.newsImagePlaceholder, { backgroundColor: colors.accentSubtle }]}>
-                    <Ionicons name="newspaper-outline" size={28} color={colors.accent} />
+                <View style={newsLayout === 'list' ? styles.newsListRow : styles.newsColumnContent}>
+                  {item.imageUrl ? (
+                    <Image
+                      source={{ uri: item.imageUrl }}
+                      style={[styles.newsImage, newsLayout === 'list' && styles.newsImageList]}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={[styles.newsImagePlaceholder, newsLayout === 'list' && styles.newsImageList, { backgroundColor: colors.accentSubtle }]}>
+                      <Ionicons name="newspaper-outline" size={28} color={colors.accent} />
+                    </View>
+                  )}
+                  <View style={newsLayout === 'list' ? styles.newsTextColumn : undefined}>
+                  <View style={styles.cardTopRow}>
+                    <View style={[styles.categoryBadge, { backgroundColor: colors.accentSubtle }]}>
+                      <Text style={[styles.categoryBadgeText, { color: colors.accent }]}>Anime News</Text>
+                    </View>
+                    <Text style={[styles.timeText, { color: colors.textMuted }]}>
+                      {formatChapterDate(item.publishedAt)}
+                    </Text>
                   </View>
-                )}
-                <View style={styles.cardTopRow}>
-                  <View style={[styles.categoryBadge, { backgroundColor: colors.accentSubtle }]}>
-                    <Text style={[styles.categoryBadgeText, { color: colors.accent }]}>Anime News</Text>
-                  </View>
-                  <Text style={[styles.timeText, { color: colors.textMuted }]}>
-                    {formatChapterDate(item.publishedAt)}
+                  <Text style={[styles.threadTitle, { color: colors.text }]} numberOfLines={3}>
+                    {item.title}
                   </Text>
-                </View>
-                <Text style={[styles.threadTitle, { color: colors.text }]} numberOfLines={3}>
-                  {item.title}
-                </Text>
-                <Text style={[styles.threadPreview, { color: colors.textSecondary }]} numberOfLines={3}>
-                  {item.summary}
-                </Text>
-                <View style={styles.newsSourceRow}>
-                  <Ionicons name="open-outline" size={14} color={colors.accent} />
-                  <Text style={[styles.authorText, { color: colors.accent }]}>{item.source}</Text>
+                  <Text style={[styles.threadPreview, { color: colors.textSecondary }]} numberOfLines={3}>
+                    {item.summary}
+                  </Text>
+                  <View style={styles.newsSourceRow}>
+                    <Ionicons name="open-outline" size={14} color={colors.accent} />
+                    <Text style={[styles.authorText, { color: colors.accent }]}>{item.source}</Text>
+                  </View>
+                  </View>
                 </View>
               </AnimatedCard>
             )}
@@ -462,17 +564,42 @@ export default function CommunityScreen() {
 
         <Modal
           visible={!!selectedNews}
-          transparent
+          transparent={isWeb}
           animationType={isWeb ? 'fade' : 'slide'}
+          presentationStyle="overFullScreen"
+          statusBarTranslucent
+          navigationBarTranslucent
           onRequestClose={() => setSelectedNews(null)}
         >
-          <View style={styles.modalOverlay}>
+          <View style={[styles.modalOverlay, !isWeb && styles.newsModalOverlayMobile]}>
             <Pressable style={StyleSheet.absoluteFill} onPress={() => setSelectedNews(null)} />
-            <View style={[styles.newsModalCard, { backgroundColor: colors.surface }]}>
-              {selectedNews?.imageUrl ? (
-                <Image source={{ uri: selectedNews.imageUrl }} style={styles.newsModalImage} resizeMode="cover" />
-              ) : null}
+            <View style={[styles.newsModalCard, isWeb ? styles.newsModalCardWeb : styles.newsModalCardMobile, { backgroundColor: colors.surface }]}>
+              {!isWeb && (
+                <SafeAreaView style={[styles.newsModalTopBar, { backgroundColor: colors.surface }]}>
+                  <Pressable onPress={() => setSelectedNews(null)} hitSlop={10} style={styles.newsBackButton}>
+                    <Ionicons name="arrow-back" size={30} color={colors.text} />
+                  </Pressable>
+                  <Pressable
+                    onPress={() => selectedNews && WebBrowser.openBrowserAsync(selectedNews.url)}
+                    hitSlop={10}
+                    style={styles.newsArticleActionButton}
+                    accessible={false}
+                    importantForAccessibility="no"
+                  >
+                    <Ionicons name="open-outline" size={25} color={colors.text} />
+                  </Pressable>
+                </SafeAreaView>
+              )}
               <ScrollView contentContainerStyle={styles.newsModalContent} showsVerticalScrollIndicator={false}>
+                <View style={styles.newsModalHero}>
+                  {selectedNews?.imageUrl ? (
+                    <Image source={{ uri: selectedNews.imageUrl }} style={styles.newsModalImage} resizeMode="cover" />
+                  ) : (
+                    <View style={[styles.newsModalImage, styles.newsModalImageFallback, { backgroundColor: colors.accentSubtle }]}>
+                      <Ionicons name="newspaper-outline" size={36} color={colors.accent} />
+                    </View>
+                  )}
+                </View>
                 <View style={styles.cardTopRow}>
                   <Text style={[styles.categoryBadgeText, { color: colors.accent }]}>Anime News Network</Text>
                   <Text style={[styles.timeText, { color: colors.textMuted }]}>
@@ -495,49 +622,52 @@ export default function CommunityScreen() {
                     </Text>
                   ))
                 )}
-                {selectedNews?.trailerUrl && (
+                {(selectedNews?.trailerUrls?.length || selectedNews?.trailerUrl) && (
                   <View style={styles.newsTrailerBlock}>
                     <Text style={[styles.newsSectionLabel, { color: colors.text }]}>Trailer</Text>
-                    {isWeb ? (
-                      React.createElement('iframe', {
-                        src: selectedNews.trailerUrl,
-                        title: `${selectedNews.title} trailer`,
-                        style: { width: '100%', height: 210, border: 0, borderRadius: 10 },
-                        allow: 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share',
-                        allowFullScreen: true,
-                      })
-                    ) : (
-                      <Pressable
-                        onPress={() => WebBrowser.openBrowserAsync(selectedNews.trailerUrl as string)}
-                        style={[styles.newsReadButton, { backgroundColor: colors.surfaceElevated }]}
-                      >
-                        <Ionicons name="logo-youtube" size={18} color="#FF0000" />
-                        <Text style={[styles.newsReadButtonText, { color: colors.text }]}>Watch trailer</Text>
-                      </Pressable>
-                    )}
+                    {(selectedNews.trailerUrls || [selectedNews.trailerUrl])
+                      .filter((url): url is string => Boolean(url))
+                      .map((trailerUrl, index) => {
+                        const embedUrl = getYomiteTrailerEmbedUrl(trailerUrl);
+                        return isWeb ? (
+                          React.createElement('iframe', {
+                            key: embedUrl,
+                            src: embedUrl,
+                            title: `${selectedNews?.title} trailer ${index + 1}`,
+                            style: { width: '100%', height: 210, border: 0, borderRadius: 10, marginBottom: 8 },
+                            allow: 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share',
+                            allowFullScreen: true,
+                          })
+                        ) : (
+                          <WebView
+                            key={embedUrl}
+                            source={{ uri: embedUrl, headers: { Referer: 'https://yomite.vercel.app/' } }}
+                            style={styles.newsTrailerWebView}
+                            javaScriptEnabled
+                            allowsFullscreenVideo
+                            allowsInlineMediaPlayback
+                            mediaPlaybackRequiresUserAction
+                          />
+                        );
+                      })}
                   </View>
                 )}
-                <Pressable
-                  onPress={() => selectedNews && WebBrowser.openBrowserAsync(selectedNews.url)}
-                  style={[styles.newsReadButton, { backgroundColor: colors.accent }]}
-                >
-                  <Text style={styles.newsReadButtonText}>Read full article</Text>
-                  <Ionicons name="open-outline" size={16} color="#FFFFFF" />
-                </Pressable>
               </ScrollView>
             </View>
           </View>
         </Modal>
 
-        <AnimatedPressable
-          onPress={handleOpenCreateTopic}
-          style={[styles.fab, { backgroundColor: colors.accent }]}
-          accessibilityRole="button"
-          accessibilityLabel="Create new discussion topic"
-        >
-          <Ionicons name="add" size={20} color="#0A0B0E" />
-          <Text style={styles.fabText}>Create post</Text>
-        </AnimatedPressable>
+        {feedMode === 'home' && (
+          <AnimatedPressable
+            onPress={handleOpenCreateTopic}
+            style={[styles.fab, { backgroundColor: colors.accent }]}
+            accessibilityRole="button"
+            accessibilityLabel="Create new discussion topic"
+          >
+            <Ionicons name="add" size={20} color="#0A0B0E" />
+            <Text style={styles.fabText}>Create post</Text>
+          </AnimatedPressable>
+        )}
 
         {/* Interactive Thread Discussion Modal */}
         <Modal
@@ -864,6 +994,16 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
     gap: Spacing.xs,
   },
+  newsCardList: {
+    minHeight: 128,
+    borderWidth: 0,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRadius: 0,
+    marginHorizontal: 0,
+    marginBottom: 0,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: 0,
+  },
   newsImage: {
     width: '100%',
     height: 150,
@@ -877,6 +1017,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.xs,
+  },
+  newsImageList: {
+    width: 128,
+    height: 128,
+    flexShrink: 0,
+    marginRight: Spacing.md,
+    marginBottom: 0,
+    borderRadius: 0,
+  },
+  newsTextColumn: {
+    flex: 1,
+    minWidth: 0,
+    paddingVertical: Spacing.md,
+  },
+  newsListRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    width: '100%',
+    minHeight: 128,
+  },
+  newsColumnContent: {
+    width: '100%',
   },
   cardTopRow: {
     flexDirection: 'row',
@@ -956,16 +1118,104 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: Spacing.xs,
   },
+  newsViewToolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingHorizontal: Spacing.lg,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.xs,
+    position: 'relative',
+    zIndex: 10,
+  },
+  newsViewDropdownWrap: {
+    position: 'relative',
+  },
+  newsViewDropdown: {
+    minWidth: 116,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderRadius: Radius.md,
+  },
+  newsViewMenu: {
+    position: 'absolute',
+    top: 42,
+    right: 0,
+    minWidth: 140,
+    borderWidth: 1,
+    borderRadius: Radius.md,
+    padding: 4,
+    shadowColor: '#000000',
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 8,
+  },
+  newsViewMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 9,
+    borderRadius: Radius.sm,
+  },
   newsModalCard: {
     width: '100%',
-    maxWidth: Platform.OS === 'web' ? 720 : undefined,
-    maxHeight: Platform.OS === 'web' ? '82vh' as any : '86%',
-    borderRadius: Platform.OS === 'web' ? Radius.lg : 0,
     overflow: 'hidden',
+  },
+  newsModalCardWeb: {
+    maxWidth: 720,
+    maxHeight: '82vh' as any,
+    borderRadius: Radius.lg,
+  },
+  newsModalCardMobile: {
+    flex: 1,
+    borderRadius: 0,
+  },
+  newsModalOverlayMobile: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    justifyContent: 'flex-start',
+    padding: 0,
+  },
+  newsModalHero: {
+    position: 'relative',
+    paddingHorizontal: 0,
+  },
+  newsModalTopBar: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   newsModalImage: {
     width: '100%',
     height: 210,
+    borderRadius: Radius.sm,
+  },
+  newsModalImageFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  newsBackButton: {
+    width: 52,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  newsArticleActionButton: {
+    width: 52,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   newsModalContent: {
     padding: Spacing.lg,
@@ -994,22 +1244,14 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     marginTop: Spacing.sm,
   },
+  newsTrailerWebView: {
+    width: '100%',
+    height: 210,
+    borderRadius: Radius.sm,
+    overflow: 'hidden',
+  },
   newsSectionLabel: {
-    fontSize: Typography.sizes.footnote,
-    fontWeight: Typography.weights.bold,
-  },
-  newsReadButton: {
-    minHeight: 44,
-    borderRadius: Radius.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.xs,
-    marginTop: Spacing.sm,
-  },
-  newsReadButtonText: {
-    color: '#FFFFFF',
-    fontSize: Typography.sizes.footnote,
+    fontSize: Typography.sizes.title3,
     fontWeight: Typography.weights.bold,
   },
   fab: {
