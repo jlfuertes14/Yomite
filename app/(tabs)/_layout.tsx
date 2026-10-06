@@ -2,11 +2,17 @@
  * Tab Layout - Yomite navigation system with floating bottom tab bar.
  */
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import { Tabs } from 'expo-router';
-import React from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { LayoutChangeEvent, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, {
+  ReduceMotion,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 import { Colors } from '../../constants/Colors';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
 
@@ -20,6 +26,13 @@ interface TabConfig {
   iconFocused: TabIcon;
 }
 
+interface AnimatedTabIconProps {
+  focused: boolean;
+  tab: TabConfig;
+  colors: ReturnType<typeof useThemeColors>;
+  selectedColor: string;
+}
+
 const TABS: TabConfig[] = [
   { name: 'index', title: 'Discover', icon: 'compass-outline', iconFocused: 'compass' },
   { name: 'library', title: 'Library', icon: 'library-outline', iconFocused: 'library' },
@@ -30,25 +43,127 @@ const TABS: TabConfig[] = [
   { name: 'settings', title: 'Settings', icon: 'settings-outline', iconFocused: 'settings' },
 ];
 
+function AnimatedTabIcon({ focused, tab, colors, selectedColor }: AnimatedTabIconProps) {
+  const reducedMotion = useReducedMotion();
+  const scale = useSharedValue(focused ? 1 : 0.92);
+  const translateY = useSharedValue(focused ? -1 : 0);
+  const rotate = useSharedValue(0);
+  const pulse = useSharedValue(1);
+  const selectedName = tab.name;
+
+  useEffect(() => {
+    const spring = {
+      dampingRatio: 0.8,
+      duration: 260,
+      reduceMotion: reducedMotion ? ReduceMotion.Always : ReduceMotion.System,
+    };
+    scale.set(withSpring(focused ? 1 : 0.92, spring));
+    const verticalTarget = focused ? -1 : 0;
+    translateY.set(withSpring(verticalTarget, spring));
+    pulse.set(withSpring(focused ? 1.08 : 1, spring));
+
+    if (!focused || reducedMotion) {
+      rotate.set(withSpring(0, spring));
+      return;
+    }
+
+    const rotation = selectedName === 'index' ? 360 : selectedName === 'settings' ? 180 : selectedName === 'history' ? 30 : 0;
+    rotate.set(0);
+    rotate.set(withSpring(rotation, { dampingRatio: 0.72, duration: 520 }));
+  }, [focused, pulse, reducedMotion, rotate, scale, selectedName, translateY]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: translateY.get() },
+      { scale: scale.get() * pulse.get() },
+      { rotate: `${rotate.get()}deg` },
+    ] as any,
+  })) as any;
+
+  return (
+    <Animated.View style={[styles.iconSlot, animatedStyle]}>
+      {selectedName === 'library' && focused ? (
+        <View style={[styles.libraryMotionIcon, { transform: [{ translateY: 2 }] }]}>
+          <Ionicons name="book" size={18} color={selectedColor} />
+        </View>
+      ) : selectedName === 'community' && focused ? (
+        <View style={[styles.communityMotionIcon, { transform: [{ scaleX: -1 }] }]}>
+          <Ionicons
+            name="chatbubble"
+            size={21}
+            color={selectedColor}
+          />
+          <Ionicons
+            name="chatbubble-outline"
+            size={12}
+            color={selectedColor}
+            style={{ position: 'absolute', right: 1, bottom: 0, transform: [{ scaleX: -1 }] }}
+          />
+        </View>
+      ) : selectedName === 'extensions' && focused ? (
+        <View style={styles.extensionsMotionIcon}>
+          <View style={[styles.windowTile, { backgroundColor: selectedColor }]} />
+          <View style={[styles.windowTile, { backgroundColor: selectedColor }]} />
+          <View style={[styles.windowTile, { backgroundColor: selectedColor }]} />
+          <View style={[styles.windowTile, { backgroundColor: selectedColor }]} />
+        </View>
+      ) : (
+        <Ionicons
+          name={focused ? tab.iconFocused : tab.icon}
+          size={21}
+          color={focused ? selectedColor : colors.tabIconDefault}
+        />
+      )}
+    </Animated.View>
+  );
+}
+
 /**
  * Floating Bottom Tab Bar
  */
 function FloatingTabBar({ state, descriptors, navigation }: NavigationBarProps) {
   const insets = useSafeAreaInsets();
   const colors = useThemeColors();
+  const navigationAccent = colors.accent;
+  const reducedMotion = useReducedMotion();
+  const [barWidth, setBarWidth] = useState(0);
+  const indicatorX = useSharedValue(0);
+  const itemWidth = barWidth / state.routes.length;
+
+  useEffect(() => {
+    if (!itemWidth) return;
+    indicatorX.set(
+      withSpring(state.index * itemWidth, {
+        dampingRatio: 0.82,
+        duration: 300,
+        reduceMotion: reducedMotion ? ReduceMotion.Always : ReduceMotion.System,
+      }),
+    );
+  }, [indicatorX, itemWidth, reducedMotion, state.index]);
+
+  const indicatorStyle = useAnimatedStyle(() => ({
+    width: Math.max(0, itemWidth - 8),
+    transform: [{ translateX: indicatorX.get() + 4 }],
+  })) as any;
+
+  const onBarLayout = (event: LayoutChangeEvent) => {
+    setBarWidth(event.nativeEvent.layout.width);
+  };
 
   return (
     <View
-      style={[styles.tabBarFrame, { bottom: Math.max(insets.bottom, 12) + 8, pointerEvents: 'box-none' }]}
+      style={[
+        styles.tabBarFrame,
+        { bottom: Math.max(insets.bottom, 12) + 8, pointerEvents: 'box-none' },
+      ]}
     >
-      <View style={[styles.tabBarPill, { borderColor: colors.border }]}>
-        <BlurView
-          intensity={95}
-          tint={colors.background === Colors.dark.background ? 'dark' : 'light'}
-          style={StyleSheet.absoluteFill}
-        />
-        <View
-          style={[styles.glassTint, { backgroundColor: `${colors.surface}99`, pointerEvents: 'none' }]}
+      <View
+        onLayout={onBarLayout}
+        style={[styles.tabBarPill, { backgroundColor: colors.surface, borderColor: colors.border }]}
+      >
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.activeIndicator, { backgroundColor: `${navigationAccent}33` }, indicatorStyle]}
         />
         {state.routes.map((route, index) => {
           const tab = TABS.find((item) => item.name === route.name);
@@ -85,16 +200,19 @@ function FloatingTabBar({ state, descriptors, navigation }: NavigationBarProps) 
               onLongPress={onLongPress}
               style={({ pressed }) => [styles.tabItem, pressed && styles.tabItemPressed]}
             >
-              <View style={styles.iconSlot}>
-                {isFocused ? (
-                  <View style={[styles.activeIconCircle, { backgroundColor: colors.accent }]}>
-                    <Ionicons name={tab.iconFocused} size={17} color="#FFFFFF" />
-                  </View>
-                ) : (
-                  <Ionicons name={tab.icon} size={17} color={colors.tabIconDefault} />
-                )}
-              </View>
-              <Text style={[styles.tabLabel, { color: isFocused ? colors.text : colors.tabIconDefault }]} numberOfLines={1}>
+              <AnimatedTabIcon
+                focused={isFocused}
+                tab={tab}
+                colors={colors}
+                selectedColor={navigationAccent}
+              />
+              <Text
+                style={[
+                  styles.tabLabel,
+                  { color: isFocused ? navigationAccent : colors.tabIconDefault },
+                ]}
+                numberOfLines={1}
+              >
                 {tab.title}
               </Text>
             </Pressable>
@@ -130,8 +248,8 @@ export default function TabLayout() {
 const styles = StyleSheet.create({
   tabBarFrame: {
     alignItems: 'center',
+    backgroundColor: 'transparent',
     bottom: 0,
-    height: 60,
     left: 0,
     position: 'absolute',
     right: 0,
@@ -139,20 +257,19 @@ const styles = StyleSheet.create({
   },
   tabBarPill: {
     alignItems: 'center',
-    backgroundColor: 'transparent',
-    borderColor: 'rgba(255, 255, 255, 0.12)',
     borderRadius: 32,
-    borderTopWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     elevation: 8,
     flexDirection: 'row',
-    height: '100%',
+    height: 60,
     overflow: 'hidden',
-    paddingHorizontal: 6,
-    boxShadow: '0 -6px 14px rgba(0, 0, 0, 0.2)',
+    paddingHorizontal: 4,
+    position: 'relative',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.24,
+    shadowRadius: 14,
     width: '94%',
-  },
-  glassTint: {
-    ...StyleSheet.absoluteFill,
   },
   tabItem: {
     alignItems: 'center',
@@ -166,23 +283,43 @@ const styles = StyleSheet.create({
   },
   iconSlot: {
     alignItems: 'center',
-    height: 30,
+    height: 28,
     justifyContent: 'center',
     width: 30,
   },
-  activeIconCircle: {
-    alignItems: 'center',
-    backgroundColor: '#F43F5E',
-    borderRadius: 999,
-    height: 30,
-    justifyContent: 'center',
-    overflow: 'hidden',
-    width: 30,
+  activeIndicator: {
+    borderRadius: 16,
+    height: 34,
+    left: 0,
+    position: 'absolute',
+    top: 6,
   },
   tabLabel: {
     color: Colors.dark.tabIconDefault,
     fontSize: 9,
     fontWeight: '600',
     marginTop: 1,
+  },
+  libraryMotionIcon: {
+    height: 22,
+    position: 'relative',
+    width: 23,
+  },
+  communityMotionIcon: {
+    height: 23,
+    position: 'relative',
+    width: 24,
+  },
+  extensionsMotionIcon: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 2,
+    height: 18,
+    transform: [{ rotate: '-8deg' }],
+    width: 18,
+  },
+  windowTile: {
+    height: 8,
+    width: 8,
   },
 });

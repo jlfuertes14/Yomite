@@ -4,8 +4,8 @@
  */
 
 const brand = {
-  accent: '#F43F5E', // Warm Rose/Red for status & key CTA highlights
-  accentSubtle: 'rgba(244, 63, 94, 0.12)',
+  accent: '#F59E0B',
+  accentSubtle: 'rgba(245, 158, 11, 0.12)',
   neutralHigh: '#FAFAFA',
   neutralMid: '#71717A',
   neutralLow: '#27272A',
@@ -15,43 +15,138 @@ const brand = {
 
 export const Colors = {
   light: {
-    text: '#09090B',
-    textSecondary: '#52525B',
-    textMuted: '#A1A1AA',
-    background: '#FAFAFA',
-    surface: '#FFFFFF',
-    surfaceElevated: '#F4F4F5',
-    border: '#E4E4E7',
-    borderSubtle: '#F4F4F5',
-    tint: '#09090B',
-    tintSecondary: brand.accent,
-    icon: '#52525B',
-    tabIconDefault: '#A1A1AA',
-    tabIconSelected: '#09090B',
+    text: '#1B1B1F',
+    textSecondary: '#44464F',
+    textMuted: '#757780',
+    background: '#FEFBFF',
+    surface: '#FBF8FD',
+    surfaceElevated: '#EFEDF1',
+    border: '#E1E2EC',
+    borderSubtle: '#F5F3F7',
+    tint: '#1B1B1F',
+    tintSecondary: '#F59E0B',
+    icon: '#44464F',
+    tabIconDefault: '#44464F',
+    tabIconSelected: '#001944',
     cardBackground: '#FFFFFF',
-    cardBorder: '#E4E4E7',
-    skeleton: '#E4E4E7',
+    cardBorder: '#E1E2EC',
+    skeleton: '#E9E7EC',
     ...brand,
   },
   dark: {
-    text: '#FAFAFA',
-    textSecondary: '#E4E4E7',
-    textMuted: '#A1A1AA',
-    background: '#09090B',     // Neutral Zinc-950
-    surface: '#141417',        // Elevated Card Surface
-    surfaceElevated: '#1F1F23', // Input & Pill Surface
-    border: '#27272A',         // Subtle Border (Zinc-800)
-    borderSubtle: '#18181B',
-    tint: '#FAFAFA',
-    tintSecondary: brand.accent,
-    icon: '#A1A1AA',
-    tabIconDefault: '#52525B',
-    tabIconSelected: '#FAFAFA',
-    cardBackground: '#141417',
-    cardBorder: '#27272A',
-    skeleton: '#1F1F23',
+    text: '#C7C6CA',
+    textSecondary: '#C4C6D0',
+    textMuted: '#8E9099',
+    background: '#1A1B1F',
+    surface: '#121316',
+    surfaceElevated: '#1F1F23',
+    border: '#44474E',
+    borderSubtle: '#292A2D',
+    tint: '#C7C6CA',
+    tintSecondary: '#F59E0B',
+    icon: '#C4C6D0',
+    tabIconDefault: '#C4C6D0',
+    tabIconSelected: '#002F65',
+    cardBackground: '#1F1F23',
+    cardBorder: '#44474E',
+    skeleton: '#292A2D',
     ...brand,
+    accent: '#F59E0B',
+    accentSubtle: 'rgba(245, 158, 11, 0.16)',
   },
+};
+
+type ThemePalette = Pick<
+  (typeof Colors)['light'],
+  | 'text'
+  | 'textSecondary'
+  | 'textMuted'
+  | 'background'
+  | 'surface'
+  | 'surfaceElevated'
+  | 'border'
+  | 'borderSubtle'
+  | 'tint'
+  | 'tintSecondary'
+  | 'icon'
+  | 'tabIconDefault'
+  | 'tabIconSelected'
+  | 'cardBackground'
+  | 'cardBorder'
+  | 'skeleton'
+  | 'accent'
+  | 'accentSubtle'
+>;
+
+export type CharacterThemeId = 'miku' | 'asuka' | 'mion' | 'rikka' | 'sakura' | 'mamimi' | 'kanade';
+
+function characterPalette(
+  accent: string,
+  background: string,
+  surface: string,
+  surfaceElevated: string,
+  text: string,
+  textSecondary: string,
+  border: string,
+): ThemePalette {
+  return {
+    accent,
+    accentSubtle: `${accent}29`,
+    background,
+    surface,
+    surfaceElevated,
+    text,
+    textSecondary,
+    textMuted: border,
+    border,
+    borderSubtle: surfaceElevated,
+    tint: text,
+    tintSecondary: accent,
+    icon: textSecondary,
+    tabIconDefault: textSecondary,
+    tabIconSelected: accent,
+    cardBackground: surfaceElevated,
+    cardBorder: border,
+    skeleton: surfaceElevated,
+  };
+}
+
+/** Kotatsu's character palettes, distilled from its Material 3 resource themes. */
+export const CharacterThemePalettes: Record<CharacterThemeId, { light: ThemePalette; dark: ThemePalette }> = {
+  miku: {
+    light: characterPalette('#00696D', '#F5FAFA', '#F5FAFA', '#EAEFEE', '#171D1D', '#3D4949', '#6D797A'),
+    dark: characterPalette('#6FDDE2', '#0F1415', '#0F1415', '#1B2121', '#DEE3E3', '#BCC9C9', '#3D4949'),
+  },
+  asuka: {
+    light: characterPalette('#904A40', '#FFF8F6', '#FFF8F6', '#F9EDEA', '#271815', '#53433F', '#89736E'),
+    dark: characterPalette('#FFB4A8', '#1A1110', '#1A1110', '#271D1C', '#F1DEDC', '#D8C2BE', '#534341'),
+  },
+  mion: {
+    light: characterPalette('#3B693A', '#F8FBF1', '#F8FBF1', '#EBF0E5', '#191D17', '#424940', '#72796E'),
+    dark: characterPalette('#A1D39A', '#10140F', '#10140F', '#1D211B', '#E0E4DB', '#C2C9BD', '#424940'),
+  },
+  rikka: {
+    light: characterPalette('#68548D', '#FEF7FF', '#FEF7FF', '#F2ECF3', '#1D1B20', '#49454E', '#7D7981'),
+    dark: characterPalette('#D3BBFD', '#151218', '#151218', '#211F24', '#E7E0E8', '#CBC4CF', '#49454E'),
+  },
+  sakura: {
+    light: characterPalette('#8C4A60', '#FFF8F8', '#FFF8F8', '#F9ECEE', '#21191B', '#514347', '#857377'),
+    dark: characterPalette('#FFB1C8', '#191113', '#191113', '#261D20', '#EFDFE1', '#D5C2C6', '#514347'),
+  },
+  mamimi: {
+    light: characterPalette('#465D91', '#FAF8FF', '#FAF8FF', '#EEEDF4', '#1A1B20', '#44464F', '#747780'),
+    dark: characterPalette('#AFC6FF', '#121318', '#121318', '#1E1F25', '#E2E2E9', '#C5C6D0', '#44464F'),
+  },
+  kanade: {
+    light: characterPalette('#474755', '#FCF8FA', '#FCF8FA', '#F0EDEF', '#1C1B1C', '#47464C', '#77747B'),
+    dark: characterPalette('#FFFFFF', '#141314', '#141314', '#282829', '#FFFFFF', '#DEDBE2', '#47464C'),
+  },
+};
+
+/** Kotatsu-style dynamic blue palette used by the Dynamic scheme. */
+export const DynamicThemePalettes: { light: ThemePalette; dark: ThemePalette } = {
+  light: characterPalette('#0059C8', '#F8F9FF', '#F8F9FF', '#E9EEFA', '#191B22', '#44474F', '#747780'),
+  dark: characterPalette('#ABC7FF', '#10141C', '#10141C', '#1D2432', '#E0E2EC', '#C2C6D4', '#444955'),
 };
 
 export const ReaderThemes = {

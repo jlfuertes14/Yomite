@@ -3,42 +3,61 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type AppThemeMode = 'system' | 'dark' | 'light';
+export type AppColorScheme =
+  | 'default'
+  | 'dynamic'
+  | 'miku'
+  | 'asuka'
+  | 'mion'
+  | 'rikka'
+  | 'sakura'
+  | 'mamimi'
+  | 'kanade';
 
-export interface AccentColorPreset {
-  id: string;
+export interface ThemeSchemePreset {
+  id: AppColorScheme;
   name: string;
   color: string;
 }
 
-export const ACCENT_PRESETS: AccentColorPreset[] = [
-  { id: 'rose', name: 'Rose Crimson', color: '#F43F5E' },
-  { id: 'violet', name: 'Neon Violet', color: '#8B5CF6' },
-  { id: 'indigo', name: 'Cyber Indigo', color: '#6366F1' },
-  { id: 'azure', name: 'Ocean Azure', color: '#0EA5E9' },
-  { id: 'emerald', name: 'Emerald Mint', color: '#10B981' },
-  { id: 'amber', name: 'Amber Gold', color: '#F59E0B' },
-  { id: 'coral', name: 'Sunset Coral', color: '#FF6B6B' },
-  { id: 'cyan', name: 'Electric Cyan', color: '#06B6D4' },
+export const THEME_SCHEME_PRESETS: ThemeSchemePreset[] = [
+  { id: 'default', name: 'Default', color: '#F59E0B' },
+  { id: 'dynamic', name: 'Dynamic', color: '#0059C8' },
+  { id: 'miku', name: 'Miku', color: '#6FDDE2' },
+  { id: 'asuka', name: 'Asuka', color: '#FFB4A8' },
+  { id: 'mion', name: 'Mion', color: '#A1D39A' },
+  { id: 'rikka', name: 'Rikka', color: '#D3BBFD' },
+  { id: 'sakura', name: 'Sakura', color: '#FFB1C8' },
+  { id: 'mamimi', name: 'Mamimi', color: '#AFC6FF' },
+  { id: 'kanade', name: 'Kanade', color: '#FFFFFF' },
 ];
 
 interface ThemeState {
   appThemeMode: AppThemeMode;
-  accentColor: string;
+  colorScheme: AppColorScheme;
   setAppThemeMode: (mode: AppThemeMode) => void;
-  setAccentColor: (color: string) => void;
+  setColorScheme: (scheme: AppColorScheme) => void;
 }
 
 export const useThemeStore = create<ThemeState>()(
   persist(
     (set) => ({
       appThemeMode: 'dark',
-      accentColor: '#F43F5E', // Default Rose Crimson
+      colorScheme: 'default',
       setAppThemeMode: (appThemeMode) => set({ appThemeMode }),
-      setAccentColor: (accentColor) => set({ accentColor }),
+      setColorScheme: (colorScheme) => set({ colorScheme }),
     }),
     {
       name: 'yomite-app-theme-pref',
+      version: 3,
       storage: createJSONStorage(() => AsyncStorage),
+      migrate: (persistedState: any) => {
+        const { accentColor: _legacyAccentColor, ...stateWithoutAccent } = persistedState ?? {};
+        return {
+          ...stateWithoutAccent,
+          colorScheme: stateWithoutAccent.colorScheme || 'default',
+        };
+      },
     }
   )
 );

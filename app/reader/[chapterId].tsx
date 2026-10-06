@@ -11,6 +11,7 @@ import {
   Pressable,
   ActivityIndicator,
   FlatList,
+  LayoutChangeEvent,
   useWindowDimensions,
   StatusBar,
   Platform,
@@ -37,13 +38,36 @@ import {
   extractScanlationGroupName,
   extractUploaderUsername,
 } from '../../src/api/mangadex';
+import {
+  getUniversalChapterPages,
+  getUniversalMangaDetails,
+  getUniversalMangaChapters,
+  isExternalSource,
+} from '../../src/sources/adapter';
 import { ReaderThemes } from '../../constants/Colors';
 import { ReaderMenuDrawer } from '../../src/components/ReaderMenuDrawer';
 import { OfflineState } from '../../src/components/OfflineState';
 import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
+import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { ApiLogger } from '../../src/services/apiLogger';
 import { ZoomableImage } from '../../src/components/ZoomableImage';
 import type { ReadingMode, Chapter } from '../../src/types';
+
+function getContrastTextColor(hex: string): string {
+  const value = hex.replace('#', '');
+  const r = parseInt(value.slice(0, 2), 16) || 0;
+  const g = parseInt(value.slice(2, 4), 16) || 0;
+  const b = parseInt(value.slice(4, 6), 16) || 0;
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  return yiq >= 128 ? '#09090B' : '#FFFFFF';
+}
+
+function getChapterNumberFromId(id: string): number | null {
+  const match = id.match(/(?:chapter[/:_-]|:)(\d+(?:\.\d+)?)$/i);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
 
 const MODE_LABELS: Record<ReadingMode, string> = {
   webtoon: 'Long Strip (Webtoon)',
@@ -62,6 +86,7 @@ interface ReaderImagePageProps {
   zoomEnabled?: boolean;
   onTap?: (x: number) => void;
   onAspectMeasured?: (ratio: number) => void;
+  headers?: Record<string, string>;
 }
 
 const ReaderImagePage = React.memo(function ReaderImagePage({
@@ -73,17 +98,22 @@ const ReaderImagePage = React.memo(function ReaderImagePage({
   zoomEnabled = true,
   onTap,
   onAspectMeasured,
+  headers,
 }: ReaderImagePageProps) {
+  const colors = useThemeColors();
+  const theme = useReaderStore((s) => s.theme);
+  const readerTheme = ReaderThemes[theme];
   const [isError, setIsError] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [isRetrying, setIsRetrying] = useState(false);
 
   const imageSource = useMemo(() => {
     if (!url) return null;
-    if (retryCount === 0) return { uri: url };
+    const baseSource = headers ? { uri: url, headers } : { uri: url };
+    if (retryCount === 0) return baseSource;
     const separator = url.includes('?') ? '&' : '?';
-    return { uri: `${url}${separator}retry=${retryCount}` };
-  }, [url, retryCount]);
+    return { ...baseSource, uri: `${url}${separator}retry=${retryCount}` };
+  }, [url, retryCount, headers]);
 
   const handleImageError = useCallback(() => {
     ApiLogger.logRequest({
@@ -119,10 +149,10 @@ const ReaderImagePage = React.memo(function ReaderImagePage({
   return (
     <View style={{ width, height, justifyContent: 'center', alignItems: 'center' }}>
       {isError ? (
-        <View style={[styles.imageErrorCard, { width: Math.min(width - 32, 420) }]}>
-          <Ionicons name="warning-outline" size={32} color="#F59E0B" />
-          <Text style={styles.imageErrorTitle}>Page {index + 1} Load Failed</Text>
-          <Text style={styles.imageErrorSubtext}>
+        <View style={[styles.imageErrorCard, { width: Math.min(width - 32, 420), borderColor: colors.border }]}>
+          <Ionicons name="warning-outline" size={32} color={colors.accent} />
+          <Text style={[styles.imageErrorTitle, { color: colors.text }]}>Page {index + 1} Load Failed</Text>
+          <Text style={[styles.imageErrorSubtext, { color: colors.textSecondary }]}>
             MangaDex rate limit (429) or network timeout.
           </Text>
 
@@ -130,11 +160,12 @@ const ReaderImagePage = React.memo(function ReaderImagePage({
             onPress={handleManualRetry}
             style={({ pressed }) => [
               styles.imageRetryBtn,
+              { backgroundColor: colors.accent },
               pressed && { opacity: 0.8 },
             ]}
           >
-            <Ionicons name="refresh" size={16} color="#FFFFFF" />
-            <Text style={styles.imageRetryBtnText}>Retry Page {index + 1}</Text>
+            <Ionicons name="refresh" size={16} color={getContrastTextColor(colors.accent)} />
+            <Text style={[styles.imageRetryBtnText, { color: getContrastTextColor(colors.accent) }]}>Retry Page {index + 1}</Text>
           </Pressable>
         </View>
       ) : (
@@ -158,9 +189,9 @@ const ReaderImagePage = React.memo(function ReaderImagePage({
           )}
 
           {isRetrying && (
-            <View style={styles.imageRetryOverlay}>
-              <ActivityIndicator size="small" color="#E11D48" />
-              <Text style={styles.imageRetryingText}>
+            <View style={[styles.imageRetryOverlay, { backgroundColor: readerTheme.background }]}>
+              <ActivityIndicator size="small" color={colors.accent} />
+              <Text style={[styles.imageRetryingText, { color: readerTheme.text }]}>
                 Rate limited / Retrying page {index + 1} ({retryCount + 1}/3)...
               </Text>
             </View>
@@ -178,6 +209,8 @@ interface WebtoonPageItemProps {
   windowHeight: number;
   imageFit: 'fit_both' | 'fit_width' | 'fit_height';
   onTap: (x: number) => void;
+  onLayout?: (event: LayoutChangeEvent) => void;
+  headers?: Record<string, string>;
 }
 
 const WebtoonPageItem = React.memo(function WebtoonPageItem({
@@ -187,6 +220,8 @@ const WebtoonPageItem = React.memo(function WebtoonPageItem({
   windowHeight,
   imageFit,
   onTap,
+  onLayout,
+  headers,
 }: WebtoonPageItemProps) {
   const [aspectRatio, setAspectRatio] = useState<number>(1.5);
 
@@ -195,7 +230,8 @@ const WebtoonPageItem = React.memo(function WebtoonPageItem({
   const displayFit = imageFit === 'fit_height' ? 'contain' : 'fill';
 
   return (
-    <ReaderImagePage
+    <View onLayout={onLayout}>
+      <ReaderImagePage
       url={url}
       index={index}
       width={webtoonWidth}
@@ -203,16 +239,18 @@ const WebtoonPageItem = React.memo(function WebtoonPageItem({
       contentFit={displayFit}
       zoomEnabled={false}
       onTap={onTap}
-      onAspectMeasured={(ratio) => {
-        setAspectRatio((prev) => (prev === ratio ? prev : ratio));
-      }}
-    />
+      headers={headers}
+        onAspectMeasured={(ratio) => {
+          setAspectRatio((prev) => (prev === ratio ? prev : ratio));
+        }}
+      />
+    </View>
   );
 });
 
 export default function ReaderScreen() {
   const router = useRouter();
-  const colors = Colors.dark;
+  const colors = useThemeColors();
   const { checkNetwork } = useNetworkStatus();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { chapterId, mangaId, page } = useLocalSearchParams<{
@@ -240,6 +278,9 @@ export default function ReaderScreen() {
 
   // Local state
   const [pages, setPages] = useState<string[]>([]);
+  const [nextChapterPages, setNextChapterPages] = useState<string[]>([]);
+  const [nextChapterPageHeaders, setNextChapterPageHeaders] = useState<Record<string, string> | undefined>();
+  const [activeWebtoonChapterId, setActiveWebtoonChapterId] = useState<string | undefined>(chapterId);
   const [currentPage, setCurrentPage] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -248,6 +289,7 @@ export default function ReaderScreen() {
   const [sideMenuVisible, setSideMenuVisible] = useState(false);
   const [imageFit, setImageFit] = useState<'fit_both' | 'fit_width' | 'fit_height'>('fit_both');
   const [headerHidden, setHeaderHidden] = useState(false);
+  const [pageTimelineWidth, setPageTimelineWidth] = useState(0);
 
   const [mangaTitle, setMangaTitle] = useState('Manga');
   const [chapterTitle, setChapterTitle] = useState(`Chapter`);
@@ -258,26 +300,58 @@ export default function ReaderScreen() {
   const [currentChapterPublishAt, setCurrentChapterPublishAt] = useState<string | undefined>();
   const [uploaderName, setUploaderName] = useState<string>('Uploader');
   const [resolvedMangaId, setResolvedMangaId] = useState<string | undefined>(mangaId);
+  const [pageHeaders, setPageHeaders] = useState<Record<string, string> | undefined>(undefined);
 
   const flatListRef = useRef<FlatList>(null);
   const webtoonListRef = useRef<FlatList<string>>(null);
   const restoredChapterIdRef = useRef<string | null>(null);
   const resumeTargetPageRef = useRef(0);
   const resumeRestoreAttemptsRef = useRef(0);
-
-  const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
-    if (viewableItems && viewableItems.length > 0) {
-      const firstVisible = viewableItems[0].index;
-      if (firstVisible !== null && firstVisible !== undefined) {
-        setCurrentPage(firstVisible);
-      }
-    }
-  }).current;
+  const isProgrammaticScrollRef = useRef(false);
+  const webtoonJumpAttemptsRef = useRef(0);
+  const pendingWebtoonJumpRef = useRef<number | null>(null);
+  const webtoonJumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nextChapterLoadRequestedRef = useRef(false);
+  const lastWebtoonPositionRef = useRef<number | null>(null);
+  const webtoonLayoutsRef = useRef(new Map<number, { y: number; height: number }>());
+  const pendingWebtoonOffsetRef = useRef(0);
+  const currentWebtoonIndexRef = useRef(0);
+  const webtoonScrollOffsetRef = useRef(0);
 
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 30,
   }).current;
   const readerTheme = ReaderThemes[theme];
+
+  const moveWebtoonTo = useCallback((index: number, scrollOffset = 0, animated = false) => {
+    isProgrammaticScrollRef.current = true;
+    pendingWebtoonJumpRef.current = index;
+    pendingWebtoonOffsetRef.current = Math.max(0, scrollOffset);
+
+    const layout = webtoonLayoutsRef.current.get(index);
+    if (layout) {
+      webtoonListRef.current?.scrollToOffset({
+        offset: Math.max(0, layout.y + pendingWebtoonOffsetRef.current),
+        animated,
+      });
+      pendingWebtoonJumpRef.current = null;
+      return;
+    }
+
+    webtoonListRef.current?.scrollToIndex({ index, animated, viewPosition: 0 });
+  }, []);
+
+  const handleWebtoonPageLayout = useCallback((index: number, event: LayoutChangeEvent) => {
+    const { y, height } = event.nativeEvent.layout;
+    webtoonLayoutsRef.current.set(index, { y, height });
+
+    if (pendingWebtoonJumpRef.current !== index) return;
+    webtoonListRef.current?.scrollToOffset({
+      offset: Math.max(0, y + pendingWebtoonOffsetRef.current),
+      animated: false,
+    });
+    pendingWebtoonJumpRef.current = null;
+  }, []);
 
   // Load chapter pages & metadata
   useEffect(() => {
@@ -300,15 +374,14 @@ export default function ReaderScreen() {
     }
 
     const frame = requestAnimationFrame(() => {
-      webtoonListRef.current?.scrollToIndex({
-        index: resumeTargetPageRef.current,
-        animated: false,
-      });
+      moveWebtoonTo(resumeTargetPageRef.current, pendingWebtoonOffsetRef.current);
       restoredChapterIdRef.current = chapterId;
     });
 
-    return () => cancelAnimationFrame(frame);
-  }, [chapterId, isLoading, mode, pages.length]);
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [chapterId, isLoading, mode, moveWebtoonTo, pages.length]);
 
   const loadPages = async () => {
     try {
@@ -318,6 +391,19 @@ export default function ReaderScreen() {
       restoredChapterIdRef.current = null;
       resumeTargetPageRef.current = 0;
       resumeRestoreAttemptsRef.current = 0;
+      isProgrammaticScrollRef.current = false;
+      webtoonJumpAttemptsRef.current = 0;
+      pendingWebtoonJumpRef.current = null;
+      if (webtoonJumpTimerRef.current) clearTimeout(webtoonJumpTimerRef.current);
+      setActiveWebtoonChapterId(chapterId);
+      setNextChapterPages([]);
+      setNextChapterPageHeaders(undefined);
+      nextChapterLoadRequestedRef.current = false;
+      lastWebtoonPositionRef.current = null;
+      webtoonLayoutsRef.current.clear();
+      pendingWebtoonOffsetRef.current = 0;
+      currentWebtoonIndexRef.current = 0;
+      webtoonScrollOffsetRef.current = 0;
 
       // Check if downloaded locally
       const downloadedCh = useDownloadStore.getState().getChapter(chapterId!);
@@ -334,8 +420,15 @@ export default function ReaderScreen() {
           return;
         }
 
-        const result = await getChapterPages(chapterId!, dataSaver);
-        loadedPages = result.pages;
+        const isExt = isExternalSource(chapterId!);
+        if (isExt) {
+          const result = await getUniversalChapterPages(chapterId!);
+          loadedPages = result.pages;
+          setPageHeaders(result.headers);
+        } else {
+          const result = await getChapterPages(chapterId!, dataSaver);
+          loadedPages = result.pages;
+        }
       }
 
       setPages(loadedPages);
@@ -347,6 +440,7 @@ export default function ReaderScreen() {
         const historyEntry = useHistoryStore.getState().entries.find((e) => e.chapterId === chapterId);
         if (historyEntry) {
           targetPage = historyEntry.pageIndex;
+          pendingWebtoonOffsetRef.current = historyEntry.scrollOffset || 0;
         }
       }
       const maxPage = Math.max(0, loadedPages.length - 1);
@@ -373,23 +467,31 @@ export default function ReaderScreen() {
       let targetMangaId = mangaId || resolvedMangaId;
       let chapterLang = 'en';
 
-      const chapterData = await getChapterDetails(chapterId!);
-      if (chapterData) {
-        chapterLang = chapterData.attributes?.translatedLanguage || 'en';
-        setScanlationGroup(extractScanlationGroupName(chapterData));
-        setUploaderName(extractUploaderUsername(chapterData));
+      const isExt = isExternalSource(chapterId!);
+      let chapterData: Chapter | null = null;
 
-        const mangaRel = chapterData.relationships?.find((r) => r.type === 'manga');
-        if (mangaRel?.id && !targetMangaId) {
-          targetMangaId = mangaRel.id;
-          setResolvedMangaId(mangaRel.id);
+      if (!isExt) {
+        chapterData = await getChapterDetails(chapterId!);
+        if (chapterData) {
+          chapterLang = chapterData.attributes?.translatedLanguage || 'en';
+          setScanlationGroup(extractScanlationGroupName(chapterData));
+          setUploaderName(extractUploaderUsername(chapterData));
+
+          const mangaRel = chapterData.relationships?.find((r) => r.type === 'manga');
+          if (mangaRel?.id && !targetMangaId) {
+            targetMangaId = mangaRel.id;
+            setResolvedMangaId(mangaRel.id);
+          }
         }
       }
 
       if (targetMangaId) {
+        const isExtManga = isExternalSource(targetMangaId);
         const [manga, chList] = await Promise.all([
-          getMangaDetails(targetMangaId),
-          getMangaChapters(targetMangaId, chapterLang, 500, 0, 'desc'),
+          isExtManga ? getUniversalMangaDetails(targetMangaId) : getMangaDetails(targetMangaId),
+          isExtManga
+            ? getUniversalMangaChapters(targetMangaId).then((chs) => ({ data: chs, total: chs.length }))
+            : getMangaChapters(targetMangaId, chapterLang, 500, 0, 'desc'),
         ]);
 
         const title = getMangaTitle(manga);
@@ -424,7 +526,7 @@ export default function ReaderScreen() {
 
   // Save progress to history & update library unread badge
   useEffect(() => {
-    if (pages.length > 0 && chapterId) {
+    if (pages.length > 0 && chapterId && (mode !== 'webtoon' || activeWebtoonChapterId === chapterId)) {
       const activeMangaId = mangaId ?? chapterId!;
       addHistoryEntry({
         mangaId: activeMangaId,
@@ -434,6 +536,7 @@ export default function ReaderScreen() {
         coverUrl: coverUrl,
         pageIndex: currentPage,
         totalPages: pages.length,
+        scrollOffset: mode === 'webtoon' ? webtoonScrollOffsetRef.current : 0,
       });
 
       // If manga is bookmarked in the library, update read progress & unread count
@@ -449,14 +552,127 @@ export default function ReaderScreen() {
         libStore.updateReadProgress(activeMangaId, chapterId!, currentPage, unread);
       }
     }
-  }, [currentPage, pages.length, mangaTitle, chapterTitle, coverUrl, chapterList]);
+  }, [activeWebtoonChapterId, chapterId, currentPage, mode, pages.length, mangaTitle, chapterTitle, coverUrl, chapterList]);
 
   // Chapter Switching
   const currentChapterIdx = chapterList.findIndex((c) => c.id === chapterId);
+  const currentChapter = currentChapterIdx >= 0
+    ? chapterList[currentChapterIdx]
+    : chapterList.find((c) => {
+        const currentNumber = getChapterNumberFromId(chapterId || '');
+        return currentNumber !== null && Number(c.attributes.chapter) === currentNumber;
+      });
+  const currentChapterNumber = currentChapter?.attributes.chapter
+    ? Number(currentChapter.attributes.chapter)
+    : getChapterNumberFromId(chapterId || '');
 
-  const nextChapterId = currentChapterIdx > 0
-    ? chapterList[currentChapterIdx - 1]?.id
-    : (currentChapterIdx === -1 && chapterList.length > 0 ? chapterList[0]?.id : undefined);
+  const nextChapterId = currentChapterNumber !== null
+    ? chapterList
+        .filter((chapter) => Number(chapter.attributes.chapter) > currentChapterNumber)
+        .sort((a, b) => Number(a.attributes.chapter) - Number(b.attributes.chapter))[0]?.id
+    : (currentChapterIdx > 0 ? chapterList[currentChapterIdx - 1]?.id : undefined);
+
+  // Keep the next chapter unloaded until the reader reaches the current chapter's
+  // boundary. This mirrors Kotatsu's lazy adjacent-chapter loading behavior.
+  useEffect(() => {
+    setNextChapterPages([]);
+    setNextChapterPageHeaders(undefined);
+    nextChapterLoadRequestedRef.current = false;
+    setActiveWebtoonChapterId(chapterId);
+  }, [dataSaver, mode, nextChapterId]);
+
+  const loadNextChapterPages = useCallback(async () => {
+    if (mode !== 'webtoon' || !nextChapterId || nextChapterLoadRequestedRef.current) return;
+    nextChapterLoadRequestedRef.current = true;
+    try {
+      const result = isExternalSource(nextChapterId)
+        ? await getUniversalChapterPages(nextChapterId)
+        : await getChapterPages(nextChapterId, dataSaver);
+      setNextChapterPages(result.pages);
+      if ('headers' in result) setNextChapterPageHeaders(result.headers);
+    } catch (err) {
+      nextChapterLoadRequestedRef.current = false;
+      console.warn('Unable to load next chapter webtoon pages:', err);
+    }
+  }, [dataSaver, mode, nextChapterId]);
+
+  const activeAppendedChapter = activeWebtoonChapterId === nextChapterId ? chapterList.find((c) => c.id === nextChapterId) : undefined;
+  const activePageCount = activeAppendedChapter ? nextChapterPages.length : pages.length;
+  const activeChapterTitle = activeAppendedChapter
+    ? `${activeAppendedChapter.attributes.chapter ? `Ch. ${activeAppendedChapter.attributes.chapter}` : 'Chapter'}${activeAppendedChapter.attributes.title ? ` - ${activeAppendedChapter.attributes.title}` : ''}`
+    : chapterTitle;
+  const activeChapterPublishAt = activeAppendedChapter?.attributes.publishAt || activeAppendedChapter?.attributes.readableAt || currentChapterPublishAt;
+  const activeScanlationGroup = activeAppendedChapter ? extractScanlationGroupName(activeAppendedChapter) : scanlationGroup;
+  const activeUploaderName = activeAppendedChapter ? extractUploaderUsername(activeAppendedChapter) : uploaderName;
+  const webtoonPages = useMemo(
+    () => (nextChapterPages.length > 0 ? [...pages, ...nextChapterPages] : pages),
+    [nextChapterPages, pages]
+  );
+
+  const handleWebtoonViewableItemsChanged = useCallback(({ viewableItems }: any) => {
+    const firstVisible = viewableItems?.[0]?.index;
+    if (firstVisible === null || firstVisible === undefined) return;
+
+    if (firstVisible >= pages.length - 2 && nextChapterPages.length === 0 && nextChapterId) {
+      loadNextChapterPages();
+    }
+
+    const pendingJump = pendingWebtoonJumpRef.current;
+    if (pendingJump !== null && viewableItems.some((item: any) => item.index === pendingJump)) {
+      const layout = webtoonLayoutsRef.current.get(pendingJump);
+      if (layout) {
+        webtoonListRef.current?.scrollToOffset({
+          offset: Math.max(0, layout.y + pendingWebtoonOffsetRef.current),
+          animated: false,
+        });
+        pendingWebtoonJumpRef.current = null;
+      }
+    } else if (pendingJump !== null) {
+      return;
+    }
+
+    if (lastWebtoonPositionRef.current === firstVisible) return;
+    lastWebtoonPositionRef.current = firstVisible;
+    currentWebtoonIndexRef.current = firstVisible;
+
+    if (firstVisible < pages.length) {
+      setActiveWebtoonChapterId(chapterId);
+      setCurrentPage(firstVisible);
+    } else if (nextChapterPages.length > 0) {
+      setActiveWebtoonChapterId(nextChapterId);
+      setCurrentPage(firstVisible - pages.length);
+    }
+  }, [chapterId, loadNextChapterPages, nextChapterId, nextChapterPages.length, pages.length]);
+
+  useEffect(() => {
+    if (!activeAppendedChapter || currentPage < 0 || nextChapterPages.length === 0) return;
+    addHistoryEntry({
+      mangaId: mangaId ?? resolvedMangaId ?? activeAppendedChapter.id,
+      chapterId: activeAppendedChapter.id,
+      title: mangaTitle,
+      chapterTitle: activeChapterTitle,
+      coverUrl,
+      pageIndex: currentPage,
+      totalPages: nextChapterPages.length,
+      scrollOffset: webtoonScrollOffsetRef.current,
+    });
+  }, [activeAppendedChapter, activeChapterTitle, addHistoryEntry, coverUrl, currentPage, mangaId, mangaTitle, nextChapterPages.length, resolvedMangaId]);
+
+  const saveWebtoonProgress = useCallback(() => {
+    if (mode !== 'webtoon' || activePageCount === 0) return;
+    const activeChapterId = activeAppendedChapter?.id || chapterId;
+    if (!activeChapterId) return;
+    addHistoryEntry({
+      mangaId: mangaId ?? resolvedMangaId ?? activeChapterId,
+      chapterId: activeChapterId,
+      title: mangaTitle,
+      chapterTitle: activeChapterTitle,
+      coverUrl,
+      pageIndex: currentPage,
+      totalPages: activePageCount,
+      scrollOffset: webtoonScrollOffsetRef.current,
+    });
+  }, [activeAppendedChapter, activeChapterTitle, activePageCount, addHistoryEntry, chapterId, coverUrl, currentPage, mangaId, mangaTitle, mode, resolvedMangaId]);
 
   const prevChapterId = (currentChapterIdx >= 0 && currentChapterIdx < chapterList.length - 1)
     ? chapterList[currentChapterIdx + 1]?.id
@@ -491,21 +707,13 @@ export default function ReaderScreen() {
 
   const goToPage = useCallback(
     (pageIdx: number) => {
-      const clamped = Math.max(0, Math.min(pageIdx, pages.length - 1));
+      const pageCount = activeAppendedChapter ? nextChapterPages.length : pages.length;
+      const clamped = Math.max(0, Math.min(pageIdx, pageCount - 1));
       setCurrentPage(clamped);
 
       if (mode === 'webtoon') {
-        try {
-          webtoonListRef.current?.scrollToIndex({
-            index: clamped,
-            animated: true,
-          });
-        } catch {
-          webtoonListRef.current?.scrollToOffset({
-            offset: clamped * (windowHeight * 0.9),
-            animated: true,
-          });
-        }
+        const globalIndex = activeAppendedChapter ? pages.length + clamped : clamped;
+        moveWebtoonTo(globalIndex, 0, true);
       } else if (mode === 'double') {
         const spreadIdx = Math.floor(clamped / 2);
         try {
@@ -533,30 +741,46 @@ export default function ReaderScreen() {
         }
       }
     },
-    [pages.length, mode, windowWidth, windowHeight]
+    [activeAppendedChapter, mode, moveWebtoonTo, nextChapterPages.length, pages.length, windowWidth]
   );
 
   const goToNextPageOrChapter = useCallback(() => {
-    if (currentPage < pages.length - 1) {
+    if (currentPage < activePageCount - 1) {
       goToPage(currentPage + 1);
-    } else if (hasNextChapter) {
+    } else if (activeAppendedChapter) {
+      return;
+    } else if (nextChapterPages.length > 0) {
+      setActiveWebtoonChapterId(nextChapterId);
+      setCurrentPage(0);
+      isProgrammaticScrollRef.current = true;
+      webtoonListRef.current?.scrollToIndex({
+        index: pages.length,
+        animated: true,
+        viewPosition: 0,
+      });
+    } else if (hasNextChapter && nextChapterPages.length === 0) {
       if (hapticsEnabled && Platform.OS !== 'web') {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
       handleNextChapter();
     }
-  }, [currentPage, pages.length, goToPage, hasNextChapter, handleNextChapter, hapticsEnabled]);
+  }, [activeAppendedChapter, activePageCount, currentPage, goToPage, hasNextChapter, handleNextChapter, hapticsEnabled, nextChapterPages.length]);
 
   const goToPrevPageOrChapter = useCallback(() => {
     if (currentPage > 0) {
       goToPage(currentPage - 1);
+    } else if (activeAppendedChapter) {
+      setActiveWebtoonChapterId(chapterId);
+      setCurrentPage(pages.length - 1);
+      isProgrammaticScrollRef.current = true;
+      webtoonListRef.current?.scrollToIndex({ index: pages.length - 1, animated: true, viewPosition: 0 });
     } else if (hasPrevChapter) {
       if (hapticsEnabled && Platform.OS !== 'web') {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
       handlePrevChapter();
     }
-  }, [currentPage, goToPage, hasPrevChapter, handlePrevChapter, hapticsEnabled]);
+  }, [activeAppendedChapter, chapterId, currentPage, goToPage, hasPrevChapter, handlePrevChapter, hapticsEnabled, pages.length]);
 
   const handlePageTap = useCallback(
     (x: number) => {
@@ -573,6 +797,11 @@ export default function ReaderScreen() {
         if (hapticsEnabled) {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         }
+      }
+
+      // In webtoon mode, disable left/right tap navigation
+      if (mode === 'webtoon') {
+        return;
       }
 
       if (mode === 'rtl') {
@@ -602,6 +831,10 @@ export default function ReaderScreen() {
 
       if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
         e.preventDefault();
+        if (mode === 'webtoon') {
+          // Disable left/right navigation in webtoon mode
+          return;
+        }
         if (mode === 'rtl') {
           goToNextPageOrChapter();
         } else {
@@ -609,6 +842,10 @@ export default function ReaderScreen() {
         }
       } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D' || e.key === ' ') {
         e.preventDefault();
+        if (mode === 'webtoon') {
+          // Disable left/right navigation in webtoon mode
+          return;
+        }
         if (mode === 'rtl') {
           goToPrevPageOrChapter();
         } else {
@@ -679,6 +916,7 @@ export default function ReaderScreen() {
         height={windowHeight}
         contentFit={fitMode}
         onTap={handlePageTap}
+        headers={pageHeaders}
       />
     );
   };
@@ -699,6 +937,7 @@ export default function ReaderScreen() {
           height={windowHeight}
           contentFit="contain"
           onTap={handlePageTap}
+          headers={pageHeaders}
         />
         {rightUrl && (
           <ReaderImagePage
@@ -708,6 +947,7 @@ export default function ReaderScreen() {
             height={windowHeight}
             contentFit="contain"
             onTap={handlePageTap}
+            headers={pageHeaders}
           />
         )}
       </View>
@@ -719,8 +959,8 @@ export default function ReaderScreen() {
   if (isLoading) {
     return (
       <View style={[styles.centerContainer, { backgroundColor: readerTheme.background }]}>
-        <ActivityIndicator size="large" color="#E11D48" />
-        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+        <ActivityIndicator size="large" color={colors.accent} />
+        <Text style={[styles.loadingText, { color: readerTheme.text }]}>
           Loading chapter pages...
         </Text>
       </View>
@@ -729,7 +969,7 @@ export default function ReaderScreen() {
 
   if (offlineUnavailable) {
     return (
-      <View style={[styles.centerContainer, { backgroundColor: readerTheme.background }]}>
+      <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
         <OfflineState onRetry={loadPages} />
       </View>
     );
@@ -737,9 +977,9 @@ export default function ReaderScreen() {
 
   if (error || pages.length === 0) {
     return (
-      <View style={[styles.centerContainer, { backgroundColor: readerTheme.background }]}>
-        <Ionicons name="alert-circle-outline" size={52} color="#E11D48" />
-        <Text style={[styles.errorText, { color: readerTheme.text }]}>
+      <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
+        <Ionicons name="alert-circle-outline" size={52} color={colors.accent} />
+        <Text style={[styles.errorText, { color: colors.text }]}>
           {error || 'No pages found for this chapter.'}
         </Text>
 
@@ -749,7 +989,7 @@ export default function ReaderScreen() {
             <Pressable
               style={({ pressed }) => [
                 styles.errorNavBtn,
-                { opacity: pressed ? 0.7 : 1, borderColor: colors.border },
+                { opacity: pressed ? 0.7 : 1, borderColor: colors.border, backgroundColor: colors.surface },
               ]}
               onPress={handlePrevChapter}
             >
@@ -761,12 +1001,12 @@ export default function ReaderScreen() {
           <Pressable
             style={({ pressed }) => [
               styles.retryButton,
-              { opacity: pressed ? 0.8 : 1 },
+              { opacity: pressed ? 0.8 : 1, backgroundColor: colors.accent },
             ]}
             onPress={loadPages}
           >
-            <Ionicons name="refresh" size={16} color="#FFF" />
-            <Text style={styles.retryText}>Retry</Text>
+            <Ionicons name="refresh" size={16} color={getContrastTextColor(colors.accent)} />
+            <Text style={[styles.retryText, { color: getContrastTextColor(colors.accent) }]}>Retry</Text>
           </Pressable>
 
           {hasNextChapter && (
@@ -777,8 +1017,8 @@ export default function ReaderScreen() {
               ]}
               onPress={handleNextChapter}
             >
-              <Text style={styles.errorNextBtnText}>Next Ch.</Text>
-              <Ionicons name="arrow-forward" size={16} color="#FFF" />
+              <Text style={[styles.errorNextBtnText, { color: getContrastTextColor(colors.accent) }]}>Next Ch.</Text>
+              <Ionicons name="arrow-forward" size={16} color={getContrastTextColor(colors.accent)} />
             </Pressable>
           )}
         </View>
@@ -804,6 +1044,7 @@ export default function ReaderScreen() {
   }
 
   const webtoonWidth = Math.min(windowWidth, 800);
+  const pageTimelineDotCount = Math.min(activePageCount, 18);
 
   return (
     <View style={[styles.readerContainer, { backgroundColor: readerTheme.background }]}>
@@ -815,7 +1056,7 @@ export default function ReaderScreen() {
           key={`flatlist-webtoon-${chapterId}`}
           ref={webtoonListRef}
           style={styles.webtoonList}
-          data={pages}
+          data={webtoonPages}
           keyExtractor={(item, index) => `webtoon-${item}-${index}`}
           renderItem={({ item, index }) => (
             <WebtoonPageItem
@@ -825,9 +1066,11 @@ export default function ReaderScreen() {
               windowHeight={windowHeight}
               imageFit={imageFit}
               onTap={handlePageTap}
+              headers={index < pages.length ? pageHeaders : nextChapterPageHeaders}
+              onLayout={(event) => handleWebtoonPageLayout(index, event)}
             />
           )}
-          onViewableItemsChanged={onViewableItemsChanged}
+          onViewableItemsChanged={handleWebtoonViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
           removeClippedSubviews={false}
           scrollEnabled={true}
@@ -837,45 +1080,37 @@ export default function ReaderScreen() {
           initialNumToRender={5}
           windowSize={7}
           onScrollToIndexFailed={({ index, averageItemLength }) => {
-            if (resumeRestoreAttemptsRef.current >= 3) return;
-            resumeRestoreAttemptsRef.current += 1;
-
-            // Page heights are image-dependent. Use RN's measured average first,
-            // then retry once the target page enters the render window.
+            // Bring the target into the render window. Its onLayout callback then
+            // restores the exact page-relative offset without repeated snapping.
             webtoonListRef.current?.scrollToOffset({
               offset: averageItemLength * index,
               animated: false,
             });
-            setTimeout(() => {
-              webtoonListRef.current?.scrollToIndex({ index, animated: false });
-            }, 100);
           }}
+          onScroll={({ nativeEvent }) => {
+            const layout = webtoonLayoutsRef.current.get(currentWebtoonIndexRef.current);
+            if (layout) {
+              webtoonScrollOffsetRef.current = Math.max(0, nativeEvent.contentOffset.y - layout.y);
+            }
+          }}
+          onScrollEndDrag={saveWebtoonProgress}
+          onMomentumScrollEnd={saveWebtoonProgress}
+          scrollEventThrottle={16}
+          onScrollBeginDrag={() => {
+            // A page-selector/history restore may still be retrying while image
+            // heights settle. Once the reader drags, their scroll must win.
+            isProgrammaticScrollRef.current = false;
+            pendingWebtoonJumpRef.current = null;
+            if (webtoonJumpTimerRef.current) {
+              clearTimeout(webtoonJumpTimerRef.current);
+              webtoonJumpTimerRef.current = null;
+            }
+          }}
+          bounces
+          alwaysBounceVertical
+          overScrollMode="always"
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ alignItems: 'center' }}
-          ListFooterComponent={
-            pages.length > 0 ? (
-              <View style={styles.endOfChapterCard}>
-                <Ionicons name="checkmark-circle" size={36} color={Colors.dark.accent} />
-                <Text style={styles.endOfChapterTitle}>Finished {chapterTitle}</Text>
-                {hasNextChapter ? (
-                  <Pressable
-                    onPress={handleNextChapter}
-                    style={({ pressed }) => [
-                      styles.nextChapterBtn,
-                      { opacity: pressed ? 0.8 : 1 },
-                    ]}
-                  >
-                    <Text style={styles.nextChapterBtnText}>
-                      Continue to Next Chapter ({chapterList[currentChapterIdx - 1]?.attributes?.chapter ? `Ch. ${chapterList[currentChapterIdx - 1].attributes.chapter}` : 'Next'})
-                    </Text>
-                    <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
-                  </Pressable>
-                ) : (
-                  <Text style={styles.lastChapterSubtext}>You've reached the latest available chapter!</Text>
-                )}
-              </View>
-            ) : null
-          }
         />
       ) : mode === 'double' ? (
         <FlatList
@@ -920,10 +1155,10 @@ export default function ReaderScreen() {
       )}
 
       {/* Page Number Indicator */}
-      {showPageNumber && pages.length > 0 && (
-        <View style={styles.pageIndicator} pointerEvents="none">
-          <Text style={styles.pageIndicatorText}>
-            {currentPage + 1} / {pages.length}
+      {showPageNumber && activePageCount > 0 && (
+        <View style={[styles.pageIndicator, { backgroundColor: colors.surfaceElevated }]} pointerEvents="none">
+          <Text style={[styles.pageIndicatorText, { color: colors.text }]}>
+            {currentPage + 1} / {activePageCount}
           </Text>
         </View>
       )}
@@ -932,7 +1167,7 @@ export default function ReaderScreen() {
       {Platform.OS !== 'web' && controlsVisible && (
         <View style={[StyleSheet.absoluteFill, { pointerEvents: 'box-none' }]}>
           {/* Top Bar */}
-          <View style={styles.topBar}>
+          <View style={[styles.topBar, { backgroundColor: colors.surfaceElevated }]}>
             <Pressable
               onPress={() => {
                 setControlsVisible(false);
@@ -946,15 +1181,15 @@ export default function ReaderScreen() {
               }}
               style={styles.controlButton}
             >
-              <Ionicons name="arrow-back" size={22} color="#FFF" />
+              <Ionicons name="arrow-back" size={22} color={colors.text} />
             </Pressable>
 
             <View style={styles.topTitleCol}>
-              <Text style={styles.topBarTitle} numberOfLines={1}>
-                {chapterTitle}
+              <Text style={[styles.topBarTitle, { color: colors.text }]} numberOfLines={1}>
+                {activeChapterTitle}
               </Text>
-              <Text style={styles.topBarSubTitle} numberOfLines={1}>
-                Page {currentPage + 1} of {pages.length}
+              <Text style={[styles.topBarSubTitle, { color: colors.textMuted }]} numberOfLines={1}>
+                Page {currentPage + 1} of {activePageCount}
               </Text>
             </View>
 
@@ -962,13 +1197,13 @@ export default function ReaderScreen() {
               onPress={() => setSideMenuVisible(true)}
               style={styles.controlButton}
             >
-              <Ionicons name="options" size={22} color="#FFF" />
+              <Ionicons name="options" size={22} color={colors.text} />
             </Pressable>
           </View>
 
           {/* Mode Selector Quick Bar */}
           {showModeSelector && (
-            <View style={styles.modeSelectorContainer}>
+            <View style={[styles.modeSelectorContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               {(Object.keys(MODE_LABELS) as ReadingMode[]).map((m) => (
                 <Pressable
                   key={m}
@@ -981,47 +1216,114 @@ export default function ReaderScreen() {
                   }}
                   style={[
                     styles.modeOption,
-                    mode === m && { backgroundColor: 'rgba(255,255,255,0.1)' },
+                    mode === m && { backgroundColor: colors.accentSubtle },
                   ]}
                 >
                   <Text
                     style={[
                       styles.modeOptionText,
-                      { color: mode === m ? '#FAFAFA' : '#A1A1AA' },
+                      { color: mode === m ? colors.text : colors.textMuted },
                     ]}
                   >
                     {MODE_LABELS[m]}
                   </Text>
                   {mode === m && (
-                    <Ionicons name="checkmark" size={18} color="#FAFAFA" />
+                    <Ionicons name="checkmark" size={18} color={colors.text} />
                   )}
                 </Pressable>
               ))}
             </View>
           )}
 
-          {/* Bottom Slider Bar */}
-          <View style={styles.bottomBar}>
-            <Text style={styles.sliderLabel}>1</Text>
-            <View style={styles.sliderTrack}>
+          {/* Chapter and page timeline navigation */}
+          <View style={[styles.bottomBar, { backgroundColor: colors.surfaceElevated }]}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Previous chapter"
+              disabled={!hasPrevChapter}
+              onPress={handlePrevChapter}
+              style={({ pressed }) => [
+                styles.chapterNavButton,
+                {
+                  backgroundColor: pressed && hasPrevChapter ? colors.accentSubtle : 'transparent',
+                  opacity: !hasPrevChapter ? 0.3 : 1,
+                },
+              ]}
+            >
+              <Ionicons name="play-skip-back" size={18} color={colors.text} />
+            </Pressable>
+
+            <View
+              style={styles.pageTimeline}
+              onLayout={(event) => setPageTimelineWidth(event.nativeEvent.layout.width)}
+            >
+              <View style={[styles.timelineRail, { backgroundColor: colors.borderSubtle }]} />
               <View
                 style={[
-                  styles.sliderFill,
+                  styles.timelineProgress,
                   {
-                    width: `${((currentPage + 1) / pages.length) * 100}%`,
+                    width: `${activePageCount > 1 ? (currentPage / (activePageCount - 1)) * 100 : 0}%`,
+                    backgroundColor: colors.accent,
+                  },
+                ]}
+              />
+              {Array.from({ length: pageTimelineDotCount }, (_, dotIndex) => {
+                const progress = pageTimelineDotCount > 1
+                  ? dotIndex / (pageTimelineDotCount - 1)
+                  : 0;
+                return (
+                  <View
+                    key={dotIndex}
+                    pointerEvents="none"
+                    style={[
+                      styles.timelineDot,
+                      {
+                        left: `${Math.min(100, progress * 100)}%`,
+                        backgroundColor: colors.border,
+                      },
+                    ]}
+                  />
+                );
+              })}
+              <View
+                pointerEvents="none"
+                style={[
+                  styles.timelineCurrentMarker,
+                  {
+                    left: `${activePageCount > 1 ? (currentPage / (activePageCount - 1)) * 100 : 0}%`,
+                    backgroundColor: colors.accent,
                   },
                 ]}
               />
               <Pressable
                 style={StyleSheet.absoluteFill}
+                accessibilityRole="adjustable"
+                accessibilityLabel={`Page ${currentPage + 1} of ${activePageCount}`}
                 onPress={(e) => {
-                  const ratio = e.nativeEvent.locationX / (windowWidth - 80);
-                  const targetPage = Math.round(ratio * (pages.length - 1));
+                  const ratio = pageTimelineWidth > 0
+                    ? e.nativeEvent.locationX / pageTimelineWidth
+                    : 0;
+                  const targetPage = Math.round(ratio * (activePageCount - 1));
                   goToPage(targetPage);
                 }}
               />
             </View>
-            <Text style={styles.sliderLabel}>{pages.length}</Text>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Next chapter"
+              disabled={!hasNextChapter}
+              onPress={handleNextChapter}
+              style={({ pressed }) => [
+                styles.chapterNavButton,
+                {
+                  backgroundColor: pressed && hasNextChapter ? colors.accentSubtle : 'transparent',
+                  opacity: !hasNextChapter ? 0.3 : 1,
+                },
+              ]}
+            >
+              <Ionicons name="play-skip-forward" size={18} color={colors.text} />
+            </Pressable>
           </View>
         </View>
       )}
@@ -1031,14 +1333,14 @@ export default function ReaderScreen() {
         visible={sideMenuVisible}
         onClose={() => setSideMenuVisible(false)}
         mangaTitle={mangaTitle}
-        chapterTitle={chapterTitle}
-        scanlationGroup={scanlationGroup}
-        uploaderName={uploaderName}
-        currentChapterPublishAt={currentChapterPublishAt}
+        chapterTitle={activeChapterTitle}
+        scanlationGroup={activeScanlationGroup}
+        uploaderName={activeUploaderName}
+        currentChapterPublishAt={activeChapterPublishAt}
         currentPage={currentPage}
-        totalPages={pages.length}
+        totalPages={activePageCount}
         onSelectPage={goToPage}
-        currentChapterId={chapterId!}
+        currentChapterId={activeWebtoonChapterId || chapterId!}
         chapters={chapterList.map((c) => ({
           id: c.id,
           chapterNum: c.attributes.chapter ?? '?',
@@ -1084,11 +1386,12 @@ export default function ReaderScreen() {
           onPress={() => setSideMenuVisible(true)}
           style={({ pressed }) => [
             styles.webFloatingMenuTrigger,
+            { backgroundColor: colors.surface, borderColor: colors.border },
             pressed && { opacity: 0.85, transform: [{ scale: 0.96 }] },
           ]}
         >
-          <Ionicons name="options-outline" size={18} color="#FFFFFF" />
-          <Text style={styles.webFloatingMenuTriggerText}>Menu</Text>
+          <Ionicons name="options-outline" size={18} color={colors.text} />
+          <Text style={[styles.webFloatingMenuTriggerText, { color: colors.text }]}>Menu</Text>
         </Pressable>
       )}
     </View>
@@ -1131,7 +1434,6 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm + 2,
     borderRadius: Radius.md,
     borderWidth: 1,
-    backgroundColor: '#18181B',
   },
   errorNavBtnText: {
     fontSize: Typography.sizes.footnote,
@@ -1146,7 +1448,6 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
   },
   errorNextBtnText: {
-    color: '#FFF',
     fontSize: Typography.sizes.footnote,
     fontWeight: Typography.weights.bold,
   },
@@ -1156,11 +1457,9 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm + 2,
-    backgroundColor: '#E11D48',
     borderRadius: Radius.md,
   },
   retryText: {
-    color: '#FFF',
     fontWeight: Typography.weights.bold,
     fontSize: Typography.sizes.footnote,
   },
@@ -1203,7 +1502,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingTop: 45,
     paddingBottom: Spacing.sm,
-    backgroundColor: 'rgba(9,9,11,0.92)',
   },
   topTitleCol: {
     flex: 1,
@@ -1211,12 +1509,10 @@ const styles = StyleSheet.create({
     marginHorizontal: Spacing.sm,
   },
   topBarTitle: {
-    color: '#FAFAFA',
     fontSize: Typography.sizes.body,
     fontWeight: Typography.weights.bold,
   },
   topBarSubTitle: {
-    color: '#A1A1AA',
     fontSize: Typography.sizes.caption,
   },
   controlButton: {
@@ -1228,10 +1524,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 90,
     right: Spacing.lg,
-    backgroundColor: '#18181B',
     borderRadius: Radius.md,
     borderWidth: 1,
-    borderColor: '#27272A',
     paddingVertical: Spacing.xs,
     width: 220,
     zIndex: 30,
@@ -1252,13 +1546,11 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 24,
     alignSelf: 'center',
-    backgroundColor: 'rgba(0,0,0,0.75)',
     paddingHorizontal: Spacing.md,
     paddingVertical: 4,
     borderRadius: Radius.full,
   },
   pageIndicatorText: {
-    color: '#FAFAFA',
     fontSize: Typography.sizes.caption,
     fontWeight: Typography.weights.bold,
   },
@@ -1271,75 +1563,57 @@ const styles = StyleSheet.create({
     right: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    backgroundColor: 'rgba(9,9,11,0.92)',
-    gap: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    gap: Spacing.xs,
   },
-  sliderLabel: {
-    color: '#FAFAFA',
-    fontSize: Typography.sizes.caption,
-    fontWeight: Typography.weights.bold,
+  chapterNavButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.md,
   },
-  sliderTrack: {
+  pageTimeline: {
     flex: 1,
-    height: 6,
-    backgroundColor: '#27272A',
-    borderRadius: 3,
-    overflow: 'hidden',
+    height: 40,
+    justifyContent: 'center',
+    position: 'relative',
   },
-  sliderFill: {
-    height: '100%',
-    backgroundColor: '#E11D48',
+  timelineRail: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 2,
+    borderRadius: Radius.full,
+  },
+  timelineProgress: {
+    position: 'absolute',
+    left: 0,
+    height: 2,
+    borderRadius: Radius.full,
+  },
+  timelineDot: {
+    position: 'absolute',
+    top: 18,
+    width: 4,
+    height: 4,
+    marginLeft: -2,
+    borderRadius: Radius.full,
+  },
+  timelineCurrentMarker: {
+    position: 'absolute',
+    top: 6,
+    width: 3,
+    height: 28,
+    marginLeft: -1.5,
+    borderRadius: Radius.full,
   },
 
-  /* End of Chapter Card */
-  endOfChapterCard: {
-    paddingVertical: 36,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    backgroundColor: '#141417',
-    borderRadius: Radius.lg,
-    marginHorizontal: 16,
-    marginVertical: 32,
-    borderWidth: 1,
-    borderColor: '#27272A',
-  },
-  endOfChapterTitle: {
-    color: '#FAFAFA',
-    fontSize: Typography.sizes.headline,
-    fontWeight: Typography.weights.bold,
-    textAlign: 'center',
-  },
-  nextChapterBtn: {
-    backgroundColor: Colors.dark.accent,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: Radius.md,
-    gap: 8,
-    marginTop: 8,
-  },
-  nextChapterBtnText: {
-    color: '#FFFFFF',
-    fontSize: Typography.sizes.body,
-    fontWeight: Typography.weights.bold,
-  },
-  lastChapterSubtext: {
-    color: '#A1A1AA',
-    fontSize: Typography.sizes.footnote,
-    textAlign: 'center',
-  },
   webFloatingMenuTrigger: {
     position: 'fixed' as any,
     bottom: 28,
     right: 28,
-    backgroundColor: '#18181B',
-    borderColor: '#27272A',
     borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1353,14 +1627,11 @@ const styles = StyleSheet.create({
     cursor: 'pointer' as any,
   },
   webFloatingMenuTriggerText: {
-    color: '#FFFFFF',
     fontSize: 13,
     fontWeight: Typography.weights.bold,
     letterSpacing: 0.3,
   },
   imageErrorCard: {
-    backgroundColor: '#18181B',
-    borderColor: '#27272A',
     borderWidth: 1,
     borderRadius: Radius.lg,
     padding: Spacing.lg,
@@ -1370,18 +1641,15 @@ const styles = StyleSheet.create({
     marginVertical: 20,
   },
   imageErrorTitle: {
-    color: '#FAFAFA',
     fontSize: Typography.sizes.body,
     fontWeight: Typography.weights.bold,
     textAlign: 'center',
   },
   imageErrorSubtext: {
-    color: '#A1A1AA',
     fontSize: Typography.sizes.footnote,
     textAlign: 'center',
   },
   imageRetryBtn: {
-    backgroundColor: '#E11D48',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -1391,14 +1659,12 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   imageRetryBtnText: {
-    color: '#FFFFFF',
     fontSize: Typography.sizes.footnote,
     fontWeight: Typography.weights.bold,
   },
   imageRetryOverlay: {
     position: 'absolute',
     bottom: 20,
-    backgroundColor: 'rgba(9,9,11,0.85)',
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: Radius.full,
@@ -1407,7 +1673,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   imageRetryingText: {
-    color: '#FAFAFA',
     fontSize: 11,
     fontWeight: Typography.weights.bold,
   },
@@ -1415,8 +1680,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 20,
     right: 20,
-    backgroundColor: 'rgba(9, 9, 11, 0.85)',
-    borderColor: 'rgba(255, 255, 255, 0.2)',
     borderWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -1427,7 +1690,6 @@ const styles = StyleSheet.create({
     zIndex: 99,
   },
   zoomResetText: {
-    color: '#FAFAFA',
     fontSize: 11,
     fontWeight: Typography.weights.bold,
   },

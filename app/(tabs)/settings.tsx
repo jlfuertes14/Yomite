@@ -1,5 +1,6 @@
 /**
- * Settings Screen — Modern Minimalist Theme & MangaDex Auth
+ * Settings Screen — Ultra-Clean Flat Minimalist Theme (Google Stitch Style)
+ * Container-free, borderless, modern flat design with subtle dividers and tactile micro-interactions.
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -9,25 +10,29 @@ import {
   ScrollView,
   Pressable,
   Switch,
-  TextInput,
   ActivityIndicator,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Image } from 'expo-image';
-import { Colors, Spacing, Radius, Typography, ReaderThemes } from '../../constants/Colors';
+import { ReaderThemes } from '../../constants/Colors';
 import { useReaderStore } from '../../src/store/readerStore';
 import { useHistoryStore } from '../../src/store/historyStore';
 import { useUserStore, getUserDisplayName, getUserHandle, getUserAvatarUrl } from '../../src/store/userStore';
-import { useThemeStore, AppThemeMode, ACCENT_PRESETS } from '../../src/store/themeStore';
+import {
+  useThemeStore,
+  AppThemeMode,
+  THEME_SCHEME_PRESETS,
+} from '../../src/store/themeStore';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { requestNotificationPermissions, sendNewChapterNotification } from '../../src/services/notificationService';
 import { registerLibraryScanTask } from '../../src/services/backgroundScanner';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
 import { AnimatedPressable } from '../../src/components/AnimatedPressable';
+import { YomiteMascotIcon } from '../../src/components/YomiteMascotIcon';
 import type { ReadingMode, ReaderTheme } from '../../src/types';
 import { triggerHaptic } from '../../src/utils/haptics';
 
@@ -48,6 +53,19 @@ const READING_MODES: { key: ReadingMode; label: string; icon: VectorIcon }[] = [
 
 const THEME_KEYS = Object.keys(ReaderThemes) as ReaderTheme[];
 
+function getContrastTextColor(hex: string): string {
+  try {
+    const cleanHex = hex.replace('#', '');
+    const r = parseInt(cleanHex.substring(0, 2), 16) || 0;
+    const g = parseInt(cleanHex.substring(2, 4), 16) || 0;
+    const b = parseInt(cleanHex.substring(4, 6), 16) || 0;
+    const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+    return yiq >= 128 ? '#09090B' : '#FFFFFF';
+  } catch {
+    return '#09090B';
+  }
+}
+
 function CustomSwitch({
   value,
   onValueChange,
@@ -57,13 +75,14 @@ function CustomSwitch({
   onValueChange: (val: boolean) => void;
   activeColor: string;
 }) {
+  const colors = useThemeColors();
   return (
     <Switch
       value={value}
       onValueChange={onValueChange}
-      trackColor={{ false: '#27272A', true: activeColor }}
-      thumbColor={value ? '#FFFFFF' : '#A1A1AA'}
-      ios_backgroundColor="#27272A"
+      trackColor={{ false: colors.surfaceElevated, true: activeColor }}
+      thumbColor={value ? getContrastTextColor(activeColor) : colors.textMuted}
+      ios_backgroundColor={colors.surfaceElevated}
     />
   );
 }
@@ -72,10 +91,14 @@ export default function SettingsScreen() {
   useDocumentTitle('Settings');
   const router = useRouter();
   const colors = useThemeColors();
-  const accentColor = useThemeStore((s) => s.accentColor);
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= 860;
+
+  const accentColor = colors.accent;
   const appThemeMode = useThemeStore((s) => s.appThemeMode);
-  const setAccentColor = useThemeStore((s) => s.setAccentColor);
+  const colorScheme = useThemeStore((s) => s.colorScheme);
   const setAppThemeMode = useThemeStore((s) => s.setAppThemeMode);
+  const setColorScheme = useThemeStore((s) => s.setColorScheme);
   const [drawerVisible, setDrawerVisible] = useState(false);
 
   // Global reader preferences
@@ -112,7 +135,6 @@ export default function SettingsScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [isScanning, setIsScanning] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [customHex, setCustomHex] = useState('');
 
   // Custom Confirmation Dialog State
   const [confirmModalConfig, setConfirmModalConfig] = useState<{
@@ -243,774 +265,967 @@ export default function SettingsScreen() {
     });
   };
 
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[{ flex: 1, width: '100%' }, Platform.OS === 'web' && styles.webCenteredContent]}>
-        <View style={styles.header}>
-        <View style={styles.titleRow}>
-          {Platform.OS === 'web' && (
-            <Pressable
-              onPress={() => setDrawerVisible(true)}
-              style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1 }]}
-              hitSlop={8}
-            >
-              <Ionicons name="menu" size={26} color={colors.text} />
-            </Pressable>
-          )}
-          <Text style={[styles.title, { color: colors.text }]}>Settings</Text>
-        </View>
-      </View>
+  /* ── SECTION 1: ACCOUNT & PROFILE (FLAT) ── */
+  const renderAccountSection = () => (
+    <View style={styles.section}>
+      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}> 
+        Yomite Account & Profile Settings
+      </Text>
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.content}
-      >
-        {/* Yomite Account & Cloud Sync (Supabase Auth) */}
-        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
-          Yomite Account & Profile Settings
-        </Text>
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
-          {user ? (
-            <View style={{ gap: Spacing.sm }}>
-              <Pressable
-                onPress={() => router.push('/profile' as any)}
-                style={({ pressed }) => [styles.profileCardHeader, { opacity: pressed ? 0.7 : 1 }]}
-              >
-                <View style={styles.authStatusLeft}>
-                  <View
-                    style={[
-                      styles.profileAvatarCircle,
-                      {
-                        backgroundColor: getUserAvatarUrl(user) ? 'transparent' : colors.accent,
-                        borderColor: colors.border,
-                        borderWidth: 1.5,
-                        overflow: 'hidden',
-                      },
-                    ]}
-                  >
-                    {getUserAvatarUrl(user) ? (
-                      <Image
-                        source={{ uri: getUserAvatarUrl(user)! }}
-                        style={styles.profileAvatarImage}
-                        contentFit="cover"
-                        transition={200}
-                        cachePolicy="memory-disk"
-                      />
-                    ) : (
-                      <Text style={styles.profileAvatarText}>
-                        {getUserDisplayName(user).charAt(0).toUpperCase()}
-                      </Text>
-                    )}
-                  </View>
-                  <View style={{ flex: 1, gap: 2 }}>
-                    <Text style={[styles.profileNameText, { color: colors.text }]}>
-                      {getUserDisplayName(user)}
-                    </Text>
-                    <Text style={[styles.profileHandleText, { color: colors.textMuted }]}>
-                      @{getUserHandle(user)} · {user.email}
-                    </Text>
-                    <Text style={[styles.optionDesc, { color: colors.emerald, marginTop: 2 }]}>
-                      ● Cloud Sync & Multi-Device Active
-                    </Text>
-                  </View>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-              </Pressable>
-
-              <View style={[styles.accountDivider, { backgroundColor: colors.border }]} />
-
-              <View style={styles.accountActionRow}>
-                <Pressable
-                  onPress={() => router.push('/profile' as any)}
-                  style={({ pressed }) => [
-                    styles.profileActionBtn,
-                    {
-                      backgroundColor: colors.surfaceElevated,
-                      borderColor: colors.border,
-                      opacity: pressed ? 0.7 : 1,
-                    },
-                  ]}
-                >
-                  <Ionicons name="person-outline" size={14} color={colors.accent} />
-                  <Text style={[styles.profileActionBtnText, { color: colors.accent }]}>
-                    Profile Settings
-                  </Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={handleManualSync}
-                  disabled={isSyncing}
-                  style={({ pressed }) => [
-                    styles.profileActionBtn,
-                    {
-                      backgroundColor: colors.surfaceElevated,
-                      borderColor: colors.border,
-                      opacity: isSyncing ? 0.6 : pressed ? 0.7 : 1,
-                    },
-                  ]}
-                >
-                  {isSyncing ? (
-                    <ActivityIndicator size="small" color={colors.emerald} />
-                  ) : (
-                    <Ionicons name="sync-outline" size={14} color={colors.emerald} />
-                  )}
-                  <Text style={[styles.profileActionBtnText, { color: colors.emerald }]}>
-                    {isSyncing ? 'Syncing...' : 'Sync Now'}
-                  </Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={handleLogout}
-                  style={({ pressed }) => [
-                    styles.profileActionBtn,
-                    {
-                      backgroundColor: colors.surfaceElevated,
-                      borderColor: colors.border,
-                      opacity: pressed ? 0.7 : 1,
-                    },
-                  ]}
-                >
-                  <Ionicons name="log-out-outline" size={14} color={colors.textSecondary} />
-                  <Text style={[styles.profileActionBtnText, { color: colors.textSecondary }]}>
-                    Sign out
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-          ) : (
-            <View style={styles.signedOutCard}>
-              <View style={styles.signedOutHeader}>
-                <View style={[styles.cloudIconBox, { backgroundColor: `${colors.accent}24` }]}>
-                  <Ionicons name="cloud-upload-outline" size={24} color={colors.accent} />
-                </View>
-                <View style={{ flex: 1, gap: 2 }}>
-                  <Text style={[styles.optionLabel, { color: colors.text }]}>
-                    Cloud Backup & Sync
-                  </Text>
-                  <Text style={[styles.optionDesc, { color: colors.textMuted }]}>
-                    Sign in with Google or Email to sync library & bookmarks across devices
-                  </Text>
-                </View>
-              </View>
-
-              <AnimatedPressable
-                onPress={() => setAuthModalVisible(true)}
+      {user ? (
+        <View style={styles.flatSectionBody}>
+          <Pressable
+            onPress={() => router.push('/profile' as any)}
+            accessibilityRole="button"
+            accessibilityLabel="View profile settings"
+            style={({ pressed, hovered }: any) => [
+              styles.profileCardRow,
+              (pressed || hovered) && { opacity: 0.8 },
+              Platform.OS === 'web' && { cursor: 'pointer' as any },
+            ]}
+          >
+            <View style={styles.profileInfoLeft}>
+              <View
                 style={[
-                  styles.openAuthBtn,
-                  { backgroundColor: colors.accent },
-                  Platform.OS === 'web' && {
-                    alignSelf: 'flex-start',
-                    paddingHorizontal: 24,
+                  styles.avatarBox,
+                  {
+                    backgroundColor: colors.surfaceElevated,
+                    borderColor: colors.border,
                   },
                 ]}
               >
-                <Ionicons name="log-in-outline" size={18} color="#FFFFFF" />
-                <Text style={styles.openAuthBtnText}>Sign In / Create Account</Text>
-              </AnimatedPressable>
-            </View>
-          )}
-        </View>
-
-        {/* App Appearance Theme */}
-        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
-          App Theme & Mode
-        </Text>
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          {[
-            { key: 'system', label: 'System Default', icon: 'hardware-chip-outline' as const, desc: 'Follow device OS theme setting' },
-            { key: 'dark', label: 'Dark Mode', icon: 'moon-outline' as const, desc: 'Neutral Zinc dark theme' },
-            { key: 'light', label: 'Light Mode', icon: 'sunny-outline' as const, desc: 'Clean paper white light theme' },
-          ].map((item, idx) => (
-            <Pressable
-              key={item.key}
-              onPress={() => setAppThemeMode(item.key as AppThemeMode)}
-              style={[
-                styles.optionRow,
-                idx < 2 && { borderBottomWidth: 1, borderBottomColor: colors.border },
-              ]}
-            >
-              <Ionicons
-                name={item.icon}
-                size={18}
-                color={appThemeMode === item.key ? colors.accent : colors.textMuted}
-              />
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.optionLabel, { color: colors.text }]}>{item.label}</Text>
-                <Text style={[styles.optionDesc, { color: colors.textMuted }]}>{item.desc}</Text>
+                {getUserAvatarUrl(user) ? (
+                  <Image
+                    source={{ uri: getUserAvatarUrl(user)! }}
+                    style={styles.avatarImg}
+                    contentFit="cover"
+                    transition={200}
+                    cachePolicy="memory-disk"
+                  />
+                ) : (
+                  <YomiteMascotIcon size={38} />
+                )}
               </View>
-              {appThemeMode === item.key && (
-                <Ionicons name="checkmark" size={18} color={colors.accent} />
-              )}
-            </Pressable>
-          ))}
-        </View>
+              <View style={styles.profileTextCol}>
+                <Text style={[styles.profileName, { color: colors.text }]} numberOfLines={1}>
+                  {getUserDisplayName(user)}
+                </Text>
+                <Text style={[styles.profileHandle, { color: colors.textSecondary }]} numberOfLines={1}>
+                  @{getUserHandle(user)} · {user.email || 'user@yomite.app'}
+                </Text>
+                <View style={styles.syncStatusRow}>
+                  <View style={styles.statusDot} />
+                  <Text style={[styles.statusText, { color: colors.textMuted }]}>
+                    Cloud Sync & Multi-Device Active
+                  </Text>
+                </View>
+              </View>
+            </View>
 
-        {/* Dynamic Accent Color Theme Picker */}
-        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
-          Accent Theme Color
-        </Text>
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border, padding: Spacing.md, gap: Spacing.md }]}>
-          <Text style={[styles.optionDesc, { color: colors.textMuted }]}>
-            Personalize your primary accent color across the app
-          </Text>
+            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+          </Pressable>
 
-          {/* Color Presets Swatches */}
-          <View style={styles.colorPresetsGrid}>
-            {ACCENT_PRESETS.map((preset) => {
-              const isSelected = accentColor.toLowerCase() === preset.color.toLowerCase();
-              return (
-                <Pressable
-                  key={preset.id}
-                  onPress={() => {
-                    triggerHaptic();
-                    setAccentColor(preset.color);
-                    setCustomHex('');
-                  }}
-                  style={({ pressed }) => [
-                    styles.colorCircle,
-                    { backgroundColor: preset.color, borderColor: isSelected ? '#FFFFFF' : 'transparent' },
-                    pressed && { opacity: 0.8 },
-                  ]}
-                >
-                  {isSelected && <Ionicons name="checkmark" size={16} color="#FFFFFF" />}
-                </Pressable>
-              );
-            })}
-          </View>
-
-          {/* Custom Hex Color Input */}
-          <View style={[styles.customHexRow, { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: Spacing.md }]}>
-            <View style={[styles.customColorPreviewCircle, { backgroundColor: accentColor }]} />
-            <TextInput
-              style={[styles.hexInput, { backgroundColor: colors.surfaceElevated, borderColor: colors.border, color: colors.text }]}
-              placeholder="Custom Hex (e.g. #8B5CF6)"
-              placeholderTextColor={colors.textMuted}
-              value={customHex}
-              onChangeText={setCustomHex}
-              autoCapitalize="characters"
-              maxLength={7}
-            />
+          <View style={styles.profileActionGrid}>
             <AnimatedPressable
-              onPress={() => {
-                let formatted = customHex.trim();
-                if (!formatted.startsWith('#')) formatted = `#${formatted}`;
-                if (/^#([0-9A-F]{3}){1,2}$/i.test(formatted)) {
-                  setAccentColor(formatted);
-                  setConfirmModalConfig({
-                    visible: true,
-                    title: 'Accent Theme Applied',
-                    message: `Accent color updated to ${formatted}`,
-                    iconName: 'color-palette-outline',
-                    confirmText: 'OK',
-                    cancelText: '',
-                    confirmVariant: 'primary',
-                    onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
-                  });
-                } else {
-                  setConfirmModalConfig({
-                    visible: true,
-                    title: 'Invalid Hex Code',
-                    message: 'Please enter a valid hex color code (e.g. #8B5CF6 or #00E5FF).',
-                    iconName: 'alert-circle-outline',
-                    confirmText: 'OK',
-                    cancelText: '',
-                    confirmVariant: 'primary',
-                    onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
-                  });
-                }
-              }}
-              disabled={!customHex.trim()}
+              onPress={() => router.push('/profile' as any)}
+              accessibilityRole="button"
+              accessibilityLabel="Open profile settings"
               style={[
-                styles.applyHexBtn,
-                { backgroundColor: colors.accent, opacity: customHex.trim() ? 1 : 0.4 },
+                styles.profileActionBtn,
+                { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+                Platform.OS === 'web' && { cursor: 'pointer' as any },
               ]}
             >
-              <Text style={styles.applyHexBtnText}>Apply</Text>
+              <Ionicons name="person-outline" size={14} color={accentColor} />
+              <Text style={[styles.profileActionBtnText, { color: accentColor }]}>
+                Profile
+              </Text>
+            </AnimatedPressable>
+
+            <AnimatedPressable
+              onPress={handleManualSync}
+              disabled={isSyncing}
+              accessibilityRole="button"
+              accessibilityLabel="Synchronize library with cloud"
+              style={[
+                styles.profileActionBtn,
+                { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+                Platform.OS === 'web' && { cursor: 'pointer' as any },
+              ]}
+            >
+              {isSyncing ? (
+                <ActivityIndicator size="small" color="#10B981" />
+              ) : (
+                <Ionicons name="sync-outline" size={14} color="#10B981" />
+              )}
+              <Text style={[styles.profileActionBtnText, { color: '#10B981' }]}>
+                {isSyncing ? 'Syncing…' : 'Sync Now'}
+              </Text>
+            </AnimatedPressable>
+
+            <AnimatedPressable
+              onPress={handleLogout}
+              accessibilityRole="button"
+              accessibilityLabel="Sign out of Yomite"
+              style={[
+                styles.profileActionBtn,
+                { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+                Platform.OS === 'web' && { cursor: 'pointer' as any },
+              ]}
+            >
+              <Ionicons name="log-out-outline" size={14} color={colors.textSecondary} />
+              <Text style={[styles.profileActionBtnText, { color: colors.textSecondary }]}> 
+                Sign out
+              </Text>
             </AnimatedPressable>
           </View>
         </View>
-
-        {/* Default Reading Mode */}
-        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
-          Default Reading Mode
-        </Text>
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          {READING_MODES.map((m, idx) => (
-            <Pressable
-              key={m.key}
-              onPress={() => setMode(m.key)}
-              style={[
-                styles.optionRow,
-                idx < READING_MODES.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border },
-              ]}
-            >
-              <Ionicons name={m.icon} size={18} color={mode === m.key ? colors.accent : colors.textMuted} />
-              <Text style={[styles.optionLabel, { color: colors.text }]}>
-                {m.label}
+      ) : (
+        <View style={styles.flatSectionBody}>
+          <View style={styles.signedOutHeader}>
+            <View style={[styles.avatarBox, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+              <Ionicons name="cloud-upload-outline" size={24} color={colors.textSecondary} />
+            </View>
+            <View style={styles.profileTextCol}>
+              <Text style={[styles.signedOutTitle, { color: colors.text }]}>Cloud Backup & Sync</Text>
+              <Text style={[styles.signedOutSubtitle, { color: colors.textSecondary }]}>
+                Sign in with Google or Email to sync library & bookmarks across devices
               </Text>
-              {mode === m.key && (
-                <Ionicons name="checkmark" size={18} color={colors.accent} />
-              )}
-            </Pressable>
-          ))}
-        </View>
+            </View>
+          </View>
 
-        {/* Reader Theme */}
-        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
-          Reader Background
-        </Text>
-        <View style={styles.themeRow}>
-          {THEME_KEYS.map((key) => {
-            const t = ReaderThemes[key];
-            const isActive = readerTheme === key;
-            return (
+          <AnimatedPressable
+            onPress={() => setAuthModalVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Sign in or create account"
+            style={[
+              styles.openAuthBtn,
+              { backgroundColor: accentColor },
+              Platform.OS === 'web' && { cursor: 'pointer' as any },
+            ]}
+          >
+            <Ionicons name="log-in-outline" size={18} color={getContrastTextColor(accentColor)} />
+            <Text style={[styles.openAuthBtnText, { color: getContrastTextColor(accentColor) }]}>
+              Sign In / Create Account
+            </Text>
+          </AnimatedPressable>
+        </View>
+      )}
+    </View>
+  );
+
+  /* ── SECTION 2: APP THEME & MODE (FLAT DIVIDED LIST) ── */
+  const renderThemeModeSection = () => (
+    <View style={styles.section}>
+      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>App Theme & Mode</Text>
+      <View style={styles.flatDividedList}>
+        {[
+          {
+            key: 'system',
+            label: 'System Default',
+            icon: 'hardware-chip-outline' as const,
+            desc: 'Follow device OS theme setting',
+          },
+          {
+            key: 'dark',
+            label: 'Dark Mode',
+            icon: 'moon-outline' as const,
+            desc: 'Neutral Zinc dark theme',
+          },
+          {
+            key: 'light',
+            label: 'Light Mode',
+            icon: 'sunny-outline' as const,
+            desc: 'Clean paper white light theme',
+          },
+        ].map((item, idx) => {
+          const isSelected = appThemeMode === item.key;
+          return (
+            <React.Fragment key={item.key}>
               <Pressable
-                key={key}
-                onPress={() => setTheme(key)}
-                style={[
-                  styles.themeChip,
-                  {
-                    backgroundColor: t.background,
-                    borderColor: isActive ? colors.accent : colors.border,
-                  },
+                onPress={() => {
+                  triggerHaptic();
+                  setAppThemeMode(item.key as AppThemeMode);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`Set theme to ${item.label}`}
+                style={({ pressed, hovered }: any) => [
+                  styles.flatRow,
+                  (pressed || hovered) && { backgroundColor: 'rgba(39, 39, 42, 0.25)' },
+                  Platform.OS === 'web' && { cursor: 'pointer' as any },
                 ]}
               >
-                <Text style={[styles.themeChipText, { color: t.text }]}>
-                  {t.name}
-                </Text>
-                {isActive && (
-                  <Ionicons name="checkmark-circle" size={14} color={colors.accent} />
+                <View style={styles.optionLeft}>
+                  <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
+                    <Ionicons
+                      name={item.icon}
+                      size={18}
+                      color={accentColor}
+                    />
+                  </View>
+                  <View style={styles.optionTextCol}>
+                    <Text style={[styles.optionTitle, { color: colors.text }, isSelected && { color: colors.text }]}>
+                      {item.label}
+                    </Text>
+                    <Text style={[styles.optionSubtitle, { color: colors.textMuted }]}>{item.desc}</Text>
+                  </View>
+                </View>
+                {isSelected && (
+                  <Ionicons name="checkmark" size={20} color={accentColor} style={styles.rowCheckmark} />
                 )}
               </Pressable>
-            );
-          })}
-        </View>
+              {idx < 2 && <View style={styles.hairlineDivider} />}
+            </React.Fragment>
+          );
+        })}
+      </View>
+    </View>
+  );
 
-        {/* Updates & Push Notifications */}
-        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
-          Background Updates & Notifications
-        </Text>
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <View style={styles.optionRow}>
-            <Ionicons name="notifications-outline" size={18} color={colors.accent} />
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: colors.text }]}>
-                New Chapter Alerts
+  /* ── SECTION 3: ACCENT THEME COLOR (FLAT WITH SCROLLABLE SWATCHES) ── */
+  const renderColorSchemeSection = () => (
+    <View style={styles.section}>
+      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>Color Scheme</Text>
+      <Text style={[styles.sectionSubDescription, { color: colors.textMuted }]}>
+        Kotatsu-inspired Material palettes for the whole app
+      </Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.schemeScrollRow}
+      >
+        {THEME_SCHEME_PRESETS.map((preset) => {
+          const isSelected = colorScheme === preset.id;
+          return (
+            <Pressable
+              key={preset.id}
+              onPress={() => {
+                triggerHaptic();
+                setColorScheme(preset.id);
+              }}
+              accessibilityRole="button"
+              accessibilityState={{ selected: isSelected }}
+              style={({ pressed }) => [
+                styles.schemeChip,
+                pressed && { opacity: 0.72 },
+              ]}
+            >
+              <View
+                style={[
+                  styles.schemeSwatch,
+                  { backgroundColor: preset.color, borderColor: isSelected ? preset.color : colors.border },
+                  isSelected && styles.schemeSwatchSelected,
+                ]}
+              >
+                {isSelected && <Ionicons name="checkmark" size={18} color={preset.id === 'kanade' ? '#1C1B1C' : '#FFFFFF'} />}
+              </View>
+              <Text style={[styles.schemeChipText, { color: isSelected ? colors.text : colors.textSecondary }]}>
+                {preset.name}
               </Text>
-              <Text style={[styles.optionDesc, { color: colors.textMuted }]}>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+
+  /* ── SECTION 4: READING MODE (FLAT DIVIDED LIST) ── */
+  const renderReadingModeSection = () => (
+    <View style={styles.section}>
+      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>Default Reading Mode</Text>
+      <View style={styles.flatDividedList}>
+        {READING_MODES.map((m, idx) => {
+          const isSelected = mode === m.key;
+          return (
+            <React.Fragment key={m.key}>
+              <Pressable
+                onPress={() => {
+                  triggerHaptic();
+                  setMode(m.key);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`Set reading mode to ${m.label}`}
+                style={({ pressed, hovered }: any) => [
+                  styles.flatRow,
+                  (pressed || hovered) && { backgroundColor: 'rgba(39, 39, 42, 0.25)' },
+                  Platform.OS === 'web' && { cursor: 'pointer' as any },
+                ]}
+              >
+                <View style={styles.optionLeft}>
+                  <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
+                    <Ionicons
+                      name={m.icon}
+                      size={18}
+                      color={accentColor}
+                    />
+                  </View>
+                  <Text style={[styles.optionTitle, { color: colors.text }, isSelected && { color: colors.text }]}>
+                    {m.label}
+                  </Text>
+                </View>
+                {isSelected && (
+                  <Ionicons name="checkmark" size={20} color={accentColor} style={styles.rowCheckmark} />
+                )}
+              </Pressable>
+              {idx < READING_MODES.length - 1 && <View style={styles.hairlineDivider} />}
+            </React.Fragment>
+          );
+        })}
+      </View>
+    </View>
+  );
+
+  /* ── SECTION 5: READER BACKGROUND (FLAT CHIPS) ── */
+  const renderReaderThemeSection = () => (
+    <View style={styles.section}>
+      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>Reader Background</Text>
+      <View style={styles.themeChipsGrid}>
+        {THEME_KEYS.map((key) => {
+          const t = ReaderThemes[key];
+          const isActive = readerTheme === key;
+          return (
+            <Pressable
+              key={key}
+              onPress={() => {
+                triggerHaptic();
+                setTheme(key);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={`Set reader theme to ${t.name}`}
+              style={({ pressed, hovered }: any) => [
+                styles.themeChip,
+                {
+                  backgroundColor: t.background,
+                  borderColor: isActive ? 'rgba(255, 255, 255, 0.28)' : '#27272A',
+                },
+                (pressed || hovered) && { opacity: 0.8 },
+                Platform.OS === 'web' && { cursor: 'pointer' as any },
+              ]}
+            >
+              <Text style={[styles.themeChipText, { color: t.text }]}>
+                {t.name}
+              </Text>
+              {isActive && (
+                <Ionicons name="checkmark-circle" size={14} color={accentColor} />
+              )}
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+
+  /* ── SECTION 6: NOTIFICATIONS (FLAT DIVIDED LIST) ── */
+  const renderNotificationsSection = () => (
+    <View style={styles.section}>
+      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}> 
+        Background Updates & Notifications
+      </Text>
+      <View style={styles.flatDividedList}>
+        <View style={styles.flatRow}>
+          <View style={styles.optionLeft}>
+            <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
+              <Ionicons name="notifications-outline" size={18} color={accentColor} />
+            </View>
+            <View style={styles.optionTextCol}>
+            <Text style={[styles.optionTitle, { color: colors.text }]}>New Chapter Alerts</Text>
+              <Text style={[styles.optionSubtitle, { color: colors.textMuted }]}>
                 Notify when library titles get new chapters
               </Text>
             </View>
-            <CustomSwitch
-              value={notificationsEnabled}
-              onValueChange={handleToggleNotifications}
-              activeColor={colors.accent}
-            />
           </View>
-
-          <Pressable
-            onPress={handleTestNotification}
-            disabled={isScanning}
-            style={({ pressed }) => [
-              styles.optionRow,
-              { borderTopWidth: 1, borderTopColor: colors.border, opacity: pressed ? 0.7 : 1 },
-            ]}
-          >
-            <Ionicons name="paper-plane-outline" size={18} color={colors.textMuted} />
-            <Text style={[styles.optionLabel, { color: colors.text, flex: 1 }]}>
-              Send Test Local Push Notification
-            </Text>
-            {isScanning ? (
-              <ActivityIndicator size="small" color={colors.accent} />
-            ) : (
-              <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-            )}
-          </Pressable>
+          <CustomSwitch
+            value={notificationsEnabled}
+            onValueChange={handleToggleNotifications}
+            activeColor={accentColor}
+          />
         </View>
 
-        {/* Data & Performance */}
-        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
-          Data & Performance
-        </Text>
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <View style={styles.optionRow}>
-            <Ionicons name="wifi-outline" size={18} color={colors.accent} />
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: colors.text }]}>
-                Data Saver (Compressed images)
-              </Text>
-              <Text style={[styles.optionDesc, { color: colors.textMuted }]}>
+        <View style={styles.hairlineDivider} />
+
+        <Pressable
+          onPress={handleTestNotification}
+          disabled={isScanning}
+          accessibilityRole="button"
+          accessibilityLabel="Send test chapter notification"
+          style={({ pressed, hovered }: any) => [
+            styles.flatRow,
+            (pressed || hovered) && { backgroundColor: 'rgba(39, 39, 42, 0.25)' },
+            Platform.OS === 'web' && { cursor: 'pointer' as any },
+          ]}
+        >
+          <View style={styles.optionLeft}>
+            <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
+              <Ionicons name="paper-plane-outline" size={18} color={accentColor} />
+            </View>
+            <Text style={[styles.optionTitle, { color: colors.text }]}>Send Test Local Push Notification</Text>
+          </View>
+          {isScanning ? (
+            <ActivityIndicator size="small" color={accentColor} />
+          ) : (
+            <Ionicons name="chevron-forward" size={16} color="#71717A" />
+          )}
+        </Pressable>
+      </View>
+    </View>
+  );
+
+  /* ── SECTION 7: DATA & PERFORMANCE (FLAT DIVIDED LIST) ── */
+  const renderDataSection = () => (
+    <View style={styles.section}>
+        <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>Data & Performance</Text>
+      <View style={styles.flatDividedList}>
+        <View style={styles.flatRow}>
+          <View style={styles.optionLeft}>
+            <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
+              <Ionicons name="wifi-outline" size={18} color={accentColor} />
+            </View>
+            <View style={styles.optionTextCol}>
+            <Text style={[styles.optionTitle, { color: colors.text }]}>Data Saver (Compressed images)</Text>
+              <Text style={[styles.optionSubtitle, { color: colors.textMuted }]}>
                 Load lower resolution images to save mobile data
               </Text>
             </View>
-            <CustomSwitch
-              value={dataSaver}
-              onValueChange={setDataSaver}
-              activeColor={colors.accent}
-            />
           </View>
+          <CustomSwitch
+            value={dataSaver}
+            onValueChange={setDataSaver}
+            activeColor={accentColor}
+          />
+        </View>
 
-          <View style={[styles.optionRow, { borderTopWidth: 1, borderTopColor: colors.border }]}> 
-            <Ionicons name="stats-chart-outline" size={18} color={colors.textMuted} />
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: colors.text }]}>
-                Show Page Number in Reader
+        <View style={styles.hairlineDivider} />
+
+        <View style={styles.flatRow}>
+          <View style={styles.optionLeft}>
+            <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
+              <Ionicons name="stats-chart-outline" size={18} color={accentColor} />
+            </View>
+            <Text style={[styles.optionTitle, { color: colors.text }]}>Show Page Number in Reader</Text>
+          </View>
+          <CustomSwitch
+            value={showPageNumber}
+            onValueChange={setShowPageNumber}
+            activeColor={accentColor}
+          />
+        </View>
+
+        <View style={styles.hairlineDivider} />
+
+        <View style={styles.flatRow}>
+          <View style={styles.optionLeft}>
+            <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
+              <Ionicons
+                name="phone-portrait-outline"
+                size={18}
+                color={accentColor}
+              />
+            </View>
+            <View style={styles.optionTextCol}>
+            <Text style={[styles.optionTitle, { color: colors.text }]}>Subtle Haptic Feedback</Text>
+              <Text style={[styles.optionSubtitle, { color: colors.textMuted }]}>
+                Vibrate lightly when tapping buttons and controls
               </Text>
             </View>
-            <CustomSwitch
-              value={showPageNumber}
-              onValueChange={setShowPageNumber}
-              activeColor={colors.accent}
-            />
           </View>
+          <CustomSwitch
+            value={hapticsEnabled}
+            onValueChange={setHapticsEnabled}
+            activeColor={accentColor}
+          />
+        </View>
 
-          <View style={[styles.optionRow, { borderTopWidth: 1, borderTopColor: colors.border }]}> 
-            <Ionicons name="phone-portrait-outline" size={18} color={hapticsEnabled ? colors.accent : colors.textMuted} />
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.optionLabel, { color: colors.text }]}>Subtle Haptic Feedback</Text>
-              <Text style={[styles.optionDesc, { color: colors.textMuted }]}>Vibrate lightly when tapping buttons and controls</Text>
+        <View style={styles.hairlineDivider} />
+
+        <Pressable
+          onPress={handleClearHistoryPrompt}
+          accessibilityRole="button"
+          accessibilityLabel="Clear reading history"
+          style={({ pressed, hovered }: any) => [
+            styles.flatRow,
+            (pressed || hovered) && { backgroundColor: 'rgba(239, 68, 68, 0.15)' },
+            Platform.OS === 'web' && { cursor: 'pointer' as any },
+          ]}
+        >
+          <View style={styles.optionLeft}>
+            <View style={[styles.iconSquare, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
+              <Ionicons name="trash-outline" size={18} color="#EF4444" />
             </View>
-            <CustomSwitch
-              value={hapticsEnabled}
-              onValueChange={setHapticsEnabled}
-              activeColor={colors.accent}
-            />
-          </View>
-
-          <Pressable
-            onPress={handleClearHistoryPrompt}
-            style={({ pressed }) => [
-              styles.optionRow,
-              { borderTopWidth: 1, borderTopColor: colors.border, opacity: pressed ? 0.7 : 1 },
-            ]}
-          >
-            <Ionicons name="trash-outline" size={18} color="#EF4444" />
-            <Text style={[styles.optionLabel, { color: '#EF4444', flex: 1 }]}>
+            <Text style={[styles.optionTitle, { color: '#EF4444' }]}>
               Clear Reading History
             </Text>
-            <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+          </View>
+          <Ionicons name="chevron-forward" size={16} color="#71717A" />
+        </Pressable>
+      </View>
+    </View>
+  );
+
+  /* ── SECTION 8: MOBILE PROMO (FLAT ROW) ── */
+  const renderMobilePromoSection = () => (
+    Platform.OS === 'web' ? (
+      <View style={styles.section}>
+        <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>Mobile Application</Text>
+        <View style={styles.flatDividedList}>
+          <Pressable
+            onPress={() => router.push('/download' as any)}
+            accessibilityRole="button"
+            accessibilityLabel="Download Yomite mobile APK"
+            style={({ pressed, hovered }: any) => [
+              styles.flatRow,
+              (pressed || hovered) && { backgroundColor: 'rgba(39, 39, 42, 0.25)' },
+              Platform.OS === 'web' && { cursor: 'pointer' as any },
+            ]}
+          >
+            <View style={styles.optionLeft}>
+              <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
+                <Ionicons name="cloud-download-outline" size={18} color={accentColor} />
+              </View>
+              <View style={styles.optionTextCol}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={[styles.optionTitle, { color: colors.text }]}>Get Yomite for Mobile</Text>
+                  <View style={[styles.promoBadge, { backgroundColor: `${accentColor}26` }]}>
+                    <Text style={[styles.promoBadgeText, { color: accentColor }]}>APK v1.2.2</Text>
+                  </View>
+                </View>
+                <Text style={[styles.optionSubtitle, { color: colors.textMuted }]}>
+                  Download direct Android APK or install iOS Web PWA with full offline capabilities
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#71717A" />
           </Pressable>
         </View>
+      </View>
+    ) : null
+  );
 
-        {/* Mobile App & APK Download Promo (Only shown on Web) */}
-        {Platform.OS === 'web' && (
-          <>
-            <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
-              Mobile Application
-            </Text>
-            <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
+      <View style={styles.contentWrapper}>
+        {/* Top Header Section */}
+        <View style={[styles.header, isDesktop && styles.headerDesktop]}>
+          <View style={styles.headerRow}>
+            {Platform.OS === 'web' && (
               <Pressable
-                onPress={() => router.push('/download' as any)}
-                style={({ pressed }) => [
-                  styles.optionRow,
-                  { opacity: pressed ? 0.7 : 1 },
+                onPress={() => setDrawerVisible(true)}
+                style={({ pressed, hovered }: any) => [
+                  styles.menuButton,
+                  (pressed || hovered) && { opacity: 0.7, backgroundColor: 'rgba(63, 63, 70, 0.8)' },
+                  Platform.OS === 'web' && { cursor: 'pointer' as any },
                 ]}
+                accessibilityRole="button"
+                accessibilityLabel="Open navigation drawer"
+                hitSlop={8}
               >
-                <Ionicons name="cloud-download-outline" size={20} color={colors.accent} />
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={[styles.optionLabel, { color: colors.text }]}>
-                      Get Yomite for Mobile
-                    </Text>
-                    <View style={[styles.promoBadge, { backgroundColor: colors.accentSubtle }]}>
-                      <Text style={[styles.promoBadgeText, { color: colors.accent }]}>APK v1.2.2</Text>
-                    </View>
-                  </View>
-                  <Text style={[styles.optionDesc, { color: colors.textMuted }]}>
-                    Download direct Android APK or install iOS Web PWA with full offline capabilities
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                <Ionicons name="menu" size={24} color="#FFFFFF" />
               </Pressable>
+            )}
+            <View>
+                  <Text style={[styles.title, isDesktop && styles.titleDesktop, { color: colors.text }]}>Settings</Text>
+              {isDesktop && (
+                <Text style={[styles.desktopSubtitle, { color: colors.textMuted }]}>
+                  Manage your account, reader preferences, themes, and storage.
+                </Text>
+              )}
             </View>
-          </>
-        )}
-
-        {/* App Info */}
-        <View style={styles.footer}>
-          <Text style={[styles.footerText, { color: colors.textMuted }]}>
-            Yomite Manga Reader v1.2.2
-          </Text>
-          <Text style={[styles.footerSubText, { color: colors.textMuted }]}>
-            Powered by MangaDex API & Supabase Cloud Sync
-          </Text>
+          </View>
         </View>
-      </ScrollView>
 
-      {/* Supabase Auth Sheet Modal */}
-      <AuthModal visible={authModalVisible} onClose={() => setAuthModalVisible(false)} />
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[styles.scrollContent, isDesktop && styles.scrollContentDesktop]}
+        >
+          {isDesktop ? (
+            /* ── DESKTOP 2-COLUMN BALANCED FLAT GRID ── */
+            <View style={styles.desktopGrid}>
+              <View style={styles.desktopCol}>
+                {renderAccountSection()}
+                {renderThemeModeSection()}
+                {renderColorSchemeSection()}
+              </View>
+              <View style={styles.desktopCol}>
+                {renderReadingModeSection()}
+                {renderReaderThemeSection()}
+                {renderNotificationsSection()}
+                {renderDataSection()}
+                {renderMobilePromoSection()}
+              </View>
+            </View>
+          ) : (
+            /* ── MOBILE SINGLE-COLUMN FLAT STACK ── */
+            <View style={styles.mobileStack}>
+              {renderAccountSection()}
+              {renderThemeModeSection()}
+              {renderColorSchemeSection()}
+              {renderReadingModeSection()}
+              {renderReaderThemeSection()}
+              {renderNotificationsSection()}
+              {renderDataSection()}
+              {renderMobilePromoSection()}
+            </View>
+          )}
 
-      {/* Sleek Custom Confirmation Dialog */}
-      <ConfirmationModal
-        visible={confirmModalConfig.visible}
-        title={confirmModalConfig.title}
-        message={confirmModalConfig.message}
-        iconName={confirmModalConfig.iconName || 'information-circle-outline'}
-        confirmVariant={confirmModalConfig.confirmVariant || 'primary'}
-        confirmText={confirmModalConfig.confirmText || 'OK'}
-        cancelText={confirmModalConfig.cancelText}
-        onConfirm={confirmModalConfig.onConfirm}
-        onCancel={() => setConfirmModalConfig((prev) => ({ ...prev, visible: false }))}
-      />
+          {/* App Info Footer */}
+          <View style={styles.footer}>
+            <Text style={[styles.footerTitle, { color: colors.textMuted }]}>Yomite Manga Reader v1.2.2</Text>
+            <Text style={[styles.footerSubtitle, { color: colors.textMuted }]}>
+              Powered by MangaDex API & Supabase Cloud Sync
+            </Text>
+          </View>
+        </ScrollView>
 
-      {/* Hamburger Slide Drawer */}
-      <SidebarDrawer visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
+        {/* Supabase Auth Modal */}
+        <AuthModal visible={authModalVisible} onClose={() => setAuthModalVisible(false)} />
+
+        {/* Custom Confirmation Modal */}
+        <ConfirmationModal
+          visible={confirmModalConfig.visible}
+          title={confirmModalConfig.title}
+          message={confirmModalConfig.message}
+          iconName={confirmModalConfig.iconName || 'information-circle-outline'}
+          confirmVariant={confirmModalConfig.confirmVariant || 'primary'}
+          confirmText={confirmModalConfig.confirmText || 'OK'}
+          cancelText={confirmModalConfig.cancelText}
+          onConfirm={confirmModalConfig.onConfirm}
+          onCancel={() => setConfirmModalConfig((prev) => ({ ...prev, visible: false }))}
+        />
+
+        {/* Sidebar Drawer */}
+        <SidebarDrawer visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
       </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  webCenteredContent: {
-    maxWidth: 1400,
+  container: {
+    flex: 1,
+    backgroundColor: '#050505',
+  },
+  contentWrapper: {
+    flex: 1,
     width: '100%',
+    maxWidth: 1200,
     alignSelf: 'center',
   },
   header: {
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.sm,
-    paddingBottom: Spacing.xs,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 12,
+    backgroundColor: 'transparent',
   },
-  titleRow: {
+  headerDesktop: {
+    paddingHorizontal: 24,
+    paddingTop: 20,
+    paddingBottom: 16,
+  },
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.sm,
+    gap: 14,
   },
-  plainIconButton: {
-    padding: 4,
+  menuButton: {
+    padding: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(39, 39, 42, 0.6)',
   },
   title: {
-    fontSize: Typography.sizes.title1,
-    fontWeight: Typography.weights.bold,
+    fontSize: 30,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: -0.5,
   },
-  content: {
-    paddingHorizontal: Spacing.lg,
-    paddingBottom: 110,
-    gap: Spacing.sm,
+  titleDesktop: {
+    fontSize: 32,
   },
-  sectionLabel: {
-    fontSize: Typography.sizes.footnote,
-    fontWeight: Typography.weights.bold,
-    letterSpacing: 0.5,
-    marginTop: Spacing.md,
-    marginBottom: Spacing.xs,
-  },
-  card: {
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  optionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: Spacing.md,
-    gap: Spacing.md,
-  },
-  optionLabel: {
-    fontSize: Typography.sizes.body,
-    fontWeight: Typography.weights.medium,
-  },
-  optionDesc: {
-    fontSize: Typography.sizes.caption,
+  desktopSubtitle: {
+    fontSize: 13,
+    color: '#A1A1AA',
     marginTop: 2,
   },
-  themeRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.sm,
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 110,
   },
-  themeChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    gap: Spacing.xs,
-  },
-  themeChipText: {
-    fontSize: Typography.sizes.footnote,
-    fontWeight: Typography.weights.medium,
+  scrollContentDesktop: {
+    paddingHorizontal: 24,
+    paddingTop: 8,
   },
 
-  /* Auth Status & Profile Card */
-  profileCardHeader: {
+  /* Desktop Grid */
+  desktopGrid: {
+    flexDirection: 'row',
+    gap: 32,
+    alignItems: 'flex-start',
+  },
+  desktopCol: {
+    flex: 1,
+    gap: 24,
+  },
+  mobileStack: {
+    gap: 24,
+  },
+
+  section: {
+    gap: 8,
+  },
+  sectionHeader: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#A1A1AA',
+    letterSpacing: 0.3,
+    paddingHorizontal: 4,
+  },
+  sectionSubDescription: {
+    fontSize: 12,
+    color: '#A1A1AA',
+    paddingHorizontal: 4,
+    marginBottom: 4,
+  },
+
+  /* Flat Section Body (No containers, completely borderless) */
+  flatSectionBody: {
+    paddingHorizontal: 4,
+  },
+  schemeScrollRow: {
+    flexDirection: 'row',
+    gap: 14,
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+  },
+  schemeChip: {
+    alignItems: 'center',
+    gap: 7,
+    justifyContent: 'flex-start',
+    minWidth: 64,
+  },
+  schemeSwatch: {
+    alignItems: 'center',
+    borderRadius: 28,
+    borderWidth: 2,
+    height: 52,
+    justifyContent: 'center',
+    width: 52,
+  },
+  schemeSwatchSelected: {
+    borderColor: '#FFFFFF',
+  },
+  schemeChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+
+  /* Profile Section */
+  profileCardRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: Spacing.md,
+    paddingBottom: 14,
   },
-  profileAvatarCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  profileInfoLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    flex: 1,
+  },
+  avatarBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  profileAvatarImage: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  avatarImg: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
   },
-  profileAvatarText: {
+  profileTextCol: {
+    flex: 1,
+    gap: 2,
+  },
+  profileName: {
+    fontSize: 16,
+    fontWeight: '700',
     color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: Typography.weights.bold,
+    letterSpacing: -0.2,
   },
-  profileNameText: {
-    fontSize: Typography.sizes.headline,
-    fontWeight: Typography.weights.bold,
+  profileHandle: {
+    fontSize: 12,
+    color: '#A1A1AA',
   },
-  profileHandleText: {
-    fontSize: Typography.sizes.caption,
-  },
-  accountDivider: {
-    height: 1,
-    marginHorizontal: Spacing.md,
-  },
-  accountActionRow: {
+  syncStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.xs,
-    paddingHorizontal: Spacing.md,
-    paddingBottom: Spacing.md,
+    gap: 6,
+    marginTop: 3,
+  },
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#10B981',
+  },
+  statusText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#34D399',
+  },
+  profileActionGrid: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingTop: 4,
   },
   profileActionBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 8,
-    borderRadius: Radius.md,
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(39, 39, 42, 0.6)',
     borderWidth: 1,
-    gap: 4,
+    borderColor: 'rgba(63, 63, 70, 0.5)',
+    minHeight: 44,
   },
   profileActionBtnText: {
     fontSize: 11,
-    fontWeight: Typography.weights.bold,
+    fontWeight: '600',
   },
-  authStatusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: Spacing.md,
-  },
-  authStatusLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    flex: 1,
-  },
-  logoutBtn: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-    borderRadius: Radius.md,
-  },
-  logoutBtnText: {
-    fontSize: Typography.sizes.footnote,
-    fontWeight: Typography.weights.bold,
-  },
-  signedOutCard: {
-    padding: Spacing.md,
-    gap: Spacing.md,
-  },
+
+  /* Signed out state */
   signedOutHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md,
+    gap: 12,
+    marginBottom: 14,
   },
-  cloudIconBox: {
-    width: 44,
-    height: 44,
-    borderRadius: Radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
+  signedOutTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  signedOutSubtitle: {
+    fontSize: 12,
+    color: '#A1A1AA',
+    lineHeight: 16,
   },
   openAuthBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: Spacing.sm + 2,
-    borderRadius: Radius.md,
     gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    minHeight: 44,
   },
   openAuthBtnText: {
-    color: '#FFFFFF',
-    fontSize: Typography.sizes.footnote,
-    fontWeight: Typography.weights.bold,
+    fontSize: 13,
+    fontWeight: '700',
   },
 
-  /* Accent Color Presets */
-  colorPresetsGrid: {
+  /* Flat Divided List (divide-y divide-zinc-800/80 without container box) */
+  flatDividedList: {
+    backgroundColor: 'transparent',
+  },
+  flatRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 6,
+    borderRadius: 12,
+    minHeight: 52,
+  },
+  hairlineDivider: {
+    height: 1,
+    backgroundColor: 'rgba(39, 39, 42, 0.6)',
+    marginHorizontal: 4,
+  },
+  optionLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  iconSquare: {
+    width: 36,
+    height: 36,
+    borderRadius: 9,
+    backgroundColor: 'rgba(39, 39, 42, 0.8)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  optionTextCol: {
+    flex: 1,
+    gap: 2,
+  },
+  optionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#E4E4E7',
+  },
+  optionSubtitle: {
+    fontSize: 12,
+    color: '#A1A1AA',
+  },
+  rowCheckmark: {
+    marginLeft: 8,
+  },
+
+  /* Reader Background Chips */
+  themeChipsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: Spacing.md,
-    justifyContent: 'flex-start',
+    gap: 8,
+    paddingHorizontal: 4,
+    paddingTop: 2,
   },
-  colorCircle: {
-    width: 38,
-    height: 38,
-    borderRadius: Radius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.25)',
-    elevation: 3,
-  },
-  customHexRow: {
+  themeChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.sm,
-  },
-  customColorPreviewCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: Radius.full,
+    gap: 6,
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    minHeight: 44,
   },
-  hexInput: {
-    flex: 1,
-    height: 38,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    paddingHorizontal: Spacing.md,
-    fontSize: Typography.sizes.footnote,
-  },
-  applyHexBtn: {
-    paddingHorizontal: Spacing.md,
-    height: 38,
-    borderRadius: Radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  applyHexBtnText: {
-    color: '#FFFFFF',
-    fontSize: Typography.sizes.footnote,
-    fontWeight: Typography.weights.bold,
+  themeChipText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
 
+  /* Mobile App Promo Badge */
   promoBadge: {
     paddingHorizontal: 6,
     paddingVertical: 2,
-    borderRadius: Radius.xs,
+    borderRadius: 6,
   },
   promoBadgeText: {
     fontSize: 10,
-    fontWeight: Typography.weights.bold,
+    fontWeight: '700',
   },
+
+  /* Footer */
   footer: {
     alignItems: 'center',
-    marginTop: Spacing.lg,
+    marginTop: 28,
     gap: 4,
   },
-  footerText: {
-    fontSize: Typography.sizes.caption,
-    fontWeight: Typography.weights.semibold,
+  footerTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#71717A',
   },
-  footerSubText: {
-    fontSize: 10,
+  footerSubtitle: {
+    fontSize: 11,
+    color: '#52525B',
   },
 });

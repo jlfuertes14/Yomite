@@ -2,7 +2,7 @@
  * LibraryCategoryModal — Bottom sheet action modal to select library category
  * Options: Reading, Plan to Read, Completed, Favorites, Dropped, and Remove from Library.
  */
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import { triggerHaptic } from '../utils/haptics';
 import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
 import { useThemeColors } from '../hooks/useThemeColor';
 import type { LibraryCategory } from '../types';
+import { MobileModalRoot, MobileSheetPanel, MobileSheetPanelRef } from './MobileBottomSheet';
 
 interface LibraryCategoryModalProps {
   visible: boolean;
@@ -74,45 +75,51 @@ export function LibraryCategoryModal({
   onRemoveFromLibrary,
 }: LibraryCategoryModalProps) {
   const colors = useThemeColors();
+  const isWeb = Platform.OS === 'web';
+  const sheetRef = useRef<MobileSheetPanelRef>(null);
+
+  const closeModal = () => {
+    if (isWeb) onClose();
+    else sheetRef.current?.close();
+  };
 
   const handleSelect = (cat: LibraryCategory) => {
     triggerHaptic();
     onSelectCategory(cat);
-    onClose();
+    closeModal();
   };
 
   const handleRemove = () => {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
     onRemoveFromLibrary();
-    onClose();
+    closeModal();
   };
 
   return (
     <Modal
       visible={visible}
-      animationType="fade"
+      animationType={Platform.OS === 'web' ? 'fade' : 'none'}
       transparent
-      onRequestClose={onClose}
+      onRequestClose={closeModal}
     >
-      <View style={styles.backdrop}>
-        <Pressable style={styles.overlayPress} onPress={onClose} />
+      <MobileModalRoot style={styles.backdrop}>
+        <Pressable style={styles.overlayPress} onPress={closeModal} />
 
-        <View
+        <MobileSheetPanel
+          visible={visible}
+          ref={sheetRef}
+          onClose={onClose}
           style={[
             styles.sheetContainer,
-            { backgroundColor: '#141417', borderColor: colors.border },
+            { backgroundColor: colors.surface, borderColor: 'transparent' },
           ]}
+          showHandle={Platform.OS !== 'web'}
         >
-          <View style={styles.dragHandle} />
-
           {/* Header */}
           <View style={styles.headerRow}>
             <Text style={[styles.headerTitle, { color: colors.text }]}>
               {isInLibrary ? 'Library Category' : 'Add to Library Category'}
             </Text>
-            <Pressable onPress={onClose} style={styles.closeBtn}>
-              <Ionicons name="close" size={20} color={colors.textMuted} />
-            </Pressable>
           </View>
 
           {/* Category List Options */}
@@ -127,11 +134,11 @@ export function LibraryCategoryModal({
                     styles.categoryRow,
                     {
                       backgroundColor: isSelected
-                        ? 'rgba(244, 63, 94, 0.15)'
+                        ? colors.accentSubtle
                         : pressed
                         ? colors.surfaceElevated
                         : colors.surface,
-                      borderColor: isSelected ? colors.accent : colors.border,
+                      borderColor: 'transparent',
                     },
                   ]}
                 >
@@ -140,7 +147,7 @@ export function LibraryCategoryModal({
                       styles.iconBox,
                       {
                         backgroundColor: isSelected
-                          ? 'rgba(244, 63, 94, 0.2)'
+                          ? colors.accentSubtle
                           : colors.surfaceElevated,
                       },
                     ]}
@@ -153,12 +160,7 @@ export function LibraryCategoryModal({
                   </View>
 
                   <View style={styles.categoryTextCol}>
-                    <Text
-                      style={[
-                        styles.categoryLabel,
-                        { color: isSelected ? colors.accent : colors.text },
-                      ]}
-                    >
+                    <Text style={[styles.categoryLabel, { color: colors.text }]}>
                       {cat.label}
                     </Text>
                     <Text
@@ -187,17 +189,17 @@ export function LibraryCategoryModal({
                   styles.removeRow,
                   {
                     backgroundColor: pressed ? 'rgba(239, 68, 68, 0.15)' : 'transparent',
-                    borderColor: 'rgba(239, 68, 68, 0.3)',
+                    borderColor: 'transparent',
                   },
                 ]}
               >
                 <Ionicons name="trash-outline" size={18} color="#EF4444" />
-                <Text style={styles.removeText}>Remove from Library</Text>
+                <Text style={[styles.removeText, { color: '#EF4444' }]}>Remove from Library</Text>
               </Pressable>
             )}
           </View>
-        </View>
-      </View>
+        </MobileSheetPanel>
+      </MobileModalRoot>
     </Modal>
   );
 }
@@ -214,7 +216,7 @@ const styles = StyleSheet.create({
   sheetContainer: {
     borderTopLeftRadius: Radius.xl,
     borderTopRightRadius: Radius.xl,
-    borderWidth: 1,
+    borderWidth: 0,
     borderBottomWidth: 0,
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
@@ -232,7 +234,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.lg,
   },
   headerTitle: {
     fontSize: Typography.sizes.headline,
@@ -242,20 +244,20 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   categoryList: {
-    gap: Spacing.sm,
+    gap: 10,
   },
   categoryRow: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: Spacing.md,
     borderRadius: Radius.lg,
-    borderWidth: 1,
+    borderWidth: 0,
     gap: Spacing.md,
   },
   iconBox: {
     width: 38,
     height: 38,
-    borderRadius: Radius.md,
+    borderRadius: Radius.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -276,7 +278,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: Spacing.md,
     borderRadius: Radius.lg,
-    borderWidth: 1,
+    borderWidth: 0,
     gap: 8,
     marginTop: Spacing.xs,
   },

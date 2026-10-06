@@ -34,6 +34,12 @@ import {
   getMangaStatistics,
   MangaStatistics,
 } from '../../src/api/mangadex';
+import {
+  getUniversalMangaDetails,
+  getUniversalMangaChapters,
+  isExternalSource,
+} from '../../src/sources/adapter';
+import { SourceManager } from '../../src/sources/SourceManager';
 import { useLibraryStore } from '../../src/store/libraryStore';
 import { useHistoryStore } from '../../src/store/historyStore';
 import { useDownloadStore } from '../../src/store/downloadStore';
@@ -50,10 +56,11 @@ import { triggerHaptic } from '../../src/utils/haptics';
 import { formatChapterDate } from '../../src/utils/date';
 import { getLanguageInfo } from '../../src/utils/language';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
+import { ApiLogger } from '../../src/services/apiLogger';
 import type { Manga, Chapter, LibraryCategory } from '../../src/types';
 
 export default function MangaDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, fromCatalog } = useLocalSearchParams<{ id: string; fromCatalog?: string }>();
   const router = useRouter();
   const colors = useThemeColors();
 
@@ -69,6 +76,12 @@ export default function MangaDetailScreen() {
   const [synopsisExpanded, setSynopsisExpanded] = useState(false);
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [error, setError] = useState<string | null>(null);
+
+  // Keep this calculation unconditional. Hooks must run before any loading
+  // or error return, otherwise source failures cause React's hook order error.
+  const coverHeaders = id?.startsWith('hitomila:')
+    ? { Referer: 'https://hitomi.la/' }
+    : undefined;
 
   const libraryEntry = useLibraryStore((s) => s.entries[id!]);
   const isInLibrary = useLibraryStore((s) => s.isInLibrary(id!));
@@ -140,15 +153,25 @@ export default function MangaDetailScreen() {
     try {
       setIsLoading(true);
       setError(null);
+      const isExt = isExternalSource(id!);
       const [data, statistics] = await Promise.all([
-        getMangaDetails(id!),
-        getMangaStatistics(id!),
+        isExt ? getUniversalMangaDetails(id!) : getMangaDetails(id!),
+        !isExt ? getMangaStatistics(id!) : Promise.resolve(null),
       ]);
       setManga(data);
       setStats(statistics);
     } catch (err: any) {
       console.error('Failed to load manga details:', err);
-      setError('Unable to reach MangaDex. Please check your internet connection and try again.');
+      ApiLogger.logRequest({
+        timestamp: Date.now(),
+        method: 'MANGA_DETAILS',
+        url: id || 'unknown',
+        status: err?.response?.status ?? null,
+        statusText: err?.response?.statusText,
+        durationMs: 0,
+        error: err?.message || String(err),
+      });
+      setError('Unable to load manga details from source. Please check your connection and try again.');
     } finally {
       setIsLoading(false);
     }
@@ -157,8 +180,29 @@ export default function MangaDetailScreen() {
   const loadChapters = async (lang = selectedLanguage, order = sortOrder) => {
     try {
       setIsLoadingChapters(true);
-      const result = await getMangaChapters(id!, lang, 100, 0, order);
-      const chs = result.data || [];
+      const isExt = isExternalSource(id!);
+      let chs: Chapter[] = [];
+
+      if (isExt) {
+        chs = await getUniversalMangaChapters(id!);
+        if (order === 'desc') {
+          chs.sort(
+            (a, b) =>
+              parseFloat(b.attributes.chapter || '0') -
+              parseFloat(a.attributes.chapter || '0')
+          );
+        } else {
+          chs.sort(
+            (a, b) =>
+              parseFloat(a.attributes.chapter || '0') -
+              parseFloat(b.attributes.chapter || '0')
+          );
+        }
+      } else {
+        const result = await getMangaChapters(id!, lang, 100, 0, order);
+        chs = result.data || [];
+      }
+
       setChapters(chs);
 
       // Reconcile total chapters and unread count badge in library
@@ -178,6 +222,15 @@ export default function MangaDetailScreen() {
       }
     } catch (err: any) {
       console.error('Failed to load chapters:', err);
+      ApiLogger.logRequest({
+        timestamp: Date.now(),
+        method: 'MANGA_CHAPTERS',
+        url: id || 'unknown',
+        status: err?.response?.status ?? null,
+        statusText: err?.response?.statusText,
+        durationMs: 0,
+        error: err?.message || String(err),
+      });
     } finally {
       setIsLoadingChapters(false);
     }
@@ -248,8 +301,15 @@ export default function MangaDetailScreen() {
 
     try {
       setIsStartingReading(true);
-      const result = await getMangaChapters(id, selectedLanguage, 1, 0, 'asc');
-      const firstChapter = result.data[0];
+      // External parsers already populated `chapters`. Calling the MangaDex
+      // endpoint here causes false 404s such as /manga/omegascans:54/feed.
+      const firstChapter = isExternalSource(id)
+        ? [...chapters].sort(
+            (a, b) =>
+              parseFloat(a.attributes.chapter || '0') -
+              parseFloat(b.attributes.chapter || '0')
+          )[0]
+        : (await getMangaChapters(id, selectedLanguage, 1, 0, 'asc')).data[0];
 
       if (firstChapter) {
         handleReadChapter(firstChapter.id, 0);
@@ -259,7 +319,7 @@ export default function MangaDetailScreen() {
     } finally {
       setIsStartingReading(false);
     }
-  }, [handleReadChapter, id, isStartingReading, lastProgress, selectedLanguage]);
+  }, [chapters, handleReadChapter, id, isStartingReading, lastProgress, selectedLanguage]);
 
   const handleToggleSelectDownload = (chapterId: string) => {
     triggerHaptic();
@@ -335,8 +395,20 @@ export default function MangaDetailScreen() {
     const groupName = group?.attributes?.name ?? null;
     const userName = user?.attributes?.username ?? null;
 
-    if (groupName && userName) return `${groupName} · ${userName}`;
-    return groupName || userName || 'MangaDex';
+    if (groupName && userName && groupName !== userName) return `${groupName} · ${userName}`;
+    if (groupName) return groupName;
+    if (userName) return userName;
+
+    if (id && isExternalSource(id)) {
+      const resolved = SourceManager.resolveSource(id);
+      if (resolved) return resolved.parser.metadata.name;
+    }
+    if (chapter.id && isExternalSource(chapter.id)) {
+      const resolved = SourceManager.resolveSource(chapter.id);
+      if (resolved) return resolved.parser.metadata.name;
+    }
+
+    return 'MangaDex';
   };
 
   if (isLoading) {
@@ -375,7 +447,7 @@ export default function MangaDetailScreen() {
         <View style={styles.heroContainer}>
           {coverUrl && (
             <Image
-              source={{ uri: coverUrl }}
+              source={{ uri: coverUrl, headers: coverHeaders }}
               style={styles.backdropImage}
               contentFit="cover"
               blurRadius={6}
@@ -391,6 +463,8 @@ export default function MangaDetailScreen() {
               onPress={() => {
                 if (router.canGoBack()) {
                   router.back();
+                } else if (fromCatalog) {
+                  router.replace(`/(tabs)/extensions?reopenCatalog=${fromCatalog}` as any);
                 } else {
                   router.replace('/(tabs)' as any);
                 }
@@ -426,7 +500,7 @@ export default function MangaDetailScreen() {
               >
                 {coverUrl ? (
                   <Image
-                    source={{ uri: coverUrl }}
+                    source={{ uri: coverUrl, headers: coverHeaders }}
                     style={styles.coverImage}
                     contentFit="cover"
                     transition={200}
@@ -447,9 +521,9 @@ export default function MangaDetailScreen() {
                 </Text>
                 <View style={styles.statusRow}>
                   {stats?.rating?.bayesian || stats?.rating?.average ? (
-                    <View style={[styles.statusPill, { backgroundColor: 'rgba(245, 158, 11, 0.15)', borderColor: '#F59E0B', flexDirection: 'row', alignItems: 'center', gap: 3 }]}>
+                    <View style={[styles.statusPill, { backgroundColor: 'rgba(255, 255, 255, 0.06)', borderColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 3 }]}>
                       <Ionicons name="star" size={10} color="#F59E0B" />
-                      <Text style={[styles.statusPillText, { color: '#F59E0B' }]}>
+                      <Text style={[styles.statusPillText, { color: colors.text }]}>
                         {(stats.rating.bayesian || stats.rating.average!).toFixed(2)}
                       </Text>
                     </View>
@@ -460,8 +534,8 @@ export default function MangaDetailScreen() {
                     style={({ pressed }) => [
                       styles.statusPill,
                       {
-                        backgroundColor: isInLibrary ? 'rgba(244, 63, 94, 0.2)' : colors.surfaceElevated,
-                        borderColor: isInLibrary ? colors.accent : colors.border,
+                        backgroundColor: colors.surfaceElevated,
+                        borderColor: colors.border,
                         flexDirection: 'row',
                         alignItems: 'center',
                         gap: 4,
@@ -472,9 +546,9 @@ export default function MangaDetailScreen() {
                     <Ionicons
                       name={isInLibrary ? 'bookmark' : 'bookmark-outline'}
                       size={11}
-                      color={colors.accent}
+                      color={isInLibrary ? colors.text : colors.textSecondary}
                     />
-                    <Text style={[styles.statusPillText, { color: isInLibrary ? colors.accent : colors.text }]}>
+                    <Text style={[styles.statusPillText, { color: isInLibrary ? colors.text : colors.textSecondary }]}>
                       {isInLibrary ? getCategoryDisplayLabel(libraryEntry?.category) : 'Add to Library'}
                     </Text>
                   </Pressable>
@@ -509,7 +583,7 @@ export default function MangaDetailScreen() {
               styles.actionButton,
               {
                 backgroundColor: isInLibrary ? colors.surfaceElevated : colors.surface,
-                borderColor: isInLibrary ? colors.accent : colors.border,
+                borderColor: colors.border,
                 borderWidth: 1,
                 flex: 1,
               },
@@ -518,7 +592,7 @@ export default function MangaDetailScreen() {
             <Ionicons
               name={isInLibrary ? 'bookmark' : 'bookmark-outline'}
               size={15}
-              color={isInLibrary ? colors.accent : colors.text}
+              color={isInLibrary ? colors.text : colors.textSecondary}
             />
             <Text
               style={[
@@ -640,7 +714,7 @@ export default function MangaDetailScreen() {
                     styles.languagePickerBtn,
                     {
                       backgroundColor: colors.surfaceElevated,
-                      borderColor: isLanguageDropdownOpen ? colors.accent : colors.border,
+                      borderColor: isLanguageDropdownOpen ? 'rgba(255, 255, 255, 0.28)' : colors.border,
                       opacity: pressed ? 0.7 : 1,
                     },
                   ]}
@@ -858,9 +932,9 @@ export default function MangaDetailScreen() {
 
                     {/* Status Badges: In-Progress Reading vs Completed Read */}
                     {isCurrentReading ? (
-                      <View style={[styles.readingBadge, { backgroundColor: colors.accent + '22', borderColor: colors.accent }]}>
-                        <Ionicons name="book" size={11} color={colors.accent} />
-                        <Text style={[styles.readingBadgeText, { color: colors.accent }]}>
+                      <View style={[styles.readingBadge, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}>
+                        <Ionicons name="book" size={11} color={colors.text} />
+                        <Text style={[styles.readingBadgeText, { color: colors.text }]}>
                           Reading · p. {(lastProgress?.pageIndex || 0) + 1}/{lastProgress?.totalPages || chapter.attributes.pages || 1}
                         </Text>
                       </View>
@@ -873,7 +947,9 @@ export default function MangaDetailScreen() {
                   </View>
 
                   <Text style={[styles.chapterMeta, { color: isRead ? colors.textMuted : colors.textSecondary }]}>
-                    {getChapterCredit(chapter)} · {chapter.attributes.pages} pages · {formatChapterDate(chapter.attributes.publishAt || chapter.attributes.readableAt)}
+                    {getChapterCredit(chapter)}
+                    {chapter.attributes.pages > 0 ? ` · ${chapter.attributes.pages} pages` : ''} ·{' '}
+                    {formatChapterDate(chapter.attributes.publishAt || chapter.attributes.readableAt)}
                   </Text>
                 </View>
 
@@ -942,24 +1018,17 @@ export default function MangaDetailScreen() {
             <Pressable
               style={[
                 styles.modalContent,
-                { backgroundColor: colors.surface, borderTopColor: colors.border },
+                { backgroundColor: colors.surface, borderTopColor: 'transparent' },
               ]}
               onPress={(e) => e.stopPropagation()}
             >
-              <View style={[styles.modalHeader, { borderBottomColor: colors.borderSubtle }]}>
+              <View style={[styles.modalHeader, { borderBottomColor: 'transparent' }]}>
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.modalTitle, { color: colors.text }]}>Chapter Language</Text>
                   <Text style={[styles.modalSub, { color: colors.textSecondary }]}>
                     Select translation language ({availableLanguages.length} available)
                   </Text>
                 </View>
-                <Pressable
-                  onPress={() => setIsLanguageDropdownOpen(false)}
-                  style={styles.closeBtn}
-                  hitSlop={8}
-                >
-                  <Ionicons name="close" size={22} color={colors.text} />
-                </Pressable>
               </View>
 
               <ScrollView
@@ -981,11 +1050,11 @@ export default function MangaDetailScreen() {
                         styles.mobileLanguageRow,
                         {
                           backgroundColor: isSelected
-                            ? colors.accent + '20'
+                            ? colors.surfaceElevated
                             : pressed
                             ? colors.surfaceElevated
                             : 'transparent',
-                          borderColor: isSelected ? colors.accent : colors.borderSubtle,
+                          borderColor: isSelected ? 'rgba(255, 255, 255, 0.22)' : colors.borderSubtle,
                         },
                       ]}
                     >
@@ -999,8 +1068,8 @@ export default function MangaDetailScreen() {
                           style={[
                             styles.mobileLanguageName,
                             {
-                              color: isSelected ? colors.accent : colors.text,
-                              fontWeight: isSelected ? 'bold' : '500',
+                              color: isSelected ? colors.text : colors.textSecondary,
+                              fontWeight: isSelected ? '700' : '500',
                             },
                           ]}
                         >
@@ -1046,7 +1115,7 @@ export default function MangaDetailScreen() {
             ]}
           >
             {/* Modal Header */}
-            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: 'transparent' }]}>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.modalTitle, { color: colors.text }]}>Download Chapters</Text>
                 <Text style={[styles.modalSub, { color: colors.textMuted }]}>
@@ -1054,16 +1123,6 @@ export default function MangaDetailScreen() {
                 </Text>
               </View>
 
-              <Pressable
-                onPress={() => setDownloadModalVisible(false)}
-                style={({ pressed }) => [
-                  styles.closeBtn,
-                  pressed && { opacity: 0.7 },
-                  Platform.OS === 'web' && { cursor: 'pointer' },
-                ]}
-              >
-                <Ionicons name="close" size={22} color={colors.textMuted} />
-              </Pressable>
             </View>
 
             {/* Quick Actions Row */}
@@ -1108,8 +1167,8 @@ export default function MangaDetailScreen() {
                     style={({ pressed }) => [
                       styles.downloadRow,
                       {
-                        backgroundColor: isSelected ? `${colors.accent}15` : colors.surfaceElevated,
-                        borderColor: isSelected ? colors.accent : colors.border,
+                        backgroundColor: isSelected ? colors.surfaceElevated : colors.surface,
+                        borderColor: isSelected ? 'rgba(255, 255, 255, 0.22)' : colors.border,
                         opacity: pressed ? 0.8 : 1,
                       },
                       Platform.OS === 'web' && { cursor: 'pointer' },
@@ -1118,7 +1177,7 @@ export default function MangaDetailScreen() {
                     <Ionicons
                       name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
                       size={20}
-                      color={isSelected ? colors.accent : colors.textMuted}
+                      color={isSelected ? colors.text : colors.textMuted}
                     />
 
                     <View style={{ flex: 1, gap: 2 }}>
@@ -1193,7 +1252,7 @@ export default function MangaDetailScreen() {
         >
           {coverUrl && (
             <ZoomableImage
-              source={{ uri: coverUrl }}
+              source={{ uri: coverUrl, headers: coverHeaders }}
               style={styles.lightboxImage}
               contentFit="contain"
               onTap={() => setIsCoverLightboxOpen(false)}

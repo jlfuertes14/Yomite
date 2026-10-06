@@ -106,7 +106,7 @@ function MangaCardComponent({
         {/* Rating overlay badge */}
         {rating && rating > 0 ? (
           <View style={styles.ratingBadge}>
-            <Ionicons name="star" size={10} color="#F59E0B" />
+            <Ionicons name="star" size={10} color={colors.accent} />
             <Text style={styles.ratingText}>{rating.toFixed(1)}</Text>
           </View>
         ) : null}

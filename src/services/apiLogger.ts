@@ -87,18 +87,35 @@ class ApiLoggerService {
       quotaInfo = ` [Quota: ${entry.rateLimit.remaining}/${entry.rateLimit.limit ?? 60}]`;
     }
 
+    let sourceLabel = 'MangaDex API';
+    if (entry.method.startsWith('SCRAPE:')) {
+      const sourceName = entry.method.replace('SCRAPE:', '');
+      sourceLabel = `Source Scraper: ${sourceName}`;
+    } else if (entry.method.startsWith('GET_JSON:')) {
+      const sourceName = entry.method.replace('GET_JSON:', '');
+      sourceLabel = `Source API: ${sourceName}`;
+    } else if (entry.method.startsWith('GET_BIN:')) {
+      const sourceName = entry.method.replace('GET_BIN:', '');
+      sourceLabel = `Source Binary: ${sourceName}`;
+    } else if (entry.method.startsWith('POST_FORM:')) {
+      const sourceName = entry.method.replace('POST_FORM:', '');
+      sourceLabel = `Source API: ${sourceName}`;
+    } else if (entry.method === 'MANGA_DETAILS' || entry.method === 'MANGA_CHAPTERS') {
+      sourceLabel = 'Source Adapter';
+    }
+
     if (isRateLimit) {
       const retryAfter = entry.rateLimit?.retryAfter ?? 5;
       console.warn(
-        `\n⛔ [MangaDex API] RATE LIMITED (429) | ${entry.method} ${path} (${duration}) | Retry-After: ${retryAfter}s${quotaInfo}`
+        `\n⛔ [${sourceLabel}] RATE LIMITED (429) | ${entry.method} ${path} (${duration}) | Retry-After: ${retryAfter}s${quotaInfo}`
       );
     } else if (isError) {
       console.error(
-        `\n❌ [MangaDex API ERROR] ${entry.method} ${path} | Status: ${entry.status ?? 'NET_ERR'} | ${entry.error || 'Failed'}`
+        `\n❌ [${sourceLabel} ERROR] ${entry.method} ${path} | Status: ${entry.status ?? 'NET_ERR'} | ${entry.error || 'Failed'}`
       );
     } else {
       console.log(
-        `[MangaDex API] ${entry.method} ${path} ➔ ${entry.status} OK (${duration})${quotaInfo}`
+        `[${sourceLabel}] ${entry.method} ${path} ➔ ${entry.status} OK (${duration})${quotaInfo}`
       );
     }
   }

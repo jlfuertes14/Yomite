@@ -150,30 +150,27 @@ export function ReaderMenuDrawer({
   };
 
   const isWeb = Platform.OS === 'web';
-
   return (
     <Modal
       visible={visible}
-      animationType={isWeb ? 'fade' : 'slide'}
+      animationType={isWeb ? 'fade' : 'none'}
       transparent
       onRequestClose={onClose}
     >
       <View style={[styles.backdrop, isWeb && styles.webBackdrop]}>
-        <Pressable style={styles.overlayPress} onPress={onClose} />
+        {isWeb && <Pressable style={styles.overlayPress} onPress={onClose} />}
 
-        <SafeAreaView
+        <View
           style={[
             styles.drawerContainer,
-            { backgroundColor: colors.surface, borderColor: colors.border },
+            { backgroundColor: colors.surface, borderColor: 'transparent' },
             isWeb && styles.webFloatingWindowContainer,
           ]}
         >
+        <SafeAreaView style={styles.drawerInner}>
           {/* Header Bar */}
           <View style={[styles.drawerHeader, isWeb && styles.webFloatingHeader]}>
             <View style={styles.headerLeftBtns}>
-              <Pressable onPress={onClose} style={styles.iconBtn}>
-                <Ionicons name="close" size={22} color={colors.text} />
-              </Pressable>
               {onGoToHome && (
                 <Pressable onPress={onGoToHome} style={styles.iconBtn}>
                   <Ionicons name="home-outline" size={20} color={colors.text} />
@@ -185,7 +182,14 @@ export function ReaderMenuDrawer({
             </Pressable>
           </View>
 
-          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            // Let an open picker own the vertical gesture so its list can scroll
+            // instead of competing with the drawer's parent ScrollView.
+            scrollEnabled={!showPagePicker && !showChapterPicker}
+            nestedScrollEnabled
+          >
             {/* Manga & Chapter Title */}
             <Pressable
               onPress={onGoBackToManga}
@@ -275,7 +279,15 @@ export function ReaderMenuDrawer({
                   </Pressable>
                 </View>
 
-                <ScrollView style={{ maxHeight: 280 }} nestedScrollEnabled showsVerticalScrollIndicator={true}>
+                <ScrollView
+                  style={{ maxHeight: 280 }}
+                  showsVerticalScrollIndicator={true}
+                  contentContainerStyle={{ paddingBottom: 20 }}
+                  keyboardShouldPersistTaps="handled"
+                  nestedScrollEnabled
+                  scrollEnabled
+                  alwaysBounceVertical
+                >
                   {filteredPages.map((pageIdx) => (
                     <Pressable
                       key={pageIdx}
@@ -371,7 +383,15 @@ export function ReaderMenuDrawer({
                   </Pressable>
                 </View>
 
-                <ScrollView style={{ maxHeight: 280 }} nestedScrollEnabled showsVerticalScrollIndicator={true}>
+                <ScrollView
+                  style={{ maxHeight: 280 }}
+                  showsVerticalScrollIndicator={true}
+                  contentContainerStyle={{ paddingBottom: 20 }}
+                  keyboardShouldPersistTaps="handled"
+                  nestedScrollEnabled
+                  scrollEnabled
+                  alwaysBounceVertical
+                >
                   {filteredChapters.map((ch) => (
                     <Pressable
                       key={ch.id}
@@ -566,6 +586,8 @@ export function ReaderMenuDrawer({
             </Pressable>
           </ScrollView>
         </SafeAreaView>
+        </View>
+        {!isWeb && <Pressable style={styles.overlayPress} onPress={onClose} />}
 
         {/* Modals */}
         <ChapterCommentsModal
@@ -603,8 +625,11 @@ const styles = StyleSheet.create({
   drawerContainer: {
     width: 320,
     height: '100%',
-    borderLeftWidth: 1,
+    borderRightWidth: 1,
     paddingHorizontal: Spacing.lg,
+  },
+  drawerInner: {
+    flex: 1,
   },
   webFloatingWindowContainer: {
     position: 'fixed' as any,

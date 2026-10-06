@@ -16,6 +16,7 @@ import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
 import { useThemeColors } from '../hooks/useThemeColor';
+import { MobileModalRoot, MobileSheetPanel } from './MobileBottomSheet';
 
 interface ShareCardModalProps {
   visible: boolean;
@@ -74,15 +75,16 @@ export function ShareCardModal({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <View style={[styles.modalContainer, { backgroundColor: '#141417', borderColor: '#27272A' }]}>
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      <MobileModalRoot style={styles.overlay}>
+        <MobileSheetPanel
+          visible={visible}
+          onClose={onClose}
+          style={[styles.modalContainer, { backgroundColor: '#141417', borderColor: 'transparent' }]}
+        >
           {/* Header */}
           <View style={styles.header}>
             <Text style={[styles.headerTitle, { color: colors.text }]}>Share Manga Quote Card</Text>
-            <Pressable onPress={onClose} style={styles.closeBtn}>
-              <Ionicons name="close" size={22} color="#A1A1AA" />
-            </Pressable>
           </View>
 
           <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
@@ -162,8 +164,8 @@ export function ShareCardModal({
               <Text style={styles.shareBtnText}>{isSharing ? 'Generating Card...' : 'Share Card'}</Text>
             </Pressable>
           </View>
-        </View>
-      </View>
+        </MobileSheetPanel>
+      </MobileModalRoot>
     </Modal>
   );
 }
@@ -178,7 +180,7 @@ const styles = StyleSheet.create({
     height: '85%',
     borderTopLeftRadius: Radius.xl,
     borderTopRightRadius: Radius.xl,
-    borderWidth: 1,
+    borderWidth: 0,
     paddingTop: Spacing.md,
   },
   header: {
@@ -187,7 +189,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg,
     paddingBottom: Spacing.md,
-    borderBottomWidth: 1,
+    borderBottomWidth: 0,
     borderBottomColor: '#27272A',
   },
   headerTitle: {

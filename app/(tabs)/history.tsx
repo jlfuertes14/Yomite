@@ -1,5 +1,6 @@
 /**
- * History Screen — Modern Minimalist Reading History with Search, Pagination, and Selective Deletion
+ * History Screen — Clean & Flat Design (Google Stitch Style)
+ * Container-free, borderless, modern reading history with date headers, progress bars, search, and selective deletion.
  */
 import React, { useCallback, useState, useEffect, useMemo } from 'react';
 import {
@@ -11,13 +12,12 @@ import {
   Platform,
   TextInput,
   ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import * as Haptics from 'expo-haptics';
-import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { useHistoryStore } from '../../src/store/historyStore';
 import { useDownloadStore } from '../../src/store/downloadStore';
@@ -41,10 +41,24 @@ function formatTimeAgo(timestamp: number): string {
   return new Date(timestamp).toLocaleDateString();
 }
 
+function getDateGroup(timestamp: number): string {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfYesterday = startOfToday - 86400000;
+  const startOfWeek = startOfToday - 6 * 86400000;
+
+  if (timestamp >= startOfToday) return 'Today';
+  if (timestamp >= startOfYesterday) return 'Yesterday';
+  if (timestamp >= startOfWeek) return 'Earlier this week';
+  return 'Older';
+}
+
 function HistoryRowItem({
   item,
   isSelectMode,
   isSelected,
+  showDateHeader,
+  dateHeaderTitle,
   onPress,
   onToggleSelect,
   onDeleteSingle,
@@ -52,6 +66,8 @@ function HistoryRowItem({
   item: HistoryEntry;
   isSelectMode: boolean;
   isSelected: boolean;
+  showDateHeader: boolean;
+  dateHeaderTitle: string;
   onPress: (entry: HistoryEntry) => void;
   onToggleSelect: (chapterId: string) => void;
   onDeleteSingle: (entry: HistoryEntry) => void;
@@ -77,6 +93,7 @@ function HistoryRowItem({
 
   const handleDownload = (e: any) => {
     e.stopPropagation();
+    triggerHaptic();
     if (isDownloaded) {
       removeDownloadedChapter(item.chapterId, item.mangaId);
       return;
@@ -93,99 +110,141 @@ function HistoryRowItem({
     });
   };
 
+  const progressPercent =
+    item.totalPages > 0
+      ? Math.min(100, Math.max(5, Math.round(((item.pageIndex + 1) / item.totalPages) * 100)))
+      : 0;
+
+  const isCompleted = item.totalPages > 0 && item.pageIndex + 1 >= item.totalPages;
+
   return (
-    <Pressable
-      onPress={() => {
-        if (isSelectMode) {
-          onToggleSelect(item.chapterId);
-        } else {
-          onPress(item);
-        }
-      }}
-      style={({ pressed }) => [
-        styles.historyRow,
-        {
-          backgroundColor: isSelected
-            ? colors.accentSubtle
-            : pressed
-            ? colors.surfaceElevated
-            : colors.surface,
-          borderColor: isSelected ? colors.accent : colors.border,
-        },
-      ]}
-    >
-      {/* Selection Checkbox in Select Mode */}
-      {isSelectMode && (
-        <Ionicons
-          name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
-          size={22}
-          color={isSelected ? colors.accent : colors.textMuted}
-          style={{ marginRight: 4 }}
-        />
+    <View>
+      {/* Date Section Header */}
+      {showDateHeader && (
+        <View style={styles.dateHeaderWrapper}>
+          <Text style={styles.dateHeaderText}>{dateHeaderTitle}</Text>
+        </View>
       )}
 
-      {/* Cover thumbnail */}
-      <View style={[styles.thumbnail, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-        {coverUrl ? (
-          <Image
-            source={{ uri: coverUrl }}
-            style={styles.thumbnailImage}
-            contentFit="cover"
-            transition={200}
+      {/* Flat Item Row (No container box, sits directly on background) */}
+      <Pressable
+        onPress={() => {
+          if (isSelectMode) {
+            onToggleSelect(item.chapterId);
+          } else {
+            onPress(item);
+          }
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={`Resume reading ${item.title}`}
+        style={({ pressed, hovered }: any) => [
+          styles.flatHistoryRow,
+          isSelected && { backgroundColor: `${colors.accent}14` },
+          (pressed || hovered) && !isSelected && { backgroundColor: 'rgba(255, 255, 255, 0.03)' },
+          Platform.OS === 'web' && { cursor: 'pointer' as any },
+        ]}
+      >
+        {/* Selection Checkbox in Select Mode */}
+        {isSelectMode && (
+          <Ionicons
+            name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
+            size={22}
+            color={isSelected ? colors.accent : '#71717A'}
+            style={styles.selectCheckbox}
           />
-        ) : (
-          <Ionicons name="book-outline" size={18} color={colors.textMuted} />
         )}
-      </View>
 
-      {/* Info */}
-      <View style={styles.infoContainer}>
-        <Text style={[styles.mangaTitle, { color: colors.text }]} numberOfLines={1}>
-          {item.title}
-        </Text>
-        <Text style={[styles.chapterInfo, { color: colors.textSecondary }]} numberOfLines={1}>
-          {item.chapterTitle} · Page {item.pageIndex + 1}/{item.totalPages}
-        </Text>
-        <Text style={[styles.timestamp, { color: colors.textMuted }]}>
-          {formatTimeAgo(item.timestamp)}
-        </Text>
-      </View>
-
-      {/* Action: Download, Trash button or Resume arrow */}
-      {!isSelectMode ? (
-        <View style={styles.actionGroup}>
-          <Pressable
-            onPress={handleDownload}
-            hitSlop={8}
-            style={({ pressed }) => [styles.deleteBtn, { opacity: pressed ? 0.6 : 1 }]}
-          >
-            {isDownloading ? (
-              <ActivityIndicator size="small" color={colors.accent} />
-            ) : isDownloaded ? (
-              <Ionicons name="checkmark-circle" size={18} color={colors.emerald} />
-            ) : (
-              <Ionicons name="download-outline" size={18} color={colors.textSecondary} />
-            )}
-          </Pressable>
-
-          <Pressable
-            onPress={(e) => {
-              e.stopPropagation();
-              onDeleteSingle(item);
-            }}
-            hitSlop={8}
-            style={({ pressed }) => [
-              styles.deleteBtn,
-              { opacity: pressed ? 0.6 : 1 },
-            ]}
-          >
-            <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
-          </Pressable>
-
-          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        {/* Manga Cover Thumbnail */}
+        <View style={styles.coverThumbnail}>
+          {coverUrl ? (
+            <Image
+              source={{ uri: coverUrl }}
+              style={styles.coverImg}
+              contentFit="cover"
+              transition={200}
+            />
+          ) : (
+            <Ionicons name="book-outline" size={20} color={colors.textMuted} />
+          )}
         </View>
-      ) : null}
-    </Pressable>
+
+        {/* Metadata & Progress Bar */}
+        <View style={styles.itemMetaCol}>
+          <Text style={[styles.mangaTitle, { color: colors.text }]} numberOfLines={1}>
+            {item.title}
+          </Text>
+          <Text style={[styles.chapterSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
+            {item.chapterTitle || `Page ${item.pageIndex + 1}`}
+          </Text>
+
+          {/* Reading Progress Bar & Timestamp */}
+          <View style={styles.progressRow}>
+            <View style={styles.progressBarTrack}>
+              <View
+                style={[
+                  styles.progressBarFill,
+                  { width: `${progressPercent}%`, backgroundColor: colors.accent },
+                ]}
+              />
+            </View>
+            <Text style={[styles.progressInfoText, { color: colors.textMuted }]}>
+              {isCompleted
+                ? `Completed · ${formatTimeAgo(item.timestamp)}`
+                : `Page ${item.pageIndex + 1}/${item.totalPages} · ${formatTimeAgo(item.timestamp)}`}
+            </Text>
+          </View>
+        </View>
+
+        {/* Inline Flat Actions */}
+        {!isSelectMode && (
+          <View style={styles.inlineActions}>
+            <Pressable
+              onPress={handleDownload}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Download options"
+              style={({ pressed, hovered }: any) => [
+                styles.actionBtn,
+                (pressed || hovered) && { opacity: 0.7 },
+                Platform.OS === 'web' && { cursor: 'pointer' as any },
+              ]}
+            >
+              {isDownloading ? (
+                <ActivityIndicator size="small" color={colors.accent} />
+              ) : isDownloaded ? (
+                <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+              ) : (
+                <Ionicons name="download-outline" size={18} color={colors.textMuted} />
+              )}
+            </Pressable>
+
+            <Pressable
+              onPress={(e) => {
+                e.stopPropagation();
+                onDeleteSingle(item);
+              }}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Remove from history"
+              style={({ pressed, hovered }: any) => [
+                styles.actionBtn,
+                (pressed || hovered) && { opacity: 0.7 },
+                Platform.OS === 'web' && { cursor: 'pointer' as any },
+              ]}
+            >
+              <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
+            </Pressable>
+
+            <View style={styles.chevronWrapper}>
+              <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+            </View>
+          </View>
+        )}
+      </Pressable>
+
+      {/* Hairline Divider between items */}
+      <View style={styles.hairlineDivider} />
+    </View>
   );
 }
 
@@ -193,6 +252,9 @@ export default function HistoryScreen() {
   useDocumentTitle('History');
   const router = useRouter();
   const colors = useThemeColors();
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= 860;
+
   const [drawerVisible, setDrawerVisible] = useState(false);
   const entries = useHistoryStore((s) => s.entries);
   const removeEntry = useHistoryStore((s) => s.removeEntry);
@@ -202,7 +264,7 @@ export default function HistoryScreen() {
   // Search & Pagination state
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const PAGE_SIZE = 15;
+  const PAGE_SIZE = 20;
 
   // Selection state
   const [isSelectMode, setIsSelectMode] = useState(false);
@@ -234,14 +296,12 @@ export default function HistoryScreen() {
     );
   }, [entries, searchQuery]);
 
-  // Reset page when search changes
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery]);
 
   const totalPages = Math.max(1, Math.ceil(filteredEntries.length / PAGE_SIZE));
 
-  // Paginated Entries for current page
   const paginatedEntries = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
     return filteredEntries.slice(start, start + PAGE_SIZE);
@@ -268,6 +328,7 @@ export default function HistoryScreen() {
   }, []);
 
   const handleSelectAll = useCallback(() => {
+    triggerHaptic();
     if (selectedIds.size === filteredEntries.length) {
       setSelectedIds(new Set());
     } else {
@@ -326,405 +387,557 @@ export default function HistoryScreen() {
   }, [clearHistory]);
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[{ flex: 1, width: '100%' }, Platform.OS === 'web' && styles.webCenteredContent]}>
-        <View style={styles.header}>
-        <View style={styles.titleRow}>
-          {Platform.OS === 'web' && (
-            <Pressable
-              onPress={() => setDrawerVisible(true)}
-              style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1 }]}
-              hitSlop={8}
-            >
-              <Ionicons name="menu" size={26} color={colors.text} />
-            </Pressable>
-          )}
-          <Text style={[styles.title, { color: colors.text }]}>History</Text>
-        </View>
-
-        {entries.length > 0 && (
-          <View style={styles.headerRightActions}>
-            {isSelectMode ? (
-              <>
-                <Pressable onPress={handleSelectAll} style={styles.headerBtn}>
-                  <Text style={[styles.headerBtnText, { color: colors.textSecondary }]}>
-                    {selectedIds.size === filteredEntries.length ? 'Deselect All' : 'Select All'}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    setIsSelectMode(false);
-                    setSelectedIds(new Set());
-                  }}
-                  style={styles.headerBtn}
-                >
-                  <Text style={[styles.headerBtnText, { color: colors.accent }]}>Done</Text>
-                </Pressable>
-              </>
-            ) : (
-              <>
-                <Pressable
-                  onPress={() => setIsSelectMode(true)}
-                  style={styles.headerBtn}
-                >
-                  <Text style={[styles.headerBtnText, { color: colors.textSecondary }]}>
-                    Select
-                  </Text>
-                </Pressable>
-                <Pressable onPress={handleClearAll} style={styles.headerBtn}>
-                  <Text style={[styles.headerBtnText, { color: colors.accent }]}>
-                    Clear all
-                  </Text>
-                </Pressable>
-              </>
-            )}
-          </View>
-        )}
-      </View>
-
-      {/* Search Input Bar when history is present */}
-      {entries.length > 0 && (
-        <View style={styles.searchContainer}>
-          <View style={[styles.searchBox, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-            <Ionicons name="search-outline" size={16} color={colors.textMuted} />
-            <TextInput
-              style={[styles.searchInput, { color: colors.text }]}
-              placeholder="Search history by title or chapter..."
-              placeholderTextColor={colors.textMuted}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
-            {searchQuery.length > 0 && (
-              <Pressable onPress={() => setSearchQuery('')} style={styles.clearSearchBtn}>
-                <Ionicons name="close-circle" size={16} color={colors.textMuted} />
-              </Pressable>
-            )}
-          </View>
-        </View>
-      )}
-
-      {entries.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Ionicons name="time-outline" size={48} color={colors.textMuted} />
-          <Text style={[styles.emptyTitle, { color: colors.textSecondary }]}>
-            No reading history
-          </Text>
-          <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
-            Chapters you read will appear here automatically
-          </Text>
-        </View>
-      ) : filteredEntries.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Ionicons name="search-outline" size={44} color={colors.textMuted} />
-          <Text style={[styles.emptyTitle, { color: colors.textSecondary }]}>
-            No matching titles
-          </Text>
-          <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
-            No reading history found matching "{searchQuery}"
-          </Text>
-        </View>
-      ) : (
-        <View style={{ flex: 1 }}>
-          <FlatList
-            data={paginatedEntries}
-            keyExtractor={(item) => `${item.chapterId}-${item.timestamp}`}
-            renderItem={({ item }) => (
-              <HistoryRowItem
-                item={item}
-                isSelectMode={isSelectMode}
-                isSelected={selectedIds.has(item.chapterId)}
-                onPress={handleResume}
-                onToggleSelect={handleToggleSelect}
-                onDeleteSingle={handleDeleteSingle}
-              />
-            )}
-            contentContainerStyle={[
-              styles.listContent,
-              isSelectMode && selectedIds.size > 0 && { paddingBottom: 110 },
-            ]}
-            showsVerticalScrollIndicator={false}
-            ListFooterComponent={
-              filteredEntries.length > PAGE_SIZE ? (
-                <View style={styles.paginationRow}>
-                  <Pressable
-                    disabled={currentPage <= 1}
-                    onPress={() => {
-                      if (currentPage > 1) setCurrentPage((p) => p - 1);
-                    }}
-                    style={({ pressed }) => [
-                      styles.pageBtn,
-                      { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
-                      currentPage <= 1 && { opacity: 0.3 },
-                      pressed && { opacity: 0.7 },
-                    ]}
-                  >
-                    <Ionicons name="chevron-back" size={16} color={colors.text} />
-                    <Text style={[styles.pageBtnText, { color: colors.text }]}>Prev</Text>
-                  </Pressable>
-
-                  <View style={styles.pageIndicatorPill}>
-                    <Text style={[styles.pageIndicatorText, { color: colors.text }]}>
-                      Page {currentPage} of {totalPages}
-                    </Text>
-                    <Text style={[styles.pageTotalCountText, { color: colors.textMuted }]}>
-                      ({filteredEntries.length} items)
-                    </Text>
-                  </View>
-
-                  <Pressable
-                    disabled={currentPage >= totalPages}
-                    onPress={() => {
-                      if (currentPage < totalPages) setCurrentPage((p) => p + 1);
-                    }}
-                    style={({ pressed }) => [
-                      styles.pageBtn,
-                      { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
-                      currentPage >= totalPages && { opacity: 0.3 },
-                      pressed && { opacity: 0.7 },
-                    ]}
-                  >
-                    <Text style={[styles.pageBtnText, { color: colors.text }]}>Next</Text>
-                    <Ionicons name="chevron-forward" size={16} color={colors.text} />
-                  </Pressable>
-                </View>
-              ) : null
-            }
-          />
-
-          {/* Floating Delete Selected Bar */}
-          {isSelectMode && selectedIds.size > 0 && (
-            <View style={[styles.floatingDeleteBar, { backgroundColor: '#18181B', borderColor: colors.border }]}>
-              <Text style={[styles.floatingBarText, { color: colors.text }]}>
-                {selectedIds.size} {selectedIds.size === 1 ? 'item' : 'items'} selected
-              </Text>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
+      <View style={styles.contentWrapper}>
+        {/* Header Section */}
+        <View style={[styles.header, isDesktop && styles.headerDesktop]}>
+          <View style={styles.titleRow}>
+            {Platform.OS === 'web' && (
               <Pressable
-                onPress={handleDeleteSelected}
-                style={({ pressed }) => [
-                  styles.deleteSelectedBtn,
-                  {
-                    backgroundColor: colors.accent,
-                    opacity: pressed ? 0.7 : 1,
-                  },
+                onPress={() => setDrawerVisible(true)}
+                style={({ pressed, hovered }: any) => [
+                  styles.menuButton,
+                  (pressed || hovered) && { opacity: 0.7, backgroundColor: 'rgba(63, 63, 70, 0.8)' },
+                  Platform.OS === 'web' && { cursor: 'pointer' as any },
                 ]}
+                accessibilityRole="button"
+                accessibilityLabel="Open navigation drawer"
+                hitSlop={8}
               >
-                <Ionicons name="trash" size={16} color="#FFFFFF" />
-                <Text style={styles.deleteSelectedText}>Delete Selected</Text>
+                <Ionicons name="menu" size={24} color={colors.text} />
               </Pressable>
+            )}
+            <Text style={[styles.title, isDesktop && styles.titleDesktop, { color: colors.text }]}>History</Text>
+          </View>
+
+          {entries.length > 0 && (
+            <View style={styles.headerRightActions}>
+              {isSelectMode ? (
+                <>
+                  <Pressable
+                    onPress={handleSelectAll}
+                    style={styles.headerBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel="Toggle select all items"
+                  >
+                    <Text style={styles.headerBtnTextMuted}>
+                      {selectedIds.size === filteredEntries.length ? 'Deselect All' : 'Select All'}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      setIsSelectMode(false);
+                      setSelectedIds(new Set());
+                    }}
+                    style={styles.headerBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel="Exit select mode"
+                  >
+                    <Text style={[styles.headerBtnTextAccent, { color: colors.accent }]}>
+                      Done
+                    </Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <Pressable
+                    onPress={() => setIsSelectMode(true)}
+                    style={styles.headerBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel="Enter selection mode"
+                  >
+                    <Text style={styles.headerBtnTextMuted}>Select</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={handleClearAll}
+                    style={styles.headerBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear all history"
+                  >
+                    <Text style={[styles.headerBtnTextAccent, { color: colors.accent }]}>
+                      Clear all
+                    </Text>
+                  </Pressable>
+                </>
+              )}
             </View>
           )}
         </View>
-      )}
 
-      {/* Sleek Custom Deletion Confirmation Dialog */}
-      <ConfirmationModal
-        visible={confirmModalConfig.visible}
-        title={confirmModalConfig.title}
-        message={confirmModalConfig.message}
-        iconName={confirmModalConfig.iconName || 'trash-outline'}
-        confirmVariant="destructive"
-        confirmText={confirmModalConfig.confirmText || 'Delete'}
-        onConfirm={confirmModalConfig.onConfirm}
-        onCancel={() => setConfirmModalConfig((prev) => ({ ...prev, visible: false }))}
-      />
+        {/* Modern Flat Search Input (Directly on screen) */}
+        {entries.length > 0 && (
+          <View style={[styles.searchWrapper, isDesktop && styles.searchWrapperDesktop]}>
+            <View style={[styles.searchBox, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+              <Ionicons name="search-outline" size={16} color={colors.textMuted} style={{ marginLeft: 4 }} />
+              <TextInput
+                style={[styles.searchInput, { color: colors.text }]}
+                placeholder="Search history by title or chapter…"
+                placeholderTextColor={colors.textMuted}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                returnKeyType="search"
+              />
+              {searchQuery.length > 0 && (
+                <Pressable
+                  onPress={() => setSearchQuery('')}
+                  style={styles.clearSearchBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear search text"
+                  hitSlop={8}
+                >
+                  <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+                </Pressable>
+              )}
+            </View>
+          </View>
+        )}
 
-      {/* Hamburger Slide Drawer */}
-      <SidebarDrawer visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
+        {/* Empty States */}
+        {entries.length === 0 ? (
+          <View style={styles.emptyState}>
+            <View style={styles.emptyIconBox}>
+              <Ionicons name="time-outline" size={38} color="#71717A" />
+            </View>
+            <Text style={styles.emptyTitle}>No reading history</Text>
+            <Text style={styles.emptySubtitle}>
+              Chapters you read will appear here automatically
+            </Text>
+          </View>
+        ) : filteredEntries.length === 0 ? (
+          <View style={styles.emptyState}>
+            <View style={styles.emptyIconBox}>
+              <Ionicons name="search-outline" size={34} color="#71717A" />
+            </View>
+            <Text style={styles.emptyTitle}>No matching titles</Text>
+            <Text style={styles.emptySubtitle}>
+              No reading history found matching "{searchQuery}"
+            </Text>
+          </View>
+        ) : (
+          <View style={{ flex: 1 }}>
+            <FlatList
+              data={paginatedEntries}
+              keyExtractor={(item) => `${item.chapterId}-${item.timestamp}`}
+              renderItem={({ item, index }) => {
+                const group = getDateGroup(item.timestamp);
+                const prevGroup =
+                  index > 0 ? getDateGroup(paginatedEntries[index - 1].timestamp) : null;
+                const showDateHeader = index === 0 || group !== prevGroup;
+
+                return (
+                  <HistoryRowItem
+                    item={item}
+                    isSelectMode={isSelectMode}
+                    isSelected={selectedIds.has(item.chapterId)}
+                    showDateHeader={showDateHeader}
+                    dateHeaderTitle={group}
+                    onPress={handleResume}
+                    onToggleSelect={handleToggleSelect}
+                    onDeleteSingle={handleDeleteSingle}
+                  />
+                );
+              }}
+              contentContainerStyle={[
+                styles.listContent,
+                isDesktop && styles.listContentDesktop,
+                isSelectMode && selectedIds.size > 0 && { paddingBottom: 120 },
+              ]}
+              showsVerticalScrollIndicator={false}
+              ListFooterComponent={
+                filteredEntries.length > PAGE_SIZE ? (
+                  <View style={styles.paginationRow}>
+                    <Pressable
+                      disabled={currentPage <= 1}
+                      onPress={() => {
+                        if (currentPage > 1) setCurrentPage((p) => p - 1);
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Previous page"
+                      style={({ pressed, hovered }: any) => [
+                        styles.pageBtn,
+                        currentPage <= 1 && { opacity: 0.3 },
+                        (pressed || hovered) && currentPage > 1 && { opacity: 0.7 },
+                        Platform.OS === 'web' && { cursor: 'pointer' as any },
+                      ]}
+                    >
+                      <Ionicons name="chevron-back" size={16} color="#E4E4E7" />
+                      <Text style={styles.pageBtnText}>Prev</Text>
+                    </Pressable>
+
+                    <View style={styles.pageIndicatorPill}>
+                      <Text style={styles.pageIndicatorText}>
+                        Page {currentPage} of {totalPages}
+                      </Text>
+                      <Text style={styles.pageTotalCountText}>
+                        ({filteredEntries.length} items)
+                      </Text>
+                    </View>
+
+                    <Pressable
+                      disabled={currentPage >= totalPages}
+                      onPress={() => {
+                        if (currentPage < totalPages) setCurrentPage((p) => p + 1);
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Next page"
+                      style={({ pressed, hovered }: any) => [
+                        styles.pageBtn,
+                        currentPage >= totalPages && { opacity: 0.3 },
+                        (pressed || hovered) && currentPage < totalPages && { opacity: 0.7 },
+                        Platform.OS === 'web' && { cursor: 'pointer' as any },
+                      ]}
+                    >
+                      <Text style={styles.pageBtnText}>Next</Text>
+                      <Ionicons name="chevron-forward" size={16} color="#E4E4E7" />
+                    </Pressable>
+                  </View>
+                ) : (
+                  <View style={{ height: 40 }} />
+                )
+              }
+            />
+
+            {/* Floating Delete Selected Bar (Only in Selection Mode) */}
+            {isSelectMode && selectedIds.size > 0 && (
+              <View style={styles.floatingDeleteBar}>
+                <Text style={styles.floatingBarText}>
+                  {selectedIds.size} {selectedIds.size === 1 ? 'item' : 'items'} selected
+                </Text>
+                <Pressable
+                  onPress={handleDeleteSelected}
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete selected reading history items"
+                  style={({ pressed }: any) => [
+                    styles.deleteSelectedBtn,
+                    { backgroundColor: colors.accent, opacity: pressed ? 0.8 : 1 },
+                    Platform.OS === 'web' && { cursor: 'pointer' as any },
+                  ]}
+                >
+                  <Ionicons name="trash" size={16} color="#09090B" />
+                  <Text style={styles.deleteSelectedText}>Delete Selected</Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Confirmation Dialog */}
+        <ConfirmationModal
+          visible={confirmModalConfig.visible}
+          title={confirmModalConfig.title}
+          message={confirmModalConfig.message}
+          iconName={confirmModalConfig.iconName || 'trash-outline'}
+          confirmVariant="destructive"
+          confirmText={confirmModalConfig.confirmText || 'Delete'}
+          onConfirm={confirmModalConfig.onConfirm}
+          onCancel={() => setConfirmModalConfig((prev) => ({ ...prev, visible: false }))}
+        />
+
+        {/* Sidebar Drawer */}
+        <SidebarDrawer visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
       </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  webCenteredContent: {
-    maxWidth: 1400,
+  container: {
+    flex: 1,
+    backgroundColor: '#0F0F11',
+  },
+  contentWrapper: {
+    flex: 1,
     width: '100%',
+    maxWidth: 1000,
     alignSelf: 'center',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.sm,
-    paddingBottom: Spacing.xs,
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 8,
+  },
+  headerDesktop: {
+    paddingHorizontal: 28,
+    paddingTop: 20,
+    paddingBottom: 12,
   },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.sm,
+    gap: 14,
   },
-  plainIconButton: {
-    padding: 4,
+  menuButton: {
+    padding: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(39, 39, 42, 0.6)',
   },
   title: {
-    fontSize: Typography.sizes.title1,
-    fontWeight: Typography.weights.bold,
+    fontSize: 30,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: -0.5,
+  },
+  titleDesktop: {
+    fontSize: 32,
   },
   headerRightActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md,
+    gap: 18,
   },
   headerBtn: {
     paddingVertical: 4,
-    paddingHorizontal: 4,
+    paddingHorizontal: 2,
   },
-  headerBtnText: {
-    fontSize: Typography.sizes.footnote,
-    fontWeight: Typography.weights.semibold,
+  headerBtnTextMuted: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#D4D4D8',
   },
-  searchContainer: {
-    paddingHorizontal: Spacing.lg,
-    marginBottom: Spacing.md,
+  headerBtnTextAccent: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  /* Flat Search Input */
+  searchWrapper: {
+    paddingHorizontal: 20,
+    paddingBottom: 10,
+  },
+  searchWrapperDesktop: {
+    paddingHorizontal: 28,
+    paddingBottom: 14,
   },
   searchBox: {
-    height: 40,
-    borderRadius: Radius.md,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: '#18181C',
     borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.07)',
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.md,
-    gap: Spacing.sm,
+    paddingHorizontal: 12,
+    gap: 10,
   },
   searchInput: {
     flex: 1,
-    fontSize: Typography.sizes.footnote,
+    fontSize: 16,
+    color: '#E4E4E7',
     paddingVertical: 0,
   },
   clearSearchBtn: {
-    padding: 2,
+    padding: 4,
   },
+
+  /* Flat List Feed */
   listContent: {
-    paddingHorizontal: Spacing.lg,
-    gap: Spacing.sm,
-    paddingBottom: 80,
+    paddingHorizontal: 20,
+    paddingBottom: 90,
   },
-  historyRow: {
+  listContentDesktop: {
+    paddingHorizontal: 28,
+  },
+  dateHeaderWrapper: {
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  dateHeaderText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(161, 161, 170, 0.9)',
+    letterSpacing: 0.2,
+  },
+  flatHistoryRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: Spacing.md,
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    gap: Spacing.md,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    gap: 14,
   },
-  thumbnail: {
-    width: 48,
-    height: 68,
-    borderRadius: Radius.sm,
-    borderWidth: 1,
+  hairlineDivider: {
+    height: 1,
+    backgroundColor: 'rgba(39, 39, 42, 0.4)',
+    marginHorizontal: 4,
+  },
+  selectCheckbox: {
+    marginRight: -4,
+  },
+  coverThumbnail: {
+    width: 56,
+    height: 78,
+    borderRadius: 8,
+    backgroundColor: '#27272A',
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  thumbnailImage: {
+  coverImg: {
     width: '100%',
     height: '100%',
   },
-  infoContainer: {
+  itemMetaCol: {
     flex: 1,
+    justifyContent: 'center',
+    minWidth: 0,
     gap: 2,
   },
   mangaTitle: {
-    fontSize: Typography.sizes.body,
-    fontWeight: Typography.weights.semibold,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    letterSpacing: -0.2,
   },
-  chapterInfo: {
-    fontSize: Typography.sizes.footnote,
+  chapterSubtitle: {
+    fontSize: 12,
+    color: '#A1A1AA',
+    marginTop: 1,
   },
-  timestamp: {
-    fontSize: Typography.sizes.caption,
-  },
-  actionGroup: {
+  progressRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md,
+    gap: 8,
+    marginTop: 6,
   },
-  deleteBtn: {
-    padding: 6,
+  progressBarTrack: {
+    width: 64,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#27272A',
+    overflow: 'hidden',
   },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  progressInfoText: {
+    fontSize: 11,
+    color: '#A1A1AA',
+  },
+  inlineActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  actionBtn: {
+    padding: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chevronWrapper: {
+    paddingLeft: 2,
+  },
+
+  /* Empty State */
   emptyState: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing.md,
+    gap: 12,
+    paddingTop: 60,
+  },
+  emptyIconBox: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: 'rgba(39, 39, 42, 0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
   },
   emptyTitle: {
-    fontSize: Typography.sizes.headline,
-    fontWeight: Typography.weights.bold,
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#E4E4E7',
   },
   emptySubtitle: {
-    fontSize: Typography.sizes.body,
+    fontSize: 13,
+    color: '#71717A',
     textAlign: 'center',
     paddingHorizontal: 40,
+    maxWidth: 360,
   },
 
-  /* Pagination Controls */
+  /* Pagination */
   paginationRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: Spacing.md,
-    marginBottom: Spacing.lg,
-    gap: Spacing.sm,
+    marginTop: 20,
+    marginBottom: 40,
+    gap: 12,
   },
   pageBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: Radius.md,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#18181C',
     borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.07)',
     gap: 4,
   },
   pageBtnText: {
-    fontSize: Typography.sizes.footnote,
-    fontWeight: Typography.weights.semibold,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#E4E4E7',
   },
   pageIndicatorPill: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: Spacing.md,
+    paddingHorizontal: 12,
   },
   pageIndicatorText: {
-    fontSize: Typography.sizes.footnote,
-    fontWeight: Typography.weights.bold,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#E4E4E7',
   },
   pageTotalCountText: {
     fontSize: 10,
+    color: '#71717A',
+    marginTop: 1,
   },
 
-  /* Floating Delete Selected Bar */
+  /* Floating Delete Bar */
   floatingDeleteBar: {
     position: 'absolute',
-    bottom: 80,
-    left: Spacing.lg,
-    right: Spacing.lg,
+    bottom: 85,
+    left: 20,
+    right: 20,
+    maxWidth: 420,
+    alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    borderRadius: Radius.xl,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 18,
+    backgroundColor: '#18181C',
     borderWidth: 1,
-    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
-    elevation: 10,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
+    elevation: 12,
   },
   floatingBarText: {
-    fontSize: Typography.sizes.footnote,
-    fontWeight: Typography.weights.semibold,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#E4E4E7',
   },
   deleteSelectedBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-    borderRadius: Radius.md,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 10,
     gap: 6,
   },
   deleteSelectedText: {
-    color: '#FFFFFF',
-    fontSize: Typography.sizes.footnote,
-    fontWeight: Typography.weights.bold,
+    color: '#09090B',
+    fontSize: 12,
+    fontWeight: '700',
   },
 });

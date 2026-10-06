@@ -17,6 +17,7 @@ import * as Haptics from 'expo-haptics';
 import { Colors, Radius, Spacing, Typography } from '../../constants/Colors';
 import { useThemeColors } from '../hooks/useThemeColor';
 import { triggerHaptic } from '../utils/haptics';
+import { MobileModalRoot, MobileSheetPanel } from './MobileBottomSheet';
 
 interface ConfirmationModalProps {
   visible: boolean;
@@ -77,20 +78,23 @@ export function ConfirmationModal({
     <Modal
       visible={visible}
       transparent
-      animationType="fade"
+      animationType={Platform.OS === 'web' ? 'fade' : 'none'}
       onRequestClose={handleCancel}
     >
-      <View style={styles.overlay}>
+      <MobileModalRoot style={[styles.overlay, Platform.OS !== 'web' && styles.mobileOverlay]}>
         <Pressable style={styles.backdrop} onPress={handleCancel} />
 
-        <View
+        <MobileSheetPanel
+          visible={visible}
+          onClose={handleCancel}
           style={[
             styles.card,
             {
               backgroundColor: colors.surface,
-              borderColor: colors.border,
+              borderColor: 'transparent',
             },
           ]}
+          showHandle={Platform.OS !== 'web'}
         >
           {/* Top Icon Pill Badge */}
           <View
@@ -144,8 +148,8 @@ export function ConfirmationModal({
               <Text style={styles.confirmBtnText}>{confirmText}</Text>
             </Pressable>
           </View>
-        </View>
-      </View>
+        </MobileSheetPanel>
+      </MobileModalRoot>
     </Modal>
   );
 }
@@ -157,6 +161,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: Spacing.xl,
+  },
+  mobileOverlay: {
+    padding: 0,
+    justifyContent: 'flex-end',
   },
   backdrop: {
     ...StyleSheet.absoluteFill,

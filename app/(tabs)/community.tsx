@@ -468,9 +468,9 @@ export default function CommunityScreen() {
         >
           <View style={styles.modalOverlay}>
             <Pressable style={StyleSheet.absoluteFill} onPress={() => setSelectedThread(null)} />
-            <View style={[styles.modalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={[styles.modalCard, { backgroundColor: colors.surface, borderColor: 'transparent' }]}>
               {/* Modal Header */}
-              <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+              <View style={[styles.modalHeader, { borderBottomColor: 'transparent' }]}>
                 <View style={{ flex: 1, gap: 4 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <View style={[styles.categoryBadge, { backgroundColor: colors.surfaceElevated }]}>
@@ -506,9 +506,6 @@ export default function CommunityScreen() {
                   </Text>
                 </View>
 
-                <Pressable onPress={() => setSelectedThread(null)} style={styles.closeBtn} hitSlop={8}>
-                  <Ionicons name="close" size={22} color={colors.text} />
-                </Pressable>
               </View>
 
               {/* Replies List */}
@@ -602,7 +599,7 @@ export default function CommunityScreen() {
         >
           <View style={styles.modalOverlay}>
             <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowCreateModal(false)} />
-            <View style={[styles.createModalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={[styles.createModalCard, { backgroundColor: colors.surface, borderColor: 'transparent' }]}>
               <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.modalThreadTitle, { color: colors.text }]}>Start a New Topic</Text>
@@ -610,9 +607,6 @@ export default function CommunityScreen() {
                     Post a question, theory, or review for the community
                   </Text>
                 </View>
-                <Pressable onPress={() => setShowCreateModal(false)} style={styles.closeBtn} hitSlop={8}>
-                  <Ionicons name="close" size={22} color={colors.text} />
-                </Pressable>
               </View>
 
               <ScrollView style={{ flexGrow: 1 }} contentContainerStyle={styles.createFormGroup} showsVerticalScrollIndicator={false}>
@@ -634,12 +628,12 @@ export default function CommunityScreen() {
                       style={[
                         styles.categorySelectChip,
                         {
-                          backgroundColor: topicCategory === cat ? colors.accent : colors.surfaceElevated,
-                          borderColor: topicCategory === cat ? colors.accent : colors.border,
+                          backgroundColor: topicCategory === cat ? colors.surfaceElevated : colors.surface,
+                          borderColor: topicCategory === cat ? 'rgba(255, 255, 255, 0.22)' : colors.border,
                         },
                       ]}
                     >
-                      <Text style={{ fontSize: 11, color: topicCategory === cat ? '#FFFFFF' : colors.textSecondary, fontWeight: 'bold' }}>
+                      <Text style={{ fontSize: 11, color: topicCategory === cat ? colors.text : colors.textSecondary, fontWeight: topicCategory === cat ? '700' : '500' }}>
                         {cat}
                       </Text>
                     </Pressable>

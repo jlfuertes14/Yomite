@@ -3,24 +3,24 @@
  * Responsive dialog modal on Web (floating centered card with backdrop)
  * and sleek sheet/fullscreen modal on mobile.
  */
-import React, { useState, useEffect, useMemo } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Modal,
-  ScrollView,
-  Pressable,
-  TextInput,
-  ActivityIndicator,
-  Platform,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
-import { useThemeColors } from '../hooks/useThemeColor';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { Radius, Spacing, Typography } from '../../constants/Colors';
 import { getTags } from '../api/mangadex';
+import { useThemeColors } from '../hooks/useThemeColor';
 import type { MangaTag, SearchFilters } from '../types';
+import { MobileModalRoot, MobileSheetPanel } from './MobileBottomSheet';
 
 interface AdvancedSearchModalProps {
   visible: boolean;
@@ -247,7 +247,13 @@ export function AdvancedSearchModal({
   const isWeb = Platform.OS === 'web';
 
   const modalBody = (
-    <View style={[styles.modalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+    <View
+      style={[
+        styles.modalCard,
+        { backgroundColor: colors.surface, borderColor: 'transparent' },
+        !isWeb && { borderRadius: 0, boxShadow: 'none', elevation: 0 },
+      ]}
+    >
       {/* Modal Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>
@@ -257,9 +263,6 @@ export function AdvancedSearchModal({
           <Pressable onPress={handleReset} style={styles.resetBtn}>
             <Text style={[styles.resetBtnText, { color: colors.accent }]}>Reset</Text>
           </Pressable>
-          <Pressable onPress={onClose} style={styles.closeBtn} hitSlop={8}>
-            <Ionicons name="close" size={22} color={colors.text} />
-          </Pressable>
         </View>
       </View>
 
@@ -268,6 +271,9 @@ export function AdvancedSearchModal({
         style={styles.scrollBody}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        nestedScrollEnabled
+        keyboardShouldPersistTaps="handled"
+        directionalLockEnabled
       >
         {/* Title Input */}
         <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Title / Keywords</Text>
@@ -340,11 +346,11 @@ export function AdvancedSearchModal({
                   styles.chip,
                   {
                     backgroundColor: active ? colors.surfaceElevated : colors.surface,
-                    borderColor: active ? colors.accent : colors.border,
+                    borderColor: active ? colors.text : colors.border,
                   },
                 ]}
               >
-                <Text style={[styles.chipText, { color: active ? colors.accent : colors.textSecondary }]}>
+                <Text style={[styles.chipText, { color: active ? colors.text : colors.textSecondary }]}>
                   {r.label}
                 </Text>
               </Pressable>
@@ -441,13 +447,13 @@ export function AdvancedSearchModal({
                             backgroundColor: isInc
                               ? 'rgba(16,185,129,0.18)'
                               : isExc
-                              ? 'rgba(244,63,94,0.18)'
-                              : colors.surfaceElevated,
+                                ? 'rgba(244,63,94,0.18)'
+                                : colors.surfaceElevated,
                             borderColor: isInc
                               ? colors.emerald
                               : isExc
-                              ? colors.accent
-                              : colors.border,
+                                ? colors.accent
+                                : colors.border,
                           },
                         ]}
                       >
@@ -458,8 +464,8 @@ export function AdvancedSearchModal({
                               color: isInc
                                 ? colors.emerald
                                 : isExc
-                                ? colors.accent
-                                : colors.textSecondary,
+                                  ? colors.accent
+                                  : colors.textSecondary,
                             },
                           ]}
                         >
@@ -478,7 +484,7 @@ export function AdvancedSearchModal({
       </ScrollView>
 
       {/* Apply Footer Bar */}
-      <View style={[styles.applyFooter, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
+      <View style={[styles.applyFooter, { backgroundColor: colors.surface, borderTopColor: 'transparent' }]}>
         {onRandomManga && (
           <Pressable
             onPress={() => {
@@ -502,8 +508,8 @@ export function AdvancedSearchModal({
   return (
     <Modal
       visible={visible}
-      animationType={isWeb ? 'fade' : 'slide'}
-      transparent={isWeb}
+      animationType={isWeb ? 'fade' : 'none'}
+      transparent
       onRequestClose={onClose}
     >
       {isWeb ? (
@@ -512,9 +518,18 @@ export function AdvancedSearchModal({
           {modalBody}
         </View>
       ) : (
-        <SafeAreaView style={[styles.mobileContainer, { backgroundColor: colors.background }]}>
-          {modalBody}
-        </SafeAreaView>
+        <MobileModalRoot style={styles.mobileOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+          <MobileSheetPanel
+            visible={visible}
+            onClose={onClose}
+            showHandle
+            gestureHandleOnly
+            style={[styles.mobileSheetPanel, { backgroundColor: colors.surface }]}
+          >
+            {modalBody}
+          </MobileSheetPanel>
+        </MobileModalRoot>
       )}
     </Modal>
   );
@@ -528,16 +543,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: Spacing.md,
   },
-  mobileContainer: {
+  mobileOverlay: {
     flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.48)',
+  },
+  mobileSheetPanel: {
+    width: '100%',
+    height: '70%',
+    maxHeight: '70%',
+    alignSelf: 'flex-end',
+    borderTopLeftRadius: Radius.xl,
+    borderTopRightRadius: Radius.xl,
+    overflow: 'hidden',
   },
   modalCard: {
     width: '100%',
     maxWidth: Platform.OS === 'web' ? 760 : undefined,
     maxHeight: Platform.OS === 'web' ? ('88vh' as any) : '100%',
     flex: Platform.OS === 'web' ? undefined : 1,
-    borderRadius: Platform.OS === 'web' ? Radius.lg : 0,
-    borderWidth: Platform.OS === 'web' ? 1 : 0,
+    borderRadius: Radius.xl,
+    borderWidth: 0,
     overflow: 'hidden',
     boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
     elevation: 10,
@@ -548,7 +574,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
+    borderBottomWidth: 0,
   },
   headerTitle: {
     fontSize: Typography.sizes.title2,
@@ -571,6 +597,7 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   scrollBody: {
+    flex: 1,
     flexGrow: 1,
   },
   content: {
@@ -671,7 +698,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
-    borderTopWidth: 1,
+    borderTopWidth: 0,
     gap: Spacing.md,
   },
   luckyBtn: {

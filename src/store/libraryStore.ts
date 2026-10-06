@@ -7,8 +7,14 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { LibraryEntry, LibraryCategory } from '../types';
 
+export type LibraryDisplayMode = 'grid' | 'details' | 'compact';
+
 interface LibraryState {
   entries: Record<string, LibraryEntry>;
+  displayMode: LibraryDisplayMode;
+  gridColumns: number;
+  setDisplayMode: (mode: LibraryDisplayMode) => void;
+  setGridColumns: (cols: number) => void;
   addToLibrary: (entry: Omit<LibraryEntry, 'addedAt' | 'updatedAt'>) => void;
   removeFromLibrary: (mangaId: string) => void;
   updateCategory: (mangaId: string, category: LibraryCategory) => void;
@@ -23,6 +29,10 @@ export const useLibraryStore = create<LibraryState>()(
   persist(
     (set, get) => ({
       entries: {},
+      displayMode: 'grid',
+      gridColumns: 2,
+      setDisplayMode: (displayMode) => set({ displayMode }),
+      setGridColumns: (gridColumns) => set({ gridColumns }),
 
       addToLibrary: (entry) =>
         set((state) => ({

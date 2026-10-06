@@ -14,6 +14,7 @@ import { getChapterComments, ForumComment } from '../api/community';
 import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
 import { useThemeColors } from '../hooks/useThemeColor';
 import { formatChapterDate } from '../utils/date';
+import { MobileModalRoot, MobileSheetPanel } from './MobileBottomSheet';
 
 interface ChapterCommentsModalProps {
   visible: boolean;
@@ -60,9 +61,13 @@ export function ChapterCommentsModal({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <View style={[styles.modalContainer, { backgroundColor: '#141417', borderColor: '#27272A' }]}>
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      <MobileModalRoot style={styles.overlay}>
+        <MobileSheetPanel
+          visible={visible}
+          onClose={onClose}
+          style={[styles.modalContainer, { backgroundColor: '#141417', borderColor: 'transparent' }]}
+        >
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerTitleCol}>
@@ -71,9 +76,6 @@ export function ChapterCommentsModal({
                 {chapterTitle} · {comments.length} comments
               </Text>
             </View>
-            <Pressable onPress={onClose} style={styles.closeBtn}>
-              <Ionicons name="close" size={22} color="#A1A1AA" />
-            </Pressable>
           </View>
 
           {/* Comments List */}
@@ -130,8 +132,8 @@ export function ChapterCommentsModal({
               <Ionicons name="send" size={16} color="#FFF" />
             </Pressable>
           </View>
-        </View>
-      </View>
+        </MobileSheetPanel>
+      </MobileModalRoot>
     </Modal>
   );
 }
@@ -146,7 +148,7 @@ const styles = StyleSheet.create({
     height: '75%',
     borderTopLeftRadius: Radius.xl,
     borderTopRightRadius: Radius.xl,
-    borderWidth: 1,
+    borderWidth: 0,
     paddingTop: Spacing.md,
   },
   header: {
@@ -155,7 +157,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg,
     paddingBottom: Spacing.md,
-    borderBottomWidth: 1,
+    borderBottomWidth: 0,
     borderBottomColor: '#27272A',
   },
   headerTitleCol: {
@@ -189,7 +191,7 @@ const styles = StyleSheet.create({
   commentCard: {
     padding: Spacing.md,
     borderRadius: Radius.md,
-    borderWidth: 1,
+    borderWidth: 0,
     gap: Spacing.xs,
   },
   commentHeader: {

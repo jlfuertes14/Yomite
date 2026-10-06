@@ -124,6 +124,8 @@ export interface HistoryEntry {
   coverUrl: string | null;
   pageIndex: number;
   totalPages: number;
+  /** Vertical offset within a webtoon page, used for exact resume. */
+  scrollOffset?: number;
   timestamp: number;
 }
 

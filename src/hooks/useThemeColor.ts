@@ -1,7 +1,7 @@
 /**
  * useThemeColor hook — returns color from design token based on scheme & dynamic accent color preference
  */
-import { Colors } from '../../constants/Colors';
+import { CharacterThemePalettes, CharacterThemeId, Colors, DynamicThemePalettes } from '../../constants/Colors';
 import { useColorScheme } from './useColorScheme';
 import { useThemeStore } from '../store/themeStore';
 
@@ -12,23 +12,36 @@ export function useThemeColor(
   props?: { light?: string; dark?: string }
 ): string {
   const scheme = useColorScheme();
-  const accentColor = useThemeStore((s) => s.accentColor) || '#F43F5E';
+  const themeScheme = useThemeStore((s) => s.colorScheme);
+  const palette = themeScheme === 'dynamic'
+    ? DynamicThemePalettes[scheme]
+    : themeScheme !== 'default'
+      ? CharacterThemePalettes[themeScheme as CharacterThemeId][scheme]
+      : undefined;
+  const resolvedAccent = palette?.accent || Colors[scheme].accent;
   const colorFromProps = props?.[scheme];
   if (colorFromProps) return colorFromProps;
-  if (colorKey === 'accent' || colorKey === 'tintSecondary') return accentColor;
-  if (colorKey === 'accentSubtle') return `${accentColor}1F`;
-  return Colors[scheme][colorKey];
+  if (colorKey === 'accent' || colorKey === 'tintSecondary') return resolvedAccent;
+  if (colorKey === 'accentSubtle') return palette?.accentSubtle || `${resolvedAccent}1F`;
+  return palette?.[colorKey] || Colors[scheme][colorKey];
 }
 
 export function useThemeColors() {
   const scheme = useColorScheme();
-  const accentColor = useThemeStore((s) => s.accentColor) || '#F43F5E';
+  const themeScheme = useThemeStore((s) => s.colorScheme);
   const baseColors = Colors[scheme];
+  const palette = themeScheme === 'dynamic'
+    ? DynamicThemePalettes[scheme]
+    : themeScheme !== 'default'
+      ? CharacterThemePalettes[themeScheme as CharacterThemeId][scheme]
+      : undefined;
+  const resolvedAccent = palette?.accent || baseColors.accent;
 
   return {
     ...baseColors,
-    accent: accentColor,
-    tintSecondary: accentColor,
-    accentSubtle: `${accentColor}1F`,
+    ...palette,
+    accent: resolvedAccent,
+    tintSecondary: resolvedAccent,
+    accentSubtle: palette?.accentSubtle || `${resolvedAccent}1F`,
   };
 }

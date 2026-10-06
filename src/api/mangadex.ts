@@ -304,6 +304,9 @@ export function getCoverUrl(
   size: '256' | '512' | 'original' = '512'
 ): string | null {
   if (!coverFileName) return null;
+  if (coverFileName.startsWith('http://') || coverFileName.startsWith('https://')) {
+    return coverFileName;
+  }
   const suffix = size === 'original' ? '' : `.${size}.jpg`;
   const base = getMangaDexCoversBase();
   return `${base}/${mangaId}/${coverFileName}${suffix}`;

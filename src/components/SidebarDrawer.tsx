@@ -200,9 +200,6 @@ export function SidebarDrawer({
                 <Text style={[styles.brandSubtitle, { color: colors.textMuted }]}>Manga & Comic Reader</Text>
               </View>
             </Pressable>
-            <Pressable onPress={onClose} style={styles.closeBtn} hitSlop={8}>
-              <Ionicons name="close" size={22} color={colors.textMuted} />
-            </Pressable>
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.itemList}>
@@ -279,8 +276,8 @@ export function SidebarDrawer({
                   {item.label}
                 </Text>
                 {item.badge ? (
-                  <View style={[styles.badge, { backgroundColor: colors.accentSubtle, borderColor: colors.accent }]}>
-                    <Text style={[styles.badgeText, { color: colors.accent }]}>{item.badge}</Text>
+                  <View style={[styles.badge, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                    <Text style={[styles.badgeText, { color: colors.textSecondary }]}>{item.badge}</Text>
                   </View>
                 ) : (
                   <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />

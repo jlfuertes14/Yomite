@@ -3,7 +3,7 @@
  * Features official 4-color Google G logo, preferred username field for registration,
  * password toggle, and native haptics.
  */
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -22,11 +22,20 @@ import { triggerHaptic } from '../utils/haptics';
 import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
 import { useThemeColors } from '../hooks/useThemeColor';
 import { GoogleLogoIcon } from './GoogleLogoIcon';
+import { MobileModalRoot, MobileSheetPanel, MobileSheetPanelRef } from './MobileBottomSheet';
 import { useUserStore } from '../store/userStore';
 
 interface AuthModalProps {
   visible: boolean;
   onClose: () => void;
+}
+
+function getContrastTextColor(hex: string): string {
+  const value = hex.replace('#', '');
+  const r = parseInt(value.slice(0, 2), 16) || 0;
+  const g = parseInt(value.slice(2, 4), 16) || 0;
+  const b = parseInt(value.slice(4, 6), 16) || 0;
+  return (r * 299 + g * 587 + b * 114) / 1000 >= 128 ? '#1B1B1F' : '#FFFFFF';
 }
 
 export function AuthModal({ visible, onClose }: AuthModalProps) {
@@ -42,6 +51,16 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const isWeb = Platform.OS === 'web';
+  const sheetRef = useRef<MobileSheetPanelRef>(null);
+
+  const closeModal = () => {
+    if (isWeb) {
+      onClose();
+    } else {
+      sheetRef.current?.close();
+    }
+  };
 
   const handleGoogleSignIn = async () => {
     triggerHaptic();
@@ -51,7 +70,7 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
       if (error) {
         Alert.alert('Google Sign In Error', error.message || 'Failed to authenticate with Google.');
       } else {
-        onClose();
+        closeModal();
       }
     } catch (err: any) {
       Alert.alert('Sign In Error', err?.message || 'Failed to complete Google Sign In.');
@@ -87,11 +106,11 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
           Alert.alert(
             'Check Your Email',
             'A confirmation link has been sent to your email. Click the verification link to activate your Yomite account!',
-            [{ text: 'OK', onPress: onClose }]
+            [{ text: 'OK', onPress: closeModal }]
           );
         } else {
           Alert.alert('Success', 'Account created successfully! Welcome to Yomite.');
-          onClose();
+          closeModal();
         }
       } else {
         const { error } = await signInWithEmail(email.trim(), password.trim());
@@ -108,28 +127,32 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
     }
   };
 
-  const isWeb = Platform.OS === 'web';
-
   return (
     <Modal
       visible={visible}
-      animationType={isWeb ? 'fade' : 'slide'}
+      animationType={isWeb ? 'fade' : 'none'}
       transparent
-      onRequestClose={onClose}
+      onRequestClose={closeModal}
     >
-      <View style={[styles.backdrop, isWeb && styles.webBackdrop]}>
-        <Pressable style={styles.overlayPress} onPress={onClose} />
+      <MobileModalRoot style={[styles.backdrop, isWeb && styles.webBackdrop]}>
+        <Pressable style={styles.overlayPress} onPress={closeModal} />
 
-        <View
+        <MobileSheetPanel
+          visible={visible}
+          ref={sheetRef}
+          onClose={onClose}
           style={[
             styles.sheetContainer,
             isWeb && styles.webSheetContainer,
-            { backgroundColor: colors.surface, borderColor: colors.border },
+            { backgroundColor: colors.surface, borderColor: 'transparent' },
           ]}
+          showHandle={!isWeb}
         >
-          {!isWeb && <View style={[styles.dragHandle, { backgroundColor: colors.border }]} />}
-
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          <ScrollView
+            style={styles.scrollView}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.scrollContent}
+          >
             {/* Header */}
             <View style={styles.headerRow}>
               <View style={styles.headerTitleCol}>
@@ -140,27 +163,22 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
                   Sync your library & reading history across all your devices
                 </Text>
               </View>
-              <Pressable onPress={onClose} style={styles.closeBtn} hitSlop={8}>
-                <Ionicons name="close" size={20} color={colors.textMuted} />
-              </Pressable>
             </View>
 
             {/* Segmented Auth Mode Switcher */}
-            <View style={styles.tabContainer}>
+            <View style={[styles.tabContainer, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
               <Pressable
                 onPress={() => setAuthMode('signin')}
                 style={[
                   styles.tabBtn,
-                  authMode === 'signin' && {
-                    backgroundColor: colors.surfaceElevated,
-                    borderColor: colors.accent,
-                  },
+                  authMode === 'signin' && [styles.tabBtnActive, { backgroundColor: colors.accent }],
                 ]}
               >
                 <Text
                   style={[
                     styles.tabText,
-                    { color: authMode === 'signin' ? colors.accent : colors.textMuted },
+                    { color: colors.textSecondary },
+                    authMode === 'signin' && [styles.tabTextActive, { color: getContrastTextColor(colors.accent) }],
                   ]}
                 >
                   Sign In
@@ -170,16 +188,14 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
                 onPress={() => setAuthMode('signup')}
                 style={[
                   styles.tabBtn,
-                  authMode === 'signup' && {
-                    backgroundColor: colors.surfaceElevated,
-                    borderColor: colors.accent,
-                  },
+                  authMode === 'signup' && [styles.tabBtnActive, { backgroundColor: colors.accent }],
                 ]}
               >
                 <Text
                   style={[
                     styles.tabText,
-                    { color: authMode === 'signup' ? colors.accent : colors.textMuted },
+                    { color: colors.textSecondary },
+                    authMode === 'signup' && [styles.tabTextActive, { color: getContrastTextColor(colors.accent) }],
                   ]}
                 >
                   Create Account
@@ -254,9 +270,9 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
                 ]}
               >
                 {isSubmitting ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
+                  <ActivityIndicator size="small" color={getContrastTextColor(colors.accent)} />
                 ) : (
-                  <Text style={styles.submitBtnText}>
+                  <Text style={[styles.submitBtnText, { color: getContrastTextColor(colors.accent) }]}>
                     {authMode === 'signin' ? 'Sign In' : 'Create Account'}
                   </Text>
                 )}
@@ -278,17 +294,17 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
               disabled={isSubmitting}
               style={({ pressed }) => [
                 styles.googleButton,
-                { opacity: pressed || isSubmitting ? 0.85 : 1 },
+                { backgroundColor: colors.cardBackground, opacity: pressed || isSubmitting ? 0.85 : 1 },
               ]}
             >
               <GoogleLogoIcon size={20} />
-              <Text style={styles.googleButtonText}>
+              <Text style={[styles.googleButtonText, { color: colors.text }]}>
                 {authMode === 'signin' ? 'Sign in with Google' : 'Sign up with Google'}
               </Text>
             </Pressable>
           </ScrollView>
-        </View>
-      </View>
+        </MobileSheetPanel>
+      </MobileModalRoot>
     </Modal>
   );
 }
@@ -314,15 +330,16 @@ const styles = StyleSheet.create({
   sheetContainer: {
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
-    borderWidth: 1,
+    borderWidth: 0,
     borderBottomWidth: 0,
     maxHeight: '90%',
+    overflow: 'hidden',
   },
   webSheetContainer: {
     width: '100%',
     maxWidth: 480,
     borderRadius: 24,
-    borderWidth: 1,
+    borderWidth: 0,
     borderBottomWidth: 1,
     boxShadow: '0 12px 28px rgba(0, 0, 0, 0.55)',
     elevation: 12,
@@ -341,6 +358,9 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.md,
     paddingBottom: Platform.OS === 'ios' ? 40 : 28,
     gap: 16,
+  },
+  scrollView: {
+    flexShrink: 1,
   },
   headerRow: {
     position: 'relative',
@@ -406,20 +426,36 @@ const styles = StyleSheet.create({
   },
   tabContainer: {
     flexDirection: 'row',
-    gap: Spacing.xs,
+    backgroundColor: '#151821',
+    borderRadius: 14,
+    padding: 3,
+    borderWidth: 0,
+    borderColor: '#1F2330',
+    gap: 4,
   },
   tabBtn: {
     flex: 1,
-    height: 40,
-    borderRadius: 12,
+    height: 38,
+    borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'transparent',
+    backgroundColor: 'transparent',
+  },
+  tabBtnActive: {
+    backgroundColor: 'transparent',
+    elevation: 0,
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
   },
   tabText: {
     fontSize: Typography.sizes.footnote,
+    fontWeight: Typography.weights.medium,
+    color: '#94A3B8',
+  },
+  tabTextActive: {
     fontWeight: Typography.weights.semibold,
+    color: '#F8FAFC',
   },
   formGroup: {
     gap: 12,

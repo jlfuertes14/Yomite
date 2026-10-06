@@ -67,4 +67,14 @@ Thumbs.db
 marketing-videos/
 docs/plans/
 assets/images/qr_code.png
+# Reference Repositories
+kotatsu-app/
+kotatsu-parsers/
+
+# Test & Investigation Scripts
+scripts/
+test*.js
+test*.ts
+verify*.js
+verify*.ts
 
