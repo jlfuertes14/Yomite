@@ -7,6 +7,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   FlatList,
   ScrollView,
@@ -20,10 +21,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  getCommunityForums,
+  getAnimeNews,
+  getAnimeNewsArticle,
   getThreadReplies,
   ForumThread,
   ForumComment,
+  AnimeNewsItem,
+  AnimeNewsArticle,
 } from '../../src/api/community';
 import { useCommunityStore } from '../../src/store/communityStore';
 import { useUserStore, getUserDisplayName } from '../../src/store/userStore';
@@ -37,15 +41,7 @@ import { ConfirmationModal } from '../../src/components/ConfirmationModal';
 import { AuthModal } from '../../src/components/AuthModal';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
-
-const CATEGORIES = [
-  'All',
-  'General Discussion',
-  'Art & Design',
-  'Scanlation',
-  'Anime & Adaptations',
-  'Chapter Release',
-];
+import * as WebBrowser from 'expo-web-browser';
 
 export default function CommunityScreen() {
   useDocumentTitle('Community');
@@ -60,11 +56,14 @@ export default function CommunityScreen() {
     addReply,
   } = useCommunityStore();
 
-  const [mangadexThreads, setMangadexThreads] = useState<ForumThread[]>([]);
+  const [animeNews, setAnimeNews] = useState<AnimeNewsItem[]>([]);
+  const [selectedNews, setSelectedNews] = useState<AnimeNewsArticle | null>(null);
+  const [isNewsArticleLoading, setIsNewsArticleLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
+  const [feedMode, setFeedMode] = useState<'home' | 'news'>('home');
+  const [topicSort, setTopicSort] = useState<'popular' | 'latest'>('latest');
 
   // Thread Discussion Modal State
   const [selectedThread, setSelectedThread] = useState<ForumThread | null>(null);
@@ -76,7 +75,6 @@ export default function CommunityScreen() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [authModalVisible, setAuthModalVisible] = useState(false);
   const [topicTitle, setTopicTitle] = useState('');
-  const [topicCategory, setTopicCategory] = useState('General Discussion');
   const [topicBody, setTopicBody] = useState('');
 
   // Custom Confirmation Dialog State
@@ -102,34 +100,44 @@ export default function CommunityScreen() {
 
   const loadThreads = async () => {
     setIsLoading(true);
-    const data = await getCommunityForums();
-    setMangadexThreads(data);
+    const news = await getAnimeNews();
+    setAnimeNews(news);
     setIsLoading(false);
   };
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    const data = await getCommunityForums(true);
-    setMangadexThreads(data);
+    const news = await getAnimeNews(true);
+    setAnimeNews(news);
     setRefreshing(false);
   };
 
+  const handleOpenNews = async (item: AnimeNewsItem) => {
+    setSelectedNews({ ...item, content: [] });
+    setIsNewsArticleLoading(true);
+    const article = await getAnimeNewsArticle(item.url);
+    if (article) setSelectedNews(article);
+    setIsNewsArticleLoading(false);
+  };
+
   const combinedThreads = useMemo(() => {
-    return [...userThreads, ...mangadexThreads];
-  }, [userThreads, mangadexThreads]);
+    return userThreads;
+  }, [userThreads]);
 
   const filteredThreads = useMemo(() => {
-    return combinedThreads.filter((t) => {
-      const matchCat =
-        selectedCategory === 'All' ||
-        t.category.toLowerCase() === selectedCategory.toLowerCase();
+    const matchingThreads = combinedThreads.filter((t) => {
       const matchSearch =
         !searchQuery.trim() ||
         t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         t.author.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchCat && matchSearch;
+      return matchSearch;
     });
-  }, [combinedThreads, selectedCategory, searchQuery]);
+
+    return [...matchingThreads].sort((a, b) => {
+      if (topicSort === 'popular') return b.repliesCount - a.repliesCount;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }, [combinedThreads, searchQuery, topicSort]);
 
   const handleOpenThread = async (thread: ForumThread) => {
     setSelectedThread(thread);
@@ -186,19 +194,6 @@ export default function CommunityScreen() {
     }
 
     if (!newReplyText.trim() || !selectedThread) return;
-    if (selectedThread.id.startsWith('mangadex_')) {
-      setConfirmModalConfig({
-        visible: true,
-        title: 'Read-Only Feed',
-        message: 'MangaDex chapter feeds are read-only in-app. Tap "New Topic" to start an interactive Yomite discussion!',
-        iconName: 'information-circle-outline',
-        confirmText: 'Got It',
-        cancelText: '',
-        confirmVariant: 'primary',
-        onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
-      });
-      return;
-    }
     const authorName = getUserDisplayName(user);
     const newReply = await addReply({
       threadId: selectedThread.id,
@@ -231,7 +226,7 @@ export default function CommunityScreen() {
     const authorName = getUserDisplayName(user);
     const created = await createThread({
       title: topicTitle.trim(),
-      category: topicCategory,
+      category: 'Discussion',
       body: topicBody.trim(),
       author: authorName,
     });
@@ -248,24 +243,10 @@ export default function CommunityScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       <View style={[{ flex: 1, width: '100%' }, isWeb && styles.webCenteredContent]}>
         {/* Top Header / Navigation Bar */}
-        <View style={styles.header}>
-          <View style={styles.headerLeftRow}>
-            {isWeb && (
-              <Pressable
-                onPress={() => setDrawerVisible(true)}
-                style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1 }]}
-                hitSlop={8}
-              >
-                <Ionicons name="menu" size={26} color={colors.text} />
-              </Pressable>
-            )}
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.headerTitle, { color: colors.text }]}>Community Forums</Text>
-              <Text style={[styles.headerSubTitle, { color: colors.textSecondary }]}>
-                Join live discussions on chapters, artwork & recommendations
-              </Text>
-            </View>
-          </View>
+      <View style={styles.header}>
+        <View style={styles.headerLeftRow}>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Community</Text>
+        </View>
 
           <AnimatedPressable
             onPress={handleOpenCreateTopic}
@@ -274,14 +255,13 @@ export default function CommunityScreen() {
               { backgroundColor: colors.accent },
             ]}
           >
-            <Ionicons name="add-circle" size={18} color="#FFFFFF" />
-            <Text style={styles.createBtnText}>New Topic</Text>
+            <Ionicons name="add" size={18} color="#FFFFFF" />
+            <Text style={styles.createBtnText}>Create post</Text>
           </AnimatedPressable>
         </View>
 
-        {/* Search & Category Filter Toolbar */}
-        <View style={styles.toolbarWrapper}>
-          {/* Search bar */}
+        {/* Search stays above the feed switcher so it never competes with Topics, Popular, Latest, or News. */}
+        {feedMode !== 'news' && <View style={styles.toolbarWrapper}>
           <View style={[styles.searchBar, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
             <Ionicons name="search" size={16} color={colors.textMuted} />
             <TextInput
@@ -297,56 +277,40 @@ export default function CommunityScreen() {
               </Pressable>
             )}
           </View>
+          <View style={styles.sortRow}>
+            <Text style={[styles.sortLabel, { color: colors.textMuted }]}>Sort by</Text>
+            {(['latest', 'popular'] as const).map((sort) => (
+              <Pressable
+                key={sort}
+                onPress={() => setTopicSort(sort)}
+                style={[
+                  styles.sortOption,
+                  topicSort === sort && { backgroundColor: colors.accentSubtle },
+                ]}
+              >
+                <Text style={[styles.sortOptionText, { color: topicSort === sort ? colors.text : colors.textMuted }]}>
+                  {sort === 'latest' ? 'Latest' : 'Popular'}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>}
 
-          {/* Category Chips Bar */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.categoriesContainer}
-            style={{ flexGrow: 0 }}
-          >
-            {CATEGORIES.map((cat) => {
-              const isSelected = selectedCategory === cat;
-              const catCount = combinedThreads.filter((t) =>
-                cat === 'All' ? true : t.category.toLowerCase() === cat.toLowerCase()
-              ).length;
-
-              return (
-                <Pressable
-                  key={cat}
-                  onPress={() => setSelectedCategory(cat)}
-                  style={[
-                    styles.categoryChip,
-                    {
-                      backgroundColor: isSelected ? colors.surfaceElevated : colors.surface,
-                      borderColor: isSelected ? colors.text : colors.border,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.categoryChipText,
-                      { color: isSelected ? colors.text : colors.textSecondary },
-                    ]}
-                  >
-                    {cat}
-                  </Text>
-                  {catCount > 0 && (
-                    <View
-                      style={[
-                        styles.catBadge,
-                        { backgroundColor: isSelected ? colors.accent : colors.border },
-                      ]}
-                    >
-                      <Text style={[styles.catBadgeText, { color: '#FFFFFF' }]}>
-                        {catCount}
-                      </Text>
-                    </View>
-                  )}
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+        <View style={[styles.feedTabs, { backgroundColor: colors.surfaceElevated }]}>
+          {(['home', 'news'] as const).map((mode) => (
+            <Pressable
+              key={mode}
+              onPress={() => setFeedMode(mode)}
+              style={[
+                styles.feedTab,
+                feedMode === mode && { backgroundColor: colors.accentSubtle },
+              ]}
+            >
+              <Text style={[styles.feedTabText, { color: feedMode === mode ? colors.text : colors.textMuted }]}>
+                {mode === 'home' ? 'Topics' : 'News'}
+              </Text>
+            </Pressable>
+          ))}
         </View>
 
         {/* Threads Grid / List */}
@@ -357,6 +321,61 @@ export default function CommunityScreen() {
               Fetching forum discussions...
             </Text>
           </View>
+        ) : feedMode === 'news' ? (
+          <FlatList
+            data={animeNews}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.listContainer}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor={colors.accent}
+                colors={[colors.accent]}
+              />
+            }
+            renderItem={({ item, index }) => (
+              <AnimatedCard
+                index={index}
+                onPress={() => handleOpenNews(item)}
+                style={[styles.newsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              >
+                {item.imageUrl ? (
+                  <Image source={{ uri: item.imageUrl }} style={styles.newsImage} resizeMode="cover" />
+                ) : (
+                  <View style={[styles.newsImagePlaceholder, { backgroundColor: colors.accentSubtle }]}>
+                    <Ionicons name="newspaper-outline" size={28} color={colors.accent} />
+                  </View>
+                )}
+                <View style={styles.cardTopRow}>
+                  <View style={[styles.categoryBadge, { backgroundColor: colors.accentSubtle }]}>
+                    <Text style={[styles.categoryBadgeText, { color: colors.accent }]}>Anime News</Text>
+                  </View>
+                  <Text style={[styles.timeText, { color: colors.textMuted }]}>
+                    {formatChapterDate(item.publishedAt)}
+                  </Text>
+                </View>
+                <Text style={[styles.threadTitle, { color: colors.text }]} numberOfLines={3}>
+                  {item.title}
+                </Text>
+                <Text style={[styles.threadPreview, { color: colors.textSecondary }]} numberOfLines={3}>
+                  {item.summary}
+                </Text>
+                <View style={styles.newsSourceRow}>
+                  <Ionicons name="open-outline" size={14} color={colors.accent} />
+                  <Text style={[styles.authorText, { color: colors.accent }]}>{item.source}</Text>
+                </View>
+              </AnimatedCard>
+            )}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Ionicons name="newspaper-outline" size={54} color={colors.textMuted} />
+                <Text style={[styles.emptyTitle, { color: colors.text }]}>No anime news available</Text>
+                <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>Pull to refresh and try again.</Text>
+              </View>
+            }
+          />
         ) : (
           <FlatList
             data={filteredThreads}
@@ -371,44 +390,22 @@ export default function CommunityScreen() {
                 colors={[colors.accent]}
               />
             }
-            renderItem={({ item, index }) => {
-              const isMangaDex = item.id.startsWith('mangadex_');
-              return (
+            renderItem={({ item, index }) => (
                 <AnimatedCard
                   index={index}
                   onPress={() => handleOpenThread(item)}
-                  style={[
-                    styles.threadCard,
-                    {
-                      backgroundColor: colors.surface,
-                      borderColor: colors.border,
-                    },
-                  ]}
+                  style={[styles.threadCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
                 >
                   <View style={styles.cardTopRow}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                      <View style={[styles.categoryBadge, { backgroundColor: colors.surfaceElevated }]}>
-                        <Text style={[styles.categoryBadgeText, { color: colors.accent }]}>
-                          {item.category}
-                        </Text>
-                      </View>
-                      <View
-                        style={[
-                          styles.modeBadge,
-                          {
-                            backgroundColor: isMangaDex
-                              ? 'rgba(161, 161, 170, 0.15)'
-                              : colors.accentSubtle,
-                          },
-                        ]}
-                      >
+                      <View style={[styles.modeBadge, { backgroundColor: colors.surfaceElevated }]}>
                         <Text
                           style={[
                             styles.modeBadgeText,
-                            { color: isMangaDex ? colors.textMuted : colors.accent },
+                            { color: colors.accent },
                           ]}
                         >
-                          {isMangaDex ? 'MangaDex Feed' : 'Live Discussion'}
+                          Live Discussion
                         </Text>
                       </View>
                     </View>
@@ -421,9 +418,13 @@ export default function CommunityScreen() {
                     {item.title}
                   </Text>
 
+                  <Text style={[styles.threadPreview, { color: colors.textSecondary }]} numberOfLines={2}>
+                    Share your theories, reactions, and recommendations with the community.
+                  </Text>
+
                   <View style={[styles.cardFooter, { borderTopColor: colors.border }]}>
                     <View style={styles.authorRow}>
-                      <View style={[styles.authorAvatar, { backgroundColor: colors.surfaceElevated }]}>
+                      <View style={[styles.authorAvatar, { backgroundColor: colors.accentSubtle }]}>
                         <Text style={[styles.authorAvatarText, { color: colors.accent }]}>
                           {item.author.charAt(0).toUpperCase()}
                         </Text>
@@ -439,10 +440,10 @@ export default function CommunityScreen() {
                         {item.repliesCount} {item.repliesCount === 1 ? 'reply' : 'replies'}
                       </Text>
                     </View>
+                    <Ionicons name="bookmark-outline" size={16} color={colors.textMuted} />
                   </View>
                 </AnimatedCard>
-              );
-            }}
+            )}
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
                 <Ionicons name="chatbubbles-outline" size={54} color={colors.textMuted} />
@@ -459,6 +460,85 @@ export default function CommunityScreen() {
           />
         )}
 
+        <Modal
+          visible={!!selectedNews}
+          transparent
+          animationType={isWeb ? 'fade' : 'slide'}
+          onRequestClose={() => setSelectedNews(null)}
+        >
+          <View style={styles.modalOverlay}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setSelectedNews(null)} />
+            <View style={[styles.newsModalCard, { backgroundColor: colors.surface }]}>
+              {selectedNews?.imageUrl ? (
+                <Image source={{ uri: selectedNews.imageUrl }} style={styles.newsModalImage} resizeMode="cover" />
+              ) : null}
+              <ScrollView contentContainerStyle={styles.newsModalContent} showsVerticalScrollIndicator={false}>
+                <View style={styles.cardTopRow}>
+                  <Text style={[styles.categoryBadgeText, { color: colors.accent }]}>Anime News Network</Text>
+                  <Text style={[styles.timeText, { color: colors.textMuted }]}>
+                    {selectedNews ? formatChapterDate(selectedNews.publishedAt) : ''}
+                  </Text>
+                </View>
+                <Text style={[styles.newsModalTitle, { color: colors.text }]}>{selectedNews?.title}</Text>
+                <Text style={[styles.newsModalSummary, { color: colors.textSecondary }]}>
+                  {selectedNews?.summary}
+                </Text>
+                {isNewsArticleLoading ? (
+                  <View style={styles.newsArticleLoading}>
+                    <ActivityIndicator size="small" color={colors.accent} />
+                    <Text style={[styles.newsModalSummary, { color: colors.textMuted }]}>Loading full article…</Text>
+                  </View>
+                ) : (
+                  selectedNews?.content.map((paragraph, index) => (
+                    <Text key={`${selectedNews.url}-${index}`} style={[styles.newsArticleText, { color: colors.text }]}>
+                      {paragraph}
+                    </Text>
+                  ))
+                )}
+                {selectedNews?.trailerUrl && (
+                  <View style={styles.newsTrailerBlock}>
+                    <Text style={[styles.newsSectionLabel, { color: colors.text }]}>Trailer</Text>
+                    {isWeb ? (
+                      React.createElement('iframe', {
+                        src: selectedNews.trailerUrl,
+                        title: `${selectedNews.title} trailer`,
+                        style: { width: '100%', height: 210, border: 0, borderRadius: 10 },
+                        allow: 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share',
+                        allowFullScreen: true,
+                      })
+                    ) : (
+                      <Pressable
+                        onPress={() => WebBrowser.openBrowserAsync(selectedNews.trailerUrl as string)}
+                        style={[styles.newsReadButton, { backgroundColor: colors.surfaceElevated }]}
+                      >
+                        <Ionicons name="logo-youtube" size={18} color="#FF0000" />
+                        <Text style={[styles.newsReadButtonText, { color: colors.text }]}>Watch trailer</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                )}
+                <Pressable
+                  onPress={() => selectedNews && WebBrowser.openBrowserAsync(selectedNews.url)}
+                  style={[styles.newsReadButton, { backgroundColor: colors.accent }]}
+                >
+                  <Text style={styles.newsReadButtonText}>Read full article</Text>
+                  <Ionicons name="open-outline" size={16} color="#FFFFFF" />
+                </Pressable>
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
+        <AnimatedPressable
+          onPress={handleOpenCreateTopic}
+          style={[styles.fab, { backgroundColor: colors.accent }]}
+          accessibilityRole="button"
+          accessibilityLabel="Create new discussion topic"
+        >
+          <Ionicons name="add" size={20} color="#0A0B0E" />
+          <Text style={styles.fabText}>Create post</Text>
+        </AnimatedPressable>
+
         {/* Interactive Thread Discussion Modal */}
         <Modal
           visible={!!selectedThread}
@@ -473,28 +553,21 @@ export default function CommunityScreen() {
               <View style={[styles.modalHeader, { borderBottomColor: 'transparent' }]}>
                 <View style={{ flex: 1, gap: 4 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <View style={[styles.categoryBadge, { backgroundColor: colors.surfaceElevated }]}>
-                      <Text style={[styles.categoryBadgeText, { color: colors.accent }]}>
-                        {selectedThread?.category}
-                      </Text>
-                    </View>
                     <View
                       style={[
                         styles.modeBadge,
                         {
-                          backgroundColor: selectedThread?.id.startsWith('mangadex_')
-                            ? 'rgba(161, 161, 170, 0.15)'
-                            : colors.accentSubtle,
+                          backgroundColor: colors.accentSubtle,
                         },
                       ]}
                     >
                       <Text
                         style={[
                           styles.modeBadgeText,
-                          { color: selectedThread?.id.startsWith('mangadex_') ? colors.textMuted : colors.accent },
+                          { color: colors.accent },
                         ]}
                       >
-                        {selectedThread?.id.startsWith('mangadex_') ? 'MangaDex Feed' : 'Live Discussion'}
+                        Live Discussion
                       </Text>
                     </View>
                   </View>
@@ -551,9 +624,7 @@ export default function CommunityScreen() {
                         No replies on this thread yet
                       </Text>
                       <Text style={{ color: colors.textMuted, fontSize: Typography.sizes.caption, textAlign: 'center', paddingHorizontal: 30 }}>
-                        {selectedThread?.id.startsWith('mangadex_')
-                          ? 'MangaDex chapter release feed. Tap "New Topic" to start an interactive Yomite discussion!'
-                          : 'Be the first to reply below!'}
+                        Be the first to reply below!
                       </Text>
                     </View>
                   }
@@ -561,15 +632,7 @@ export default function CommunityScreen() {
               )}
 
               {/* Post Reply Input Footer */}
-              {selectedThread?.id.startsWith('mangadex_') ? (
-                <View style={[styles.readOnlyBanner, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-                  <Ionicons name="lock-closed-outline" size={16} color={colors.textMuted} />
-                  <Text style={[styles.readOnlyText, { color: colors.textMuted }]}>
-                    MangaDex feeds are read-only. Tap "New Topic" to start an interactive Yomite discussion!
-                  </Text>
-                </View>
-              ) : (
-                <View style={[styles.replyInputRow, { backgroundColor: colors.surfaceElevated, borderTopColor: colors.border }]}>
+              <View style={[styles.replyInputRow, { backgroundColor: colors.surfaceElevated, borderTopColor: colors.border }]}>
                   <TextInput
                     style={[styles.replyInput, { color: colors.text }]}
                     placeholder="Join the discussion..."
@@ -584,8 +647,7 @@ export default function CommunityScreen() {
                   >
                     <Ionicons name="send" size={16} color="#FFFFFF" />
                   </Pressable>
-                </View>
-              )}
+              </View>
             </View>
           </View>
         </Modal>
@@ -618,27 +680,6 @@ export default function CommunityScreen() {
                   value={topicTitle}
                   onChangeText={setTopicTitle}
                 />
-
-                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Category</Text>
-                <View style={styles.categorySelectRow}>
-                  {CATEGORIES.filter((c) => c !== 'All').map((cat) => (
-                    <Pressable
-                      key={cat}
-                      onPress={() => setTopicCategory(cat)}
-                      style={[
-                        styles.categorySelectChip,
-                        {
-                          backgroundColor: topicCategory === cat ? colors.surfaceElevated : colors.surface,
-                          borderColor: topicCategory === cat ? 'rgba(255, 255, 255, 0.22)' : colors.border,
-                        },
-                      ]}
-                    >
-                      <Text style={{ fontSize: 11, color: topicCategory === cat ? colors.text : colors.textSecondary, fontWeight: topicCategory === cat ? '700' : '500' }}>
-                        {cat}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
 
                 <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Discussion Body</Text>
                 <TextInput
@@ -700,16 +741,11 @@ const styles = StyleSheet.create({
   webCenteredContent: {
     maxWidth: 1280,
     width: '100%',
-    alignSelf: 'center',
+    alignSelf: 'flex-start',
   },
   headerLeftRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     flex: 1,
-    gap: Spacing.sm,
-  },
-  plainIconButton: {
-    padding: 4,
   },
   header: {
     flexDirection: 'row',
@@ -717,7 +753,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg,
     paddingTop: Platform.OS === 'web' ? Spacing.lg : Spacing.md,
-    paddingBottom: Spacing.xs,
+    paddingBottom: Spacing.sm,
     gap: Spacing.md,
   },
   headerTitle: {
@@ -725,15 +761,29 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.bold,
     letterSpacing: -0.5,
   },
-  headerSubTitle: {
-    fontSize: Typography.sizes.caption,
-    marginTop: 2,
+  feedTabs: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: Spacing.lg,
+    borderRadius: Radius.md,
+    padding: 3,
+    gap: 2,
+  },
+  feedTab: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.sm,
+  },
+  feedTabText: {
+    fontSize: Typography.sizes.footnote,
+    fontWeight: Typography.weights.semibold,
   },
   createBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 9,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 8,
     borderRadius: Radius.full,
     gap: 6,
   },
@@ -745,7 +795,8 @@ const styles = StyleSheet.create({
   toolbarWrapper: {
     paddingHorizontal: Spacing.lg,
     gap: Spacing.xs + 2,
-    marginVertical: Spacing.sm,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.xs,
   },
   searchBar: {
     flexDirection: 'row',
@@ -761,34 +812,24 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.footnote,
     height: '100%',
   },
-  categoriesContainer: {
-    gap: Spacing.xs,
-    alignItems: 'center',
-    paddingVertical: 2,
-  },
-  categoryChip: {
+  sortRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: Radius.full,
-    borderWidth: 1,
+    gap: Spacing.xs,
+    marginTop: Spacing.xs,
   },
-  categoryChipText: {
+  sortLabel: {
     fontSize: Typography.sizes.caption,
-    fontWeight: Typography.weights.medium,
+    marginRight: 2,
   },
-  catBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 1,
+  sortOption: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 5,
     borderRadius: Radius.full,
-    minWidth: 16,
-    alignItems: 'center',
   },
-  catBadgeText: {
-    fontSize: 10,
-    fontWeight: Typography.weights.bold,
+  sortOptionText: {
+    fontSize: Typography.sizes.caption,
+    fontWeight: Typography.weights.semibold,
   },
   centerLoading: {
     flex: 1,
@@ -801,16 +842,41 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.footnote,
   },
   listContainer: {
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: 0,
     paddingTop: Spacing.xs,
-    paddingBottom: 110,
-    gap: Spacing.md,
+    paddingBottom: 120,
   },
   threadCard: {
-    padding: Spacing.md,
-    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
     borderWidth: 1,
+    borderRadius: Radius.md,
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.sm,
     gap: Spacing.xs,
+  },
+  newsCard: {
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderWidth: 1,
+    borderRadius: Radius.md,
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.sm,
+    gap: Spacing.xs,
+  },
+  newsImage: {
+    width: '100%',
+    height: 150,
+    borderRadius: Radius.sm,
+    marginBottom: Spacing.xs,
+  },
+  newsImagePlaceholder: {
+    width: '100%',
+    height: 150,
+    borderRadius: Radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.xs,
   },
   cardTopRow: {
     flexDirection: 'row',
@@ -843,13 +909,17 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.bold,
     lineHeight: 20,
   },
+  threadPreview: {
+    fontSize: Typography.sizes.caption,
+    lineHeight: 17,
+    marginTop: 2,
+  },
   cardFooter: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
+    gap: Spacing.md,
     marginTop: Spacing.xs,
-    paddingTop: Spacing.xs + 2,
-    borderTopWidth: 1,
   },
   authorRow: {
     flexDirection: 'row',
@@ -878,6 +948,89 @@ const styles = StyleSheet.create({
   },
   repliesText: {
     fontSize: Typography.sizes.caption,
+    fontWeight: Typography.weights.bold,
+  },
+  newsSourceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: Spacing.xs,
+  },
+  newsModalCard: {
+    width: '100%',
+    maxWidth: Platform.OS === 'web' ? 720 : undefined,
+    maxHeight: Platform.OS === 'web' ? '82vh' as any : '86%',
+    borderRadius: Platform.OS === 'web' ? Radius.lg : 0,
+    overflow: 'hidden',
+  },
+  newsModalImage: {
+    width: '100%',
+    height: 210,
+  },
+  newsModalContent: {
+    padding: Spacing.lg,
+    gap: Spacing.md,
+  },
+  newsModalTitle: {
+    fontSize: Typography.sizes.title2,
+    fontWeight: Typography.weights.bold,
+    lineHeight: 28,
+  },
+  newsModalSummary: {
+    fontSize: Typography.sizes.body,
+    lineHeight: 23,
+  },
+  newsArticleLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+  },
+  newsArticleText: {
+    fontSize: Typography.sizes.body,
+    lineHeight: 24,
+  },
+  newsTrailerBlock: {
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
+  },
+  newsSectionLabel: {
+    fontSize: Typography.sizes.footnote,
+    fontWeight: Typography.weights.bold,
+  },
+  newsReadButton: {
+    minHeight: 44,
+    borderRadius: Radius.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xs,
+    marginTop: Spacing.sm,
+  },
+  newsReadButtonText: {
+    color: '#FFFFFF',
+    fontSize: Typography.sizes.footnote,
+    fontWeight: Typography.weights.bold,
+  },
+  fab: {
+    position: 'absolute',
+    right: Spacing.lg,
+    bottom: 24,
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.full,
+    elevation: 8,
+    shadowColor: '#000000',
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+  },
+  fabText: {
+    color: '#0A0B0E',
+    fontSize: Typography.sizes.footnote,
     fontWeight: Typography.weights.bold,
   },
   emptyContainer: {
@@ -1059,18 +1212,6 @@ const styles = StyleSheet.create({
   textAreaInput: {
     height: 100,
     textAlignVertical: 'top',
-  },
-  categorySelectRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginVertical: 4,
-  },
-  categorySelectChip: {
-    paddingHorizontal: Spacing.sm + 2,
-    paddingVertical: 6,
-    borderRadius: Radius.full,
-    borderWidth: 1,
   },
   publishBtn: {
     flexDirection: 'row',

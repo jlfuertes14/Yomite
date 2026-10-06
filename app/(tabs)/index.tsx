@@ -49,6 +49,7 @@ import { OfflineState } from '../../src/components/OfflineState';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
 import { Skeleton } from '../../src/components/Skeleton';
 import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
+import { useColorScheme } from '../../src/hooks/useColorScheme';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { useUserStore, getUserDisplayName, getUserHandle, getUserAvatarUrl } from '../../src/store/userStore';
 import { syncUserDataWithCloud } from '../../src/services/cloudSync';
@@ -721,6 +722,8 @@ export default function DiscoverScreen() {
   useDocumentTitle();
   const router = useRouter();
   const colors = useThemeColors();
+  const colorScheme = useColorScheme();
+  const isLightTheme = colorScheme === 'light';
   const { isOffline } = useNetworkStatus();
   const { width: windowWidth } = useWindowDimensions();
   const isDesktop = windowWidth >= 768;
@@ -1369,11 +1372,7 @@ export default function DiscoverScreen() {
           {Platform.OS !== 'web' && (
             <>
               <View style={styles.header}>
-                <Pressable
-                  onPress={handleResetToDiscover}
-                  style={({ pressed }) => [styles.headerLeft, { opacity: pressed ? 0.7 : 1 }]}
-                  hitSlop={8}
-                >
+                <View style={styles.headerLeft}>
                   <Pressable
                     onPress={handleToggleMenu}
                     style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1 }]}
@@ -1381,8 +1380,14 @@ export default function DiscoverScreen() {
                   >
                     <Ionicons name="menu" size={26} color={colors.text} />
                   </Pressable>
+                  <Pressable
+                    onPress={handleResetToDiscover}
+                    style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}
+                    hitSlop={8}
+                  >
                   <Text style={[styles.appTitle, { color: colors.text }]}>Discover</Text>
-                </Pressable>
+                  </Pressable>
+                </View>
 
                 <View style={styles.headerRight}>
                   <Pressable
@@ -1583,6 +1588,10 @@ export default function DiscoverScreen() {
                         style={[
                           styles.feedSegmentPill,
                           String(activeNavId) === 'latest' && styles.feedSegmentPillActive,
+                          {
+                            backgroundColor: String(activeNavId) === 'latest' ? colors.accent : colors.surfaceElevated,
+                            borderColor: String(activeNavId) === 'latest' ? colors.accent : colors.border,
+                          },
                         ]}
                         accessibilityRole="tab"
                           accessibilityState={{ selected: String(activeNavId) === 'latest' }}
@@ -1590,12 +1599,13 @@ export default function DiscoverScreen() {
                         <Ionicons
                           name="time-outline"
                           size={14}
-                          color={String(activeNavId) === 'latest' ? '#0A0B0E' : '#71717A'}
+                          color={String(activeNavId) === 'latest' ? '#0A0B0E' : colors.textSecondary}
                         />
                         <Text
                           style={[
                             styles.feedSegmentText,
                             String(activeNavId) === 'latest' ? styles.feedSegmentTextActive : styles.feedSegmentTextInactive,
+                            String(activeNavId) !== 'latest' && { color: colors.textSecondary },
                           ]}
                         >
                           Latest Updates
@@ -1607,6 +1617,10 @@ export default function DiscoverScreen() {
                         style={[
                           styles.feedSegmentPill,
                           String(activeNavId) === 'recently_added' && styles.feedSegmentPillActive,
+                          {
+                            backgroundColor: String(activeNavId) === 'recently_added' ? colors.accent : colors.surfaceElevated,
+                            borderColor: String(activeNavId) === 'recently_added' ? colors.accent : colors.border,
+                          },
                         ]}
                         accessibilityRole="tab"
                           accessibilityState={{ selected: String(activeNavId) === 'recently_added' }}
@@ -1614,41 +1628,19 @@ export default function DiscoverScreen() {
                         <Ionicons
                           name="add-circle-outline"
                           size={14}
-                          color={String(activeNavId) === 'recently_added' ? '#0A0B0E' : '#71717A'}
+                          color={String(activeNavId) === 'recently_added' ? '#0A0B0E' : colors.textSecondary}
                         />
                         <Text
                           style={[
                             styles.feedSegmentText,
                             String(activeNavId) === 'recently_added' ? styles.feedSegmentTextActive : styles.feedSegmentTextInactive,
+                            String(activeNavId) !== 'recently_added' && { color: colors.textSecondary },
                           ]}
                         >
                           Recently Added
                         </Text>
                       </Pressable>
 
-                      <Pressable
-                        onPress={handleSelectPopular}
-                        style={[
-                          styles.feedSegmentPill,
-                          String(activeNavId) === 'popular' && styles.feedSegmentPillActive,
-                        ]}
-                        accessibilityRole="tab"
-                          accessibilityState={{ selected: String(activeNavId) === 'popular' }}
-                      >
-                        <Ionicons
-                          name="trending-up-outline"
-                          size={14}
-                          color={String(activeNavId) === 'popular' ? '#0A0B0E' : '#71717A'}
-                        />
-                        <Text
-                          style={[
-                            styles.feedSegmentText,
-                            String(activeNavId) === 'popular' ? styles.feedSegmentTextActive : styles.feedSegmentTextInactive,
-                          ]}
-                        >
-                          Top Ranked
-                        </Text>
-                      </Pressable>
                     </View>
                   </View>
 
@@ -1760,6 +1752,7 @@ export default function DiscoverScreen() {
                       <Animated.View
                         style={[
                           styles.heroBannerFrame,
+                          isLightTheme && { backgroundColor: colors.surface, borderColor: colors.border },
                           Platform.OS === 'web' && styles.webHeroBannerFrame,
                           Platform.OS === 'web' && {
                             transform: [{ translateX: heroSlideAnim }],
@@ -1771,54 +1764,76 @@ export default function DiscoverScreen() {
                         {currentHeroCover && (
                           <Image
                             source={{ uri: currentHeroCover }}
-                            style={styles.heroBackdrop}
+                            style={[styles.heroBackdrop, isLightTheme && { opacity: 0.5 }]}
                             contentFit="cover"
                             blurRadius={Platform.OS === 'web' ? 24 : 18}
                             transition={250}
                           />
                         )}
 
-                        {/* Multi-Stop Linear Gradient Overlay Fading 100% into Canvas Background */}
-                        <LinearGradient
-                          colors={[
-                            'rgba(11, 12, 14, 0.40)',
-                            'rgba(11, 12, 14, 0.72)',
-                            colors.background,
-                          ]}
-                          locations={[0, 0.55, 1.0]}
-                          start={{ x: 0, y: 0 }}
-                          end={{ x: 0, y: 1 }}
-                          style={styles.heroBackdropGradient}
-                        />
+                        {!isLightTheme && (
+                          <LinearGradient
+                            colors={[
+                              'rgba(11, 12, 14, 0.40)',
+                              'rgba(11, 12, 14, 0.72)',
+                              colors.background,
+                            ]}
+                            locations={[0, 0.55, 1.0]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 0, y: 1 }}
+                            style={styles.heroBackdropGradient}
+                          />
+                        )}
 
                         <View style={[styles.heroInnerContainer, Platform.OS === 'web' && styles.webCenteredContent]}>
-                          {/* Eyebrow Header: Spotlight Label & Minimal Slide Indicator Dots */}
+                          {/* Carousel header */}
                           <View style={styles.trendingEyebrowRow}>
-                            <View style={styles.trendingEyebrowLeft}>
-                              <View style={styles.trendingDot} />
-                              <Text style={styles.trendingEyebrowText}>
-                                TRENDING SPOTLIGHT
-                              </Text>
-                            </View>
+                            <Text style={[styles.trendingEyebrowText, { color: isLightTheme ? colors.text : '#E4E4E7' }]}>
+                              Popular New Titles
+                            </Text>
 
-                            {/* Slide Indicator Dots for top 5 titles */}
-                            <View style={styles.trendingSlideDots}>
-                              {popular.slice(0, 5).map((_, i) => (
+                            <View style={styles.heroHeaderControls}>
+                              <View style={styles.trendingSlideDots}>
+                                {popular.slice(0, 5).map((_, i) => (
+                                  <Pressable
+                                    key={i}
+                                    onPress={() => changeHeroIndex(i, i > heroIndex ? 'next' : 'prev')}
+                                    hitSlop={6}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`Go to slide ${i + 1}`}
+                                  >
+                                    <View
+                                      style={[
+                                        styles.slideDot,
+                                        i === (heroIndex % 5) ? styles.slideDotActive : styles.slideDotInactive,
+                                        i === (heroIndex % 5)
+                                          ? { backgroundColor: colors.accent }
+                                          : { backgroundColor: colors.textMuted },
+                                      ]}
+                                    />
+                                  </Pressable>
+                                ))}
+                              </View>
+                              <View style={styles.heroControls}>
                                 <Pressable
-                                  key={i}
-                                  onPress={() => changeHeroIndex(i, i > heroIndex ? 'next' : 'prev')}
-                                  hitSlop={6}
+                                  onPress={prevHero}
+                                  style={({ pressed }) => [styles.heroArrowBtn, pressed && { opacity: 0.5 }]}
+                                  hitSlop={8}
                                   accessibilityRole="button"
-                                  accessibilityLabel={`Go to slide ${i + 1}`}
+                                  accessibilityLabel="Previous title"
                                 >
-                                  <View
-                                    style={[
-                                      styles.slideDot,
-                                      i === (heroIndex % 5) ? styles.slideDotActive : styles.slideDotInactive,
-                                    ]}
-                                  />
+                                  <Ionicons name="chevron-back" size={18} color={isLightTheme ? colors.text : '#FAFAFA'} />
                                 </Pressable>
-                              ))}
+                                <Pressable
+                                  onPress={nextHero}
+                                  style={({ pressed }) => [styles.heroArrowBtn, pressed && { opacity: 0.5 }]}
+                                  hitSlop={8}
+                                  accessibilityRole="button"
+                                  accessibilityLabel="Next title"
+                                >
+                                  <Ionicons name="chevron-forward" size={18} color={isLightTheme ? colors.text : '#FAFAFA'} />
+                                </Pressable>
+                              </View>
                             </View>
                           </View>
 
@@ -1861,7 +1876,7 @@ export default function DiscoverScreen() {
                                 ]}
                               >
                                 <Text
-                                  style={[styles.heroTitleText, Platform.OS === 'web' && styles.webHeroTitleText]}
+                                  style={[styles.heroTitleText, Platform.OS === 'web' && styles.webHeroTitleText, isLightTheme && { color: colors.text }]}
                                   numberOfLines={2}
                                 >
                                   {currentHeroTitle}
@@ -1872,8 +1887,8 @@ export default function DiscoverScreen() {
                               <View style={styles.trendingMetaRow}>
                                 {currentHeroRating != null && (
                                   <View style={styles.trendingMetaBadge}>
-                                    <Ionicons name="star" size={12} color="#F59E0B" />
-                                    <Text style={styles.trendingRatingText}>
+                                    <Ionicons name="star" size={12} color={colors.accent} />
+                                    <Text style={[styles.trendingRatingText, isLightTheme && { color: colors.text }]}>
                                       {currentHeroRating.toFixed(1)}
                                     </Text>
                                   </View>
@@ -1881,15 +1896,15 @@ export default function DiscoverScreen() {
 
                                 {currentHeroFollows != null && (
                                   <View style={styles.trendingMetaBadge}>
-                                    <Ionicons name="bookmark-outline" size={12} color="#94A3B8" />
-                                    <Text style={styles.trendingMetaText}>
+                                    <Ionicons name="bookmark-outline" size={12} color={isLightTheme ? colors.textSecondary : '#94A3B8'} />
+                                    <Text style={[styles.trendingMetaText, isLightTheme && { color: colors.text }]}>
                                       {formatCompactNumber(currentHeroFollows)} follows
                                     </Text>
                                   </View>
                                 )}
 
                                 {currentHeroAuthor ? (
-                                  <Text style={styles.heroAuthorText} numberOfLines={1}>
+                                  <Text style={[styles.heroAuthorText, isLightTheme && { color: colors.text }]} numberOfLines={1}>
                                     by {currentHeroAuthor}
                                   </Text>
                                 ) : null}
@@ -1900,8 +1915,8 @@ export default function DiscoverScreen() {
                                 {currentHeroTags.map((t) => {
                                   const tagLabel = (t.attributes.name.en ?? Object.values(t.attributes.name)[0]);
                                   return (
-                                    <View key={t.id} style={styles.heroTagPill}>
-                                      <Text style={styles.heroTagText} numberOfLines={1}>
+                                    <View key={t.id} style={[styles.heroTagPill, isLightTheme && { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
+                                      <Text style={[styles.heroTagText, isLightTheme && { color: colors.text }]} numberOfLines={1}>
                                         {tagLabel}
                                       </Text>
                                     </View>
@@ -1911,57 +1926,16 @@ export default function DiscoverScreen() {
 
                               {/* Synopsis Preview */}
                               <Text
-                                style={[styles.heroSynopsisText, Platform.OS === 'web' && styles.webHeroSynopsisText]}
+                                style={[
+                                  styles.heroSynopsisText,
+                                  Platform.OS === 'web' && styles.webHeroSynopsisText,
+                                  isLightTheme && { color: colors.text },
+                                ]}
                                 numberOfLines={Platform.OS === 'web' ? 3 : 2}
                               >
                                 {currentHeroDesc}
                               </Text>
 
-                              {/* Actions & Carousel Arrow Controls */}
-                              <View style={styles.heroActionFooterRow}>
-                                <Pressable
-                                  onPress={() => navigateToManga(currentHeroManga.id)}
-                                  style={({ pressed }) => [
-                                    styles.trendingCtaBtn,
-                                    pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
-                                    Platform.OS === 'web' && { cursor: 'pointer' as any },
-                                  ]}
-                                  accessibilityRole="button"
-                                  accessibilityLabel={`Start reading ${currentHeroTitle}`}
-                                >
-                                  <Ionicons name="book-outline" size={14} color="#0B0C0E" />
-                                  <Text style={styles.trendingCtaText}>Start Reading</Text>
-                                </Pressable>
-
-                                <View style={styles.heroControls}>
-                                  <Pressable
-                                    onPress={prevHero}
-                                    style={({ pressed }) => [
-                                      styles.heroArrowBtn,
-                                      pressed && { opacity: 0.5 },
-                                      Platform.OS === 'web' && { cursor: 'pointer' as any },
-                                    ]}
-                                    hitSlop={8}
-                                    accessibilityRole="button"
-                                    accessibilityLabel="Previous title"
-                                  >
-                                    <Ionicons name="chevron-back" size={16} color="#FAFAFA" />
-                                  </Pressable>
-                                  <Pressable
-                                    onPress={nextHero}
-                                    style={({ pressed }) => [
-                                      styles.heroArrowBtn,
-                                      pressed && { opacity: 0.5 },
-                                      Platform.OS === 'web' && { cursor: 'pointer' as any },
-                                    ]}
-                                    hitSlop={8}
-                                    accessibilityRole="button"
-                                    accessibilityLabel="Next title"
-                                  >
-                                    <Ionicons name="chevron-forward" size={16} color="#FAFAFA" />
-                                  </Pressable>
-                                </View>
-                              </View>
                             </View>
                           </View>
                         </View>
@@ -1977,6 +1951,10 @@ export default function DiscoverScreen() {
                         style={[
                           styles.feedSegmentPill,
                           activeNavId === 'latest' && styles.feedSegmentPillActive,
+                          {
+                            backgroundColor: activeNavId === 'latest' ? colors.accent : colors.surfaceElevated,
+                            borderColor: activeNavId === 'latest' ? colors.accent : colors.border,
+                          },
                         ]}
                         accessibilityRole="tab"
                         accessibilityState={{ selected: activeNavId === 'latest' }}
@@ -1984,12 +1962,13 @@ export default function DiscoverScreen() {
                         <Ionicons
                           name="time-outline"
                           size={14}
-                          color={activeNavId === 'latest' ? '#0A0B0E' : '#71717A'}
+                          color={activeNavId === 'latest' ? '#0A0B0E' : colors.textSecondary}
                         />
                         <Text
                           style={[
                             styles.feedSegmentText,
                             activeNavId === 'latest' ? styles.feedSegmentTextActive : styles.feedSegmentTextInactive,
+                            activeNavId !== 'latest' && { color: colors.textSecondary },
                           ]}
                         >
                           Latest Updates
@@ -2001,6 +1980,10 @@ export default function DiscoverScreen() {
                         style={[
                           styles.feedSegmentPill,
                           activeNavId === 'recently_added' && styles.feedSegmentPillActive,
+                          {
+                            backgroundColor: activeNavId === 'recently_added' ? colors.accent : colors.surfaceElevated,
+                            borderColor: activeNavId === 'recently_added' ? colors.accent : colors.border,
+                          },
                         ]}
                         accessibilityRole="tab"
                         accessibilityState={{ selected: activeNavId === 'recently_added' }}
@@ -2008,41 +1991,19 @@ export default function DiscoverScreen() {
                         <Ionicons
                           name="add-circle-outline"
                           size={14}
-                          color={activeNavId === 'recently_added' ? '#0A0B0E' : '#71717A'}
+                          color={activeNavId === 'recently_added' ? '#0A0B0E' : colors.textSecondary}
                         />
                         <Text
                           style={[
                             styles.feedSegmentText,
                             activeNavId === 'recently_added' ? styles.feedSegmentTextActive : styles.feedSegmentTextInactive,
+                            activeNavId !== 'recently_added' && { color: colors.textSecondary },
                           ]}
                         >
                           Recently Added
                         </Text>
                       </Pressable>
 
-                      <Pressable
-                        onPress={handleSelectPopular}
-                        style={[
-                          styles.feedSegmentPill,
-                          activeNavId === 'popular' && styles.feedSegmentPillActive,
-                        ]}
-                        accessibilityRole="tab"
-                        accessibilityState={{ selected: activeNavId === 'popular' }}
-                      >
-                        <Ionicons
-                          name="trending-up-outline"
-                          size={14}
-                          color={activeNavId === 'popular' ? '#0A0B0E' : '#71717A'}
-                        />
-                        <Text
-                          style={[
-                            styles.feedSegmentText,
-                            activeNavId === 'popular' ? styles.feedSegmentTextActive : styles.feedSegmentTextInactive,
-                          ]}
-                        >
-                          Top Ranked
-                        </Text>
-                      </Pressable>
                     </View>
                   </View>
 
@@ -2316,10 +2277,7 @@ const styles = StyleSheet.create({
   appTitle: {
     fontSize: Typography.sizes.title1,
     fontWeight: Typography.weights.bold,
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    textAlign: 'center',
+    lineHeight: 30,
   },
   searchContainer: {
     flexDirection: 'row',
@@ -2952,9 +2910,8 @@ const styles = StyleSheet.create({
   heroSkeletonWrap: { paddingHorizontal: Spacing.lg },
   heroInnerContainer: { flex: 1, padding: Spacing.lg },
   trendingEyebrowRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.lg },
-  trendingEyebrowLeft: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  trendingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#F43F5E' },
-  trendingEyebrowText: { color: '#E4E4E7', fontSize: 10, fontWeight: Typography.weights.bold, letterSpacing: 1.2 },
+  heroHeaderControls: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  trendingEyebrowText: { fontSize: Typography.sizes.headline, fontWeight: Typography.weights.bold },
   trendingSlideDots: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   slideDot: { width: 5, height: 5, borderRadius: 3 },
   slideDotActive: { width: 18, backgroundColor: '#FAFAFA' },
@@ -2977,9 +2934,6 @@ const styles = StyleSheet.create({
   trendingMetaBadge: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   trendingRatingText: { color: '#FAFAFA', fontSize: Typography.sizes.footnote, fontWeight: Typography.weights.bold },
   trendingMetaText: { color: '#D4D4D8', fontSize: Typography.sizes.footnote, fontWeight: Typography.weights.medium },
-  heroActionFooterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: Spacing.xs },
-  trendingCtaBtn: { flex: 1, minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: Spacing.md, borderRadius: Radius.lg, backgroundColor: '#F59E0B' },
-  trendingCtaText: { color: '#0B0C0E', fontSize: Typography.sizes.footnote, fontWeight: Typography.weights.bold },
 
   /* Grid Section */
   section: {

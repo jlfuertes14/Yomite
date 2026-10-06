@@ -22,6 +22,66 @@ export interface ForumThread {
   lastReplyAt: string;
 }
 
+export interface AnimeNewsItem {
+  id: string;
+  title: string;
+  summary: string;
+  publishedAt: string;
+  url: string;
+  imageUrl?: string;
+  trailerUrl?: string;
+  source: 'Anime News Network';
+}
+
+export interface AnimeNewsArticle extends AnimeNewsItem {
+  content: string[];
+}
+
+const ANIME_NEWS_API_BASE = 'https://yomite-parsers.onrender.com';
+
+/**
+ * Fetch the latest Anime News Network headlines for the read-only Community news tab.
+ * The feed is cached so the mobile client does not request every time the tab opens.
+ */
+export async function getAnimeNews(bypassCache = false): Promise<AnimeNewsItem[]> {
+  const cacheKey = 'community_anime_news_v1';
+  if (!bypassCache) {
+    const cached = await CacheManager.get<AnimeNewsItem[]>(cacheKey);
+    if (cached) return cached;
+  }
+
+  try {
+    const response = await axios.get<{ items?: AnimeNewsItem[] }>(`${ANIME_NEWS_API_BASE}/api/news`, {
+      timeout: 30000,
+    });
+    const items = response.data?.items || [];
+    await CacheManager.set(cacheKey, items, 15 * 60 * 1000);
+    return items;
+  } catch (err) {
+    console.warn('Failed to fetch Anime News Network from Yomite parser:', err);
+  }
+
+  return [];
+}
+
+export async function getAnimeNewsArticle(url: string): Promise<AnimeNewsArticle | null> {
+  const cacheKey = `community_anime_news_article_${encodeURIComponent(url)}`;
+  const cached = await CacheManager.get<AnimeNewsArticle>(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const response = await axios.get<AnimeNewsArticle>(`${ANIME_NEWS_API_BASE}/api/news/article`, {
+      params: { url },
+      timeout: 30000,
+    });
+    await CacheManager.set(cacheKey, response.data, 60 * 60 * 1000);
+    return response.data;
+  } catch (err) {
+    console.warn('Failed to fetch Anime News Network article from Yomite parser:', err);
+    return null;
+  }
+}
+
 /**
  * Fetch comments for a specific chapter
  */
@@ -85,90 +145,8 @@ export async function getChapterComments(chapterId: string): Promise<ForumCommen
 }
 
 /**
- * Fetch trending community forum threads dynamically based on real MangaDex top titles
- */
-export async function getCommunityForums(bypassCache = false): Promise<ForumThread[]> {
-  const cacheKey = 'community_forums_clean_v5';
-  if (!bypassCache) {
-    const cached = await CacheManager.get<ForumThread[]>(cacheKey);
-    if (cached) return cached;
-  }
-
-  try {
-    const baseUrl = getMangaDexApiBase();
-    const res = await axios.get(`${baseUrl}/chapter`, {
-      params: {
-        limit: 15,
-        'order[publishAt]': 'desc',
-        'contentRating[]': ['safe', 'suggestive', 'erotica'],
-        includes: ['manga', 'scanlation_group', 'user'],
-        'translatedLanguage[]': ['en'],
-      },
-    });
-
-    if (res.data?.data && Array.isArray(res.data.data)) {
-      const categories = ['Chapter Release', 'General Discussion', 'Scanlation', 'Art & Design'];
-      const threads: ForumThread[] = res.data.data.map((chap: any, idx: number) => {
-        const mangaRel = chap.relationships?.find((r: any) => r.type === 'manga');
-        const groupRel = chap.relationships?.find((r: any) => r.type === 'scanlation_group');
-        const mangaTitle = mangaRel?.attributes?.title?.en || Object.values(mangaRel?.attributes?.title || {})[0] || 'Latest Release';
-        const groupName = groupRel?.attributes?.name || 'MangaDex Scanlator';
-
-        const attr = chap.attributes || {};
-        const chapNum = attr.chapter ? `Ch. ${attr.chapter}` : 'New Chapter';
-        const chapTitle = attr.title ? `: "${attr.title}"` : '';
-        const publishTime = attr.publishAt || attr.createdAt || new Date().toISOString();
-
-        return {
-          id: `mangadex_${chap.id}`,
-          title: `🔥 [MangaDex] ${mangaTitle} ${chapNum}${chapTitle}`,
-          category: categories[idx % categories.length],
-          author: groupName,
-          repliesCount: 0,
-          createdAt: publishTime,
-          lastReplyAt: publishTime,
-        };
-      });
-
-      await CacheManager.set(cacheKey, threads, 3 * 60 * 1000); // 3 min TTL
-      return threads;
-    }
-  } catch (err) {
-    console.warn('Failed to fetch live MangaDex chapter threads:', err);
-  }
-
-  const fallback = [
-    {
-      id: 'f1',
-      title: '🔥 Weekly Manga Discussion Thread — Best Chapters of the Week!',
-      category: 'General Discussion',
-      author: 'MangaDexMod',
-      repliesCount: 0,
-      createdAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-      lastReplyAt: new Date().toISOString(),
-    },
-    {
-      id: 'f2',
-      title: '🎨 Art Appreciation: Favorite double-page spreads in modern series',
-      category: 'Art & Design',
-      author: 'InkMaster',
-      repliesCount: 0,
-      createdAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
-      lastReplyAt: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
-    },
-  ];
-  await CacheManager.set(cacheKey, fallback, 3 * 60 * 1000);
-  return fallback;
-}
-
-/**
  * Fetch replies for a specific forum discussion thread
  */
 export async function getThreadReplies(threadId: string): Promise<ForumComment[]> {
-  if (threadId.startsWith('mangadex_')) {
-    // MangaDex API comments require Discourse session auth so return empty array
-    return [];
-  }
-
   return [];
 }

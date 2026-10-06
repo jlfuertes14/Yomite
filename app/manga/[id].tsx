@@ -457,7 +457,6 @@ export default function MangaDetailScreen() {
             colors={['rgba(9,9,11,0.2)', 'rgba(9,9,11,0.7)', colors.background]}
             style={styles.backdropGradient}
           />
-          {/* Back button on far upper left */}
           <SafeAreaView style={styles.backButtonContainer}>
             <Pressable
               onPress={() => {
@@ -469,13 +468,13 @@ export default function MangaDetailScreen() {
                   router.replace('/(tabs)' as any);
                 }
               }}
-              style={({ pressed }) => [{ opacity: pressed ? 0.6 : 1, padding: 4 }]}
+              style={({ pressed }) => [{ opacity: pressed ? 0.6 : 1, padding: 8 }]}
               hitSlop={8}
+              accessibilityLabel="Go back"
             >
-              <Ionicons name="arrow-back" size={26} color="#FAFAFA" />
+              <Ionicons name="arrow-back" size={25} color="#FAFAFA" />
             </Pressable>
           </SafeAreaView>
-
           {/* Inner hero content centered with global web margins */}
           <View style={[{ width: '100%' }, Platform.OS === 'web' && styles.webCenteredContent]}>
             {/* Cover + Info overlay */}
@@ -521,7 +520,7 @@ export default function MangaDetailScreen() {
                 </Text>
                 <View style={styles.statusRow}>
                   {stats?.rating?.bayesian || stats?.rating?.average ? (
-                    <View style={[styles.statusPill, { backgroundColor: 'rgba(255, 255, 255, 0.06)', borderColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 3 }]}>
+                    <View style={[styles.statusPill, { backgroundColor: 'transparent', borderColor: 'transparent', flexDirection: 'row', alignItems: 'center', gap: 3 }]}>
                       <Ionicons name="star" size={10} color="#F59E0B" />
                       <Text style={[styles.statusPillText, { color: colors.text }]}>
                         {(stats.rating.bayesian || stats.rating.average!).toFixed(2)}
@@ -529,37 +528,13 @@ export default function MangaDetailScreen() {
                     </View>
                   ) : null}
 
-                  <Pressable
-                    onPress={() => setCategoryModalVisible(true)}
-                    style={({ pressed }) => [
-                      styles.statusPill,
-                      {
-                        backgroundColor: colors.surfaceElevated,
-                        borderColor: colors.border,
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 4,
-                        opacity: pressed ? 0.7 : 1,
-                      },
-                    ]}
-                  >
-                    <Ionicons
-                      name={isInLibrary ? 'bookmark' : 'bookmark-outline'}
-                      size={11}
-                      color={isInLibrary ? colors.text : colors.textSecondary}
-                    />
-                    <Text style={[styles.statusPillText, { color: isInLibrary ? colors.text : colors.textSecondary }]}>
-                      {isInLibrary ? getCategoryDisplayLabel(libraryEntry?.category) : 'Add to Library'}
-                    </Text>
-                  </Pressable>
-
-                  <View style={[styles.statusPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                  <View style={[styles.statusPill, { backgroundColor: 'transparent', borderColor: 'transparent' }]}>
                     <Text style={[styles.statusPillText, { color: colors.accent }]}>
                       {manga.attributes.status?.toLowerCase()}
                     </Text>
                   </View>
                   {manga.attributes.publicationDemographic && (
-                    <View style={[styles.statusPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                    <View style={[styles.statusPill, { backgroundColor: 'transparent', borderColor: 'transparent' }]}>
                       <Text style={[styles.statusPillText, { color: colors.textSecondary }]}>
                         {manga.attributes.publicationDemographic.toLowerCase()}
                       </Text>
@@ -662,7 +637,12 @@ export default function MangaDetailScreen() {
         </View>
 
         {/* Tags */}
-        <View style={styles.tagsRow}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.tagsRow}
+          contentContainerStyle={styles.tagsContent}
+        >
           {tags.map((tag) => (
             <View
               key={tag.id}
@@ -673,7 +653,7 @@ export default function MangaDetailScreen() {
               </Text>
             </View>
           ))}
-        </View>
+        </ScrollView>
 
         {/* Synopsis */}
         {description ? (
@@ -916,6 +896,7 @@ export default function MangaDetailScreen() {
               >
                 <View style={styles.chapterInfo}>
                   <View style={styles.chapterTitleRow}>
+                    {isCurrentReading && <View style={[styles.chapterActiveDot, { backgroundColor: colors.accent }]} />}
                     <Text
                       style={[
                         styles.chapterNumber,
@@ -1276,7 +1257,7 @@ const styles = StyleSheet.create({
     position: 'relative',
     minHeight: Platform.OS === 'web' ? 380 : 290,
     justifyContent: 'flex-end',
-    paddingTop: Platform.OS === 'ios' ? 54 : 44,
+    paddingTop: Spacing.md,
   },
   backdropImage: {
     position: 'absolute',
@@ -1382,8 +1363,8 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   statusPill: {
-    paddingHorizontal: Platform.OS === 'web' ? 10 : 7,
-    paddingVertical: Platform.OS === 'web' ? 5 : 3,
+    paddingHorizontal: Platform.OS === 'web' ? 8 : 4,
+    paddingVertical: Platform.OS === 'web' ? 4 : 2,
     borderRadius: Radius.xs,
     borderWidth: 1,
   },
@@ -1412,10 +1393,11 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.bold,
   },
   tagsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: Spacing.lg,
     marginTop: Platform.OS === 'web' ? Spacing.xl : Spacing.lg,
+    flexGrow: 0,
+  },
+  tagsContent: {
+    paddingHorizontal: Spacing.lg,
     gap: Platform.OS === 'web' ? Spacing.sm : Spacing.xs,
   },
   tagChip: {
@@ -1446,7 +1428,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg,
-    marginTop: Platform.OS === 'web' ? Spacing['2xl'] + 8 : Spacing['2xl'],
+    marginTop: Platform.OS === 'web' ? Spacing['2xl'] : Spacing.xl,
     marginBottom: Spacing.md,
     gap: Spacing.sm,
     zIndex: 100,
@@ -1581,6 +1563,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: Platform.OS === 'web' ? Spacing.md + 4 : Spacing.md,
     paddingHorizontal: Spacing.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  chapterActiveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 2,
   },
   chapterInfo: {
     flex: 1,

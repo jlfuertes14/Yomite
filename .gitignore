@@ -70,6 +70,8 @@ assets/images/qr_code.png
 # Reference Repositories
 kotatsu-app/
 kotatsu-parsers/
+yomite-parser/
+yomite-parsers/
 
 # Test & Investigation Scripts
 scripts/
@@ -77,4 +79,3 @@ test*.js
 test*.ts
 verify*.js
 verify*.ts
-
