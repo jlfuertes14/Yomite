@@ -9,6 +9,8 @@ import {
   SourceFilter,
   SourceManga,
   SourcePage,
+  SourceSortOption,
+  SourceTag,
 } from '../types';
 import { sourceHttpClient, DEFAULT_USER_AGENT } from '../network/httpClient';
 import { ParsedHtml } from '../network/htmlParser';
@@ -20,6 +22,31 @@ export abstract class BaseParser implements MangaParser {
   public abstract getDetails(manga: SourceManga): Promise<SourceManga>;
   public abstract getChapters(manga: SourceManga): Promise<SourceChapter[]>;
   public abstract getPages(chapter: SourceChapter): Promise<SourcePage[]>;
+
+  /**
+   * Default available sort options based on metadata.availableSortOrders
+   */
+  public getAvailableSorts(): SourceSortOption[] {
+    const labelMap: Record<string, string> = {
+      popular: 'Popular',
+      latest: 'Latest',
+      newest: 'Newest',
+      rating: 'Top Rated',
+      alphabetical: 'A-Z',
+    };
+    const sorts = this.metadata.availableSortOrders || ['popular', 'latest'];
+    return sorts.map((id) => ({
+      id,
+      label: labelMap[id] || id.charAt(0).toUpperCase() + id.slice(1),
+    }));
+  }
+
+  /**
+   * Returns supported tags or genres for this source
+   */
+  public async getAvailableTags(): Promise<SourceTag[]> {
+    return [];
+  }
 
   /**
    * Default headers used when loading pages or images from this source
@@ -53,33 +80,73 @@ export abstract class BaseParser implements MangaParser {
   protected cleanText(text: string | null | undefined): string {
     if (!text) return '';
     return text
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'")
       .replace(/\r\n|\n|\r|\t/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
   }
 
   /**
-   * Extracts chapter number from strings like "Chapter 10.5 - Extra" -> 10.5
+   * Helper to strip HTML tags, decode entities, and preserve paragraphs
    */
-  protected parseChapterNumber(name: string): number {
-    const match = name.match(/(?:chapter|ch\.?|ep\.?|episode)\s*([\d.]+)/i);
+  protected stripHtml(html: string | null | undefined): string {
+    if (!html) return '';
+    return html
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'")
+      .replace(/\r\n|\r/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  /**
+   * Extracts chapter number from strings like "Chapter 10.5 - Extra" -> 10.5
+   * Safely handles undefined, null, numbers, or non-string inputs.
+   */
+  protected parseChapterNumber(name: any): number {
+    if (name === null || name === undefined) return 0;
+    if (typeof name === 'number') return isNaN(name) ? 0 : name;
+    const str = String(name).trim();
+    if (!str) return 0;
+
+    const match = str.match(/(?:chapter|ch\.?|ep\.?|episode)\s*([\d.]+)/i);
     if (match && match[1]) {
       const num = parseFloat(match[1]);
       if (!isNaN(num)) return num;
     }
-    const standaloneMatch = name.match(/^([\d.]+)/);
+    const standaloneMatch = str.match(/^([\d.]+)/);
     if (standaloneMatch && standaloneMatch[1]) {
       const num = parseFloat(standaloneMatch[1]);
+      if (!isNaN(num)) return num;
+    }
+    const anyNumberMatch = str.match(/[\d.]+/);
+    if (anyNumberMatch) {
+      const num = parseFloat(anyNumberMatch[0]);
       if (!isNaN(num)) return num;
     }
     return 0;
   }
 
   /**
-   * Scrapes HTML from a given URL using the source's headers
+   * Scrapes HTML from a given URL using the source's headers.
+   * Automatically normalizes relative paths or slugs into absolute URLs.
    */
   protected async fetchHtml(url: string): Promise<ParsedHtml> {
-    return sourceHttpClient.fetchHtml(url, {
+    const fullUrl = this.toAbsoluteUrl(url);
+    return sourceHttpClient.fetchHtml(fullUrl, {
       referer: this.metadata.baseUrl,
       sourceId: this.metadata.name,
     });

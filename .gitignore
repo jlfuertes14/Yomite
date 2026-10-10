@@ -67,11 +67,18 @@ Thumbs.db
 marketing-videos/
 docs/plans/
 assets/images/qr_code.png
+assets/images/Yomite Screenshots
+yomite-promo/
+snapshots-test/
+snapshots-test2/
+snapshots-zoom/
+
 # Reference Repositories
 kotatsu-app/
 kotatsu-parsers/
 yomite-parser/
 yomite-parsers/
+
 
 # Test & Investigation Scripts
 scripts/

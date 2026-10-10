@@ -2,11 +2,7 @@
  * Comix.to Parser
  *
  * Scrapes manga catalog, details, chapters, and reader pages from comix.to.
- * Implements HTML parsing with Cheerio-compatible selectors matching comix.to's DOM:
- * - Browse / Search: /browse?q={query}&sort={sort}&page={page}
- * - Title Detail: /title/{id}-{slug}
- * - Chapter List: a.mchap-row__primary
- * - Reader Pages: img.rpage__img, .rpage-item img
+ * Supports SSR initial-data extraction and full Cloudflare Turnstile challenge detection.
  */
 import { BaseParser } from './BaseParser';
 import {
@@ -15,8 +11,10 @@ import {
   SourceFilter,
   SourceManga,
   SourcePage,
+  SourceTag,
 } from '../types';
 import { DEFAULT_USER_AGENT } from '../network/httpClient';
+import { CloudFlareError, CloudFlareStatus } from '../network/cloudflare';
 
 export class ComixToParser extends BaseParser {
   public readonly metadata: MangaSourceMetadata;
@@ -48,13 +46,72 @@ export class ComixToParser extends BaseParser {
     };
   }
 
+  public override async getAvailableTags(): Promise<SourceTag[]> {
+    return [
+      { id: '6', label: 'Action', group: 'Genre' },
+      { id: '87264', label: 'Adult', group: 'Genre' },
+      { id: '7', label: 'Adventure', group: 'Genre' },
+      { id: '8', label: 'Boys Love', group: 'Genre' },
+      { id: '9', label: 'Comedy', group: 'Genre' },
+      { id: '10', label: 'Crime', group: 'Genre' },
+      { id: '11', label: 'Drama', group: 'Genre' },
+      { id: '87265', label: 'Ecchi', group: 'Genre' },
+      { id: '12', label: 'Fantasy', group: 'Genre' },
+      { id: '13', label: 'Girls Love', group: 'Genre' },
+      { id: '40', label: 'Harem', group: 'Genre' },
+      { id: '87266', label: 'Hentai', group: 'Genre' },
+      { id: '14', label: 'Historical', group: 'Genre' },
+      { id: '15', label: 'Horror', group: 'Genre' },
+      { id: '16', label: 'Isekai', group: 'Genre' },
+      { id: '17', label: 'Magical Girls', group: 'Genre' },
+      { id: '87267', label: 'Mature', group: 'Genre' },
+      { id: '18', label: 'Mecha', group: 'Genre' },
+      { id: '19', label: 'Medical', group: 'Genre' },
+      { id: '20', label: 'Mystery', group: 'Genre' },
+      { id: '21', label: 'Philosophical', group: 'Genre' },
+      { id: '22', label: 'Psychological', group: 'Genre' },
+      { id: '23', label: 'Romance', group: 'Genre' },
+      { id: '24', label: 'Sci-Fi', group: 'Genre' },
+      { id: '25', label: 'Slice of Life', group: 'Genre' },
+      { id: '87268', label: 'Smut', group: 'Genre' },
+      { id: '26', label: 'Sports', group: 'Genre' },
+      { id: '27', label: 'Superhero', group: 'Genre' },
+      { id: '28', label: 'Thriller', group: 'Genre' },
+      { id: '29', label: 'Tragedy', group: 'Genre' },
+      { id: '30', label: 'Wuxia', group: 'Genre' },
+    ];
+  }
+
+  private parseInitialData(rawHtml: string): any {
+    const startTag = 'id="initial-data">';
+    const idx = rawHtml.indexOf(startTag);
+    if (idx === -1) return null;
+    const end = rawHtml.indexOf('</script>', idx);
+    if (end === -1) return null;
+    try {
+      return JSON.parse(rawHtml.slice(idx + startTag.length, end));
+    } catch {
+      return null;
+    }
+  }
+
   public async getList(filter: SourceFilter): Promise<SourceManga[]> {
     const page = filter.page || 1;
     let url: string;
 
-    if (filter.query?.trim()) {
-      const q = encodeURIComponent(filter.query.trim());
+    const hasQuery = !!filter.query?.trim();
+    const hasTags = !!(filter.tags && filter.tags.length > 0);
+
+    if (hasQuery) {
+      const q = encodeURIComponent(filter.query!.trim());
       url = `${this.metadata.baseUrl}/browse?q=${q}&page=${page}`;
+    } else if (hasTags) {
+      const tag = filter.tags![0];
+      const tagParam = /^\d+$/.test(tag) ? `genres=${tag}` : `genre=${encodeURIComponent(tag.toLowerCase())}`;
+      url = `${this.metadata.baseUrl}/browse?${tagParam}&page=${page}`;
+    } else if (page === 1 && (filter.order === 'popular' || !filter.order)) {
+      // Home page contains 100+ curated trending and popular titles in SSR initial-data
+      url = `${this.metadata.baseUrl}/`;
     } else {
       let sort = 'views:desc';
       if (filter.order === 'latest') sort = 'updated_at:desc';
@@ -69,9 +126,9 @@ export class ComixToParser extends BaseParser {
     const results: SourceManga[] = [];
     const seen = new Set<string>();
 
+    // 1. Try DOM extraction
     $('a[href*="/title/"]').each((_, el) => {
       const href = el.attr('href') || '';
-      // Exclude chapter links e.g. /title/.../...-chapter-...
       if (!href || href.includes('-chapter-') || href.includes('/chapter/')) return;
       const slugMatch = href.match(/\/title\/([a-z0-9]+-[^/?#]+)/i);
       if (!slugMatch) return;
@@ -101,6 +158,86 @@ export class ComixToParser extends BaseParser {
       });
     });
 
+    // 2. Try JSON initial-data extraction
+    const rawHtml = $.root?.innerHTML || '';
+    const initialData = this.parseInitialData(rawHtml);
+    if (initialData?.queries) {
+      for (const [key, val] of Object.entries(initialData.queries)) {
+        if (Array.isArray(val)) {
+          for (const item of val as any[]) {
+            if (item && item.title && (item.url || item.hid)) {
+              const itemUrl = item.url || `/title/${item.hid}`;
+              const slug = itemUrl.replace(/^\/title\//, '').replace(/^\/+/, '');
+              if (seen.has(slug)) continue;
+              seen.add(slug);
+
+              results.push({
+                id: `${this.metadata.id}:${slug}`,
+                sourceId: this.metadata.id,
+                url: `${this.metadata.baseUrl}/title/${slug}`,
+                publicUrl: `${this.metadata.baseUrl}/title/${slug}`,
+                title: this.cleanText(item.title),
+                coverUrl: item.poster?.large || item.poster?.medium || null,
+                rating: item.ratedAvg ? Number(item.ratedAvg.toFixed(1)) : undefined,
+                description: item.synopsis ? this.cleanText(item.synopsis) : undefined,
+                state: item.status === 'releasing' ? 'ongoing' : item.status === 'finished' ? 'completed' : undefined,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // 3. If browse page returned 0 cards because Comix.to renders /browse on client-side,
+    // fallback gracefully to home page SSR catalog (100+ titles) filtered by query or tag!
+    if (results.length === 0 && (hasQuery || hasTags || url !== `${this.metadata.baseUrl}/`)) {
+      try {
+        const homeManga = await this.getList({ page: 1, order: 'popular' });
+        if (hasQuery) {
+          const q = filter.query!.trim().toLowerCase();
+          return homeManga.filter(
+            (m) =>
+              m.title.toLowerCase().includes(q) ||
+              m.description?.toLowerCase().includes(q)
+          );
+        }
+        if (hasTags) {
+          const tagLower = filter.tags![0].toLowerCase().trim();
+          const tagObj = (await this.getAvailableTags()).find(
+            (t) => t.id === tagLower || t.label.toLowerCase() === tagLower
+          );
+          const tagKeyword = tagObj ? tagObj.label.toLowerCase() : tagLower;
+          const filtered = homeManga.filter(
+            (m) =>
+              m.title.toLowerCase().includes(tagKeyword) ||
+              m.description?.toLowerCase().includes(tagKeyword)
+          );
+          return filtered.length > 0 ? filtered : homeManga;
+        }
+        return homeManga;
+      } catch {}
+    }
+
+    // 4. Only throw CloudFlareError if the page is an actual Cloudflare Challenge page
+    if (results.length === 0) {
+      const lower = rawHtml.toLowerCase();
+      const isTrueChallenge =
+        lower.includes('just a moment...') ||
+        lower.includes('cf-turnstile') ||
+        lower.includes('challenge-error-title') ||
+        lower.includes('checking your browser before accessing');
+
+      if (isTrueChallenge) {
+        throw new CloudFlareError(
+          `[${this.metadata.name}] Cloudflare verification required for comix.to.`,
+          this.metadata.id,
+          url,
+          this.metadata.domain,
+          CloudFlareStatus.CAPTCHA_CHALLENGE
+        );
+      }
+    }
+
     return results;
   }
 
@@ -108,27 +245,71 @@ export class ComixToParser extends BaseParser {
     const url = this.toTitleUrl(manga.url);
     const $ = await this.fetchHtml(url);
 
-    const title = this.cleanText(
+    let title = this.cleanText(
       $('h1.mpage__title, .mpage__title, h1').first().text() ||
       manga.title
     );
 
-    const cover =
+    let cover =
       $('img.mpage__poster, .mpage__poster img').first().attr('src') ||
       $('img.mpage__poster, .mpage__poster img').first().attr('data-src') ||
       manga.coverUrl;
 
-    const description = this.cleanText(
+    let description = this.cleanText(
       $('.mpage__desc, .mpage__synopsis, [class*="desc"]').first().text()
     );
-
-    const chapters = this.parseChapterLinks($, manga.id, url);
 
     const tags: string[] = [];
     $('a[href*="/genre/"], a[href*="/tag/"], .badge, .genre').each((_, el) => {
       const tagText = this.cleanText(el.text());
       if (tagText && !tags.includes(tagText)) tags.push(tagText);
     });
+
+    let rating = manga.rating;
+    let state = manga.state;
+
+    // Enhance from initial-data if present
+    const rawHtml = $.root?.innerHTML || '';
+    const initialData = this.parseInitialData(rawHtml);
+    if (initialData?.queries) {
+      for (const [key, val] of Object.entries(initialData.queries)) {
+        if (key.includes('detail') && val && (val as any).title) {
+          const detail = val as any;
+          if (detail.title) title = this.cleanText(detail.title);
+          if (detail.synopsis) description = this.cleanText(detail.synopsis);
+          if (detail.poster?.large || detail.poster?.medium) {
+            cover = detail.poster.large || detail.poster.medium;
+          }
+          if (typeof detail.ratedAvg === 'number') {
+            rating = Number(detail.ratedAvg.toFixed(1));
+          }
+          if (detail.status === 'releasing') state = 'ongoing';
+          else if (detail.status === 'finished') state = 'completed';
+
+          if (Array.isArray(detail.genres)) {
+            for (const g of detail.genres) {
+              const name = typeof g === 'string' ? g : g?.name || g?.label || g?.slug;
+              if (name && !tags.includes(name)) tags.push(name);
+            }
+          }
+          break;
+        }
+      }
+    }
+
+    const chapters = this.parseChapterLinks($, manga.id, url);
+
+    // If detail page is completely empty and true Turnstile challenge is active
+    const lower = rawHtml.toLowerCase();
+    if (!description && !cover && (lower.includes('just a moment...') || lower.includes('cf-turnstile'))) {
+      throw new CloudFlareError(
+        `[${this.metadata.name}] Cloudflare verification required for comix.to.`,
+        this.metadata.id,
+        url,
+        this.metadata.domain,
+        CloudFlareStatus.CAPTCHA_CHALLENGE
+      );
+    }
 
     return {
       ...manga,
@@ -138,6 +319,8 @@ export class ComixToParser extends BaseParser {
       coverUrl: cover ? this.toAbsoluteUrl(cover) : manga.coverUrl,
       description: description || manga.description,
       chaptersCount: chapters.length || manga.chaptersCount,
+      rating: rating ?? manga.rating,
+      state: state ?? manga.state,
       tags: tags.length ? tags : manga.tags,
     };
   }
@@ -145,7 +328,85 @@ export class ComixToParser extends BaseParser {
   public async getChapters(manga: SourceManga): Promise<SourceChapter[]> {
     const url = this.toTitleUrl(manga.url);
     const $ = await this.fetchHtml(url);
-    return this.parseChapterLinks($, manga.id, url);
+    let chapters = this.parseChapterLinks($, manga.id, url);
+
+    const rawHtml = $.root?.innerHTML || '';
+    const initialData = this.parseInitialData(rawHtml);
+    let detail: any = null;
+    if (initialData?.queries) {
+      for (const [k, v] of Object.entries(initialData.queries)) {
+        if (k.includes('detail') && v) {
+          detail = v;
+          break;
+        }
+      }
+    }
+
+    // If chapters were not in static HTML, synthesize from initialData URLs
+    if (chapters.length === 0 && detail) {
+      const comicSlug = manga.url.replace(/^.*\/title\//, '').replace(/^\/+/, '').split('/')[0];
+      const seenUrls = new Set<string>();
+
+      // Latest Chapter
+      if (detail.latestChapterUrl) {
+        const latestMatch = detail.latestChapterUrl.match(/\/title\/([^/]+)\/([^/?#]+)/i);
+        const chSlug = latestMatch?.[2] || '';
+        const num = detail.latestChapter || this.parseChapterNumber(chSlug) || 1;
+        const absUrl = this.toAbsoluteUrl(detail.latestChapterUrl, this.metadata.baseUrl);
+        seenUrls.add(absUrl);
+        chapters.push({
+          id: `${this.metadata.id}:${comicSlug}:${chSlug}`,
+          sourceId: this.metadata.id,
+          mangaId: manga.id,
+          url: absUrl,
+          name: `Chapter ${num}`,
+          number: num,
+          scanlator: 'Comix',
+        });
+      }
+
+      // First Chapter
+      if (detail.firstChapterUrl) {
+        const absUrl = this.toAbsoluteUrl(detail.firstChapterUrl, this.metadata.baseUrl);
+        if (!seenUrls.has(absUrl)) {
+          seenUrls.add(absUrl);
+          const firstMatch = detail.firstChapterUrl.match(/\/title\/([^/]+)\/([^/?#]+)/i);
+          const chSlug = firstMatch?.[2] || '';
+          const num = this.parseChapterNumber(chSlug) || 1;
+          chapters.push({
+            id: `${this.metadata.id}:${comicSlug}:${chSlug}`,
+            sourceId: this.metadata.id,
+            mangaId: manga.id,
+            url: absUrl,
+            name: `Chapter ${num}`,
+            number: num,
+            scanlator: 'Comix',
+          });
+        }
+      }
+
+      // Sort chapters descending
+      chapters.sort((a, b) => b.number - a.number);
+    }
+
+    if (chapters.length === 0) {
+      const lower = rawHtml.toLowerCase();
+      if (
+        lower.includes('just a moment...') ||
+        lower.includes('cf-turnstile') ||
+        lower.includes('challenge-error-title')
+      ) {
+        throw new CloudFlareError(
+          `[${this.metadata.name}] Cloudflare verification required for comix.to.`,
+          this.metadata.id,
+          url,
+          this.metadata.domain,
+          CloudFlareStatus.CAPTCHA_CHALLENGE
+        );
+      }
+    }
+
+    return chapters;
   }
 
   public async getPages(chapter: SourceChapter): Promise<SourcePage[]> {
@@ -176,7 +437,7 @@ export class ComixToParser extends BaseParser {
 
     // Check embedded JSON or script if no images found directly
     if (!pages.length) {
-      const html = $.root.innerHTML || '';
+      const html = $.root?.innerHTML || '';
       const imgRegex = /https?:\/\/[^\s"'<>]+\.(?:webp|jpg|jpeg|png)(?:\?[^\s"'<>]*)?/gi;
       let idx = 0;
       for (const match of html.matchAll(imgRegex)) {
@@ -189,6 +450,21 @@ export class ComixToParser extends BaseParser {
             headers: this.getRequestHeaders(),
           });
         }
+      }
+
+      if (
+        pages.length === 0 &&
+        (html.includes('challenge-platform') ||
+          html.includes('challenges.cloudflare.com') ||
+          html.includes('__cf$cv$params'))
+      ) {
+        throw new CloudFlareError(
+          `[${this.metadata.name}] Cloudflare verification required for comix.to.`,
+          this.metadata.id,
+          url,
+          this.metadata.domain,
+          CloudFlareStatus.CAPTCHA_CHALLENGE
+        );
       }
     }
 

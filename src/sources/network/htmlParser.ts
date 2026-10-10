@@ -106,6 +106,7 @@ export class HtmlElementList {
 export interface HtmlQueryFunction {
   (selectorOrElement: string | HtmlElementWrapper | HTMLElement | null | undefined): HtmlElementList;
   root: HTMLElement;
+  html(): string;
 }
 
 export function loadHtml(html: string): HtmlQueryFunction {
@@ -154,6 +155,7 @@ export function loadHtml(html: string): HtmlQueryFunction {
   }) as HtmlQueryFunction;
 
   queryFn.root = root;
+  queryFn.html = () => root.innerHTML || html;
   return queryFn;
 }
 

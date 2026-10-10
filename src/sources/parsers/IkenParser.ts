@@ -10,6 +10,8 @@ import {
   SourceFilter,
   SourceManga,
   SourcePage,
+  SourceSortOption,
+  SourceTag,
 } from '../types';
 import { sourceHttpClient, DEFAULT_USER_AGENT } from '../network/httpClient';
 
@@ -33,9 +35,44 @@ export class IkenParser extends BaseParser {
     };
   }
 
+  public override getAvailableSorts(): SourceSortOption[] {
+    return [
+      { id: 'popular', label: 'Most Popular' },
+      { id: 'latest', label: 'Latest Chapter' },
+    ];
+  }
+
+  public override async getAvailableTags(): Promise<SourceTag[]> {
+    return [
+      { id: 'Action', label: 'Action', group: 'Genre' },
+      { id: 'Fantasy', label: 'Fantasy', group: 'Genre' },
+      { id: 'Manhwa', label: 'Manhwa', group: 'Genre' },
+      { id: 'Adventure', label: 'Adventure', group: 'Genre' },
+      { id: 'Martial Arts', label: 'Martial Arts', group: 'Genre' },
+      { id: 'Comedy', label: 'Comedy', group: 'Genre' },
+      { id: 'Drama', label: 'Drama', group: 'Genre' },
+      { id: 'Mystery', label: 'Mystery', group: 'Genre' },
+      { id: 'Romance', label: 'Romance', group: 'Genre' },
+      { id: 'Sci-Fi', label: 'Sci-Fi', group: 'Genre' },
+      { id: 'Supernatural', label: 'Supernatural', group: 'Genre' },
+      { id: 'Historical', label: 'Historical', group: 'Genre' },
+      { id: 'Horror', label: 'Horror', group: 'Genre' },
+      { id: 'Psychological', label: 'Psychological', group: 'Genre' },
+      { id: 'School Life', label: 'School Life', group: 'Genre' },
+      { id: 'Shounen', label: 'Shounen', group: 'Genre' },
+      { id: 'Slice of Life', label: 'Slice of Life', group: 'Genre' },
+      { id: 'Tragedy', label: 'Tragedy', group: 'Genre' },
+    ];
+  }
+
   public async getList(filter: SourceFilter): Promise<SourceManga[]> {
     const page = filter.page || 1;
-    const query = filter.query ? encodeURIComponent(filter.query.trim()) : '';
+    const searchTerm = filter.query?.trim()
+      ? filter.query.trim()
+      : filter.tags && filter.tags.length > 0
+      ? filter.tags[0]
+      : '';
+    const query = encodeURIComponent(searchTerm);
 
     const url = `${this.apiBaseUrl}/api/query?page=${page}&perPage=18&searchTerm=${query}`;
 
@@ -56,15 +93,61 @@ export class IkenParser extends BaseParser {
 
     const posts = this.extractItems(data);
 
+    if (posts.length === 0 && !query) {
+      // HTML fallback for series catalog if API returns empty
+      try {
+        const $ = await this.fetchHtml(`${this.apiBaseUrl}/series?page=${page}`);
+        const scraped: SourceManga[] = [];
+        $('a[href*="/series/"]').each((_, el) => {
+          const $a = $(el);
+          const href = $a.attr('href') || '';
+          const match = href.match(/\/series\/([^/?#]+)$/i);
+          if (match && match[1] && !['series', 'all', 'genres', 'filter'].includes(match[1])) {
+            const slug = match[1];
+            if (!scraped.some((s) => s.id.endsWith(`:${slug}`))) {
+              const title =
+                this.cleanText($a.find('h2, h3, h4, p, span').first().text()) ||
+                $a.text().trim();
+              const img =
+                $a.find('img').first().attr('src') ||
+                $a.find('img').first().attr('data-src');
+              if (title) {
+                scraped.push({
+                  id: `${this.metadata.id}:${slug}`,
+                  sourceId: this.metadata.id,
+                  title,
+                  url: `/series/${slug}`,
+                  publicUrl: `${this.apiBaseUrl}/series/${slug}`,
+                  coverUrl: img ? this.toAbsoluteUrl(img) : null,
+                });
+              }
+            }
+          }
+        });
+        if (scraped.length > 0) return scraped;
+      } catch {
+        // ignore
+      }
+    }
+
     return posts.map((item: any) => {
       const slug = item.slug || String(item.id);
       const title = item.postTitle || item.title || slug;
 
       let coverUrl: string | null = null;
-      if (item.featuredImage) {
-        coverUrl = item.featuredImage.startsWith('http')
-          ? item.featuredImage
-          : `https://${this.metadata.domain}/${item.featuredImage.replace(/^\/+/, '')}`;
+      const rawCover =
+        item.featuredImage ||
+        item.featured_image ||
+        item.cover ||
+        item.coverUrl ||
+        item.thumbnail ||
+        item.image ||
+        item.poster ||
+        item.featuredImageUrl;
+      if (rawCover) {
+        coverUrl = rawCover.startsWith('http')
+          ? rawCover
+          : `https://${this.metadata.domain}/${rawCover.replace(/^\/+/, '')}`;
       }
 
       let rating: number | undefined = undefined;
@@ -80,6 +163,23 @@ export class IkenParser extends BaseParser {
         }
       }
 
+      const authors: string[] = [];
+      if (typeof item.author === 'string' && item.author.trim()) {
+        authors.push(this.cleanText(item.author));
+      } else if (typeof item.postAuthor === 'string' && item.postAuthor.trim()) {
+        authors.push(this.cleanText(item.postAuthor));
+      } else if (typeof item.author?.name === 'string') {
+        authors.push(this.cleanText(item.author.name));
+      } else if (Array.isArray(item.authors)) {
+        for (const a of item.authors) {
+          const name = typeof a === 'string' ? a : a?.name;
+          if (name) authors.push(this.cleanText(name));
+        }
+      }
+
+      const rawDesc = item.postContent || item.description || item.summary || '';
+      const description = rawDesc ? this.stripHtml(rawDesc) : undefined;
+
       return {
         id: `${this.metadata.id}:${slug}`,
         sourceId: this.metadata.id,
@@ -88,10 +188,163 @@ export class IkenParser extends BaseParser {
         publicUrl: `${this.apiBaseUrl}/series/${slug}`,
         coverUrl,
         rating,
+        authors: authors.length ? authors : undefined,
+        description,
         tags: genres.slice(0, 15),
         state: item.seriesStatus === 'COMPLETED' ? 'completed' : 'ongoing',
       };
     });
+  }
+
+  /**
+   * Helper to locate post metadata and postId by slug using API queries and HTML SSR
+   */
+  private async fetchPost(
+    slug: string,
+    titleHint?: string
+  ): Promise<{ post: any; postId?: number | string; html?: string; chapters?: any[] }> {
+    const cleanSlug = slug.trim().toLowerCase();
+
+    // 1. Search with title hint or slug with spaces
+    const queries = [
+      titleHint ? titleHint.trim() : '',
+      slug.replace(/[-_]+/g, ' ').trim(),
+      slug.trim(),
+    ].filter(Boolean);
+
+    for (const q of queries) {
+      try {
+        const searchUrl = `${this.apiBaseUrl}/api/query?searchTerm=${encodeURIComponent(q)}&perPage=10`;
+        const res = await sourceHttpClient.fetchJson<any>(searchUrl, {
+          sourceId: this.metadata.name,
+          referer: `${this.apiBaseUrl}/`,
+        });
+        const items = this.extractItems(res);
+        const exact = items.find((it: any) => {
+          const itSlug = (it.slug || String(it.id || '')).trim().toLowerCase();
+          return itSlug === cleanSlug;
+        });
+        if (exact) {
+          const postId = exact.id ?? exact.postId ?? exact.seriesId;
+          return { post: exact, postId };
+        }
+      } catch {
+        // try next query
+      }
+    }
+
+    // 2. Search in general query list
+    try {
+      const listData = await sourceHttpClient.fetchJson<any>(
+        `${this.apiBaseUrl}/api/query?perPage=50`,
+        {
+          sourceId: this.metadata.name,
+          referer: `${this.apiBaseUrl}/`,
+        }
+      );
+      const items = this.extractItems(listData);
+      const found = items.find((it: any) => {
+        const itSlug = (it.slug || String(it.id || '')).trim().toLowerCase();
+        return itSlug === cleanSlug;
+      });
+      if (found) {
+        const postId = found.id ?? found.postId ?? found.seriesId;
+        return { post: found, postId };
+      }
+    } catch {
+      // fallback to HTML
+    }
+
+    // 3. Fallback: Fetch Series HTML page (SSR / TanStack Router)
+    try {
+      const seriesPageUrl = `${this.apiBaseUrl}/series/${slug}`;
+      const $ = await this.fetchHtml(seriesPageUrl);
+      const htmlText = $.html() || '';
+
+      // Extract postId
+      let postId: string | undefined = undefined;
+      const idMatch =
+        htmlText.match(new RegExp(`id\\s*:\\s*(\\d+)\\s*,\\s*slug\\s*:\\s*["']${slug}["']`, 'i')) ||
+        htmlText.match(new RegExp(`slug\\s*:\\s*["']${slug}["'][\\s\\S]*?id\\s*:\\s*(\\d+)`, 'i')) ||
+        htmlText.match(/post:\s*\{[^}]*?id\s*:\s*(\d+)/i) ||
+        htmlText.match(/postId["']?\s*[:=]\s*["']?(\d+)/i);
+      if (idMatch && idMatch[1]) {
+        postId = idMatch[1];
+      }
+
+      // Extract description
+      let description = '';
+      const descMatch = htmlText.match(/postContent\s*:\s*"([^"]+)"/i);
+      if (descMatch && descMatch[1]) {
+        description = descMatch[1]
+          .replace(/\\x3C/g, '<')
+          .replace(/\\"/g, '"')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+      if (!description) {
+        const metaDesc =
+          $('meta[property="og:description"]').attr('content') ||
+          $('meta[name="description"]').attr('content') ||
+          '';
+        const descText = this.stripHtml(
+          $('[class*="description"], [class*="synopsis"], .description, .synopsis, p.text-sm').first().text()
+        );
+        description =
+          !metaDesc || /read free|vortex scans/i.test(metaDesc)
+            ? descText
+            : this.cleanText(metaDesc);
+      }
+
+      // Extract title
+      const titleMatch = htmlText.match(/postTitle\s*:\s*"([^"]+)"/i);
+      const postTitle = titleMatch ? titleMatch[1] : this.cleanText($('h1').first().text());
+
+      // Extract cover
+      const coverMatch = htmlText.match(/featuredImage\s*:\s*"([^"]+)"/i);
+      const featuredImage = coverMatch
+        ? coverMatch[1]
+        : $('meta[property="og:image"]').attr('content') ||
+          $('img[src*="featured"], img[src*="cover"]').first().attr('src');
+
+      // Extract author
+      const authorMatch = htmlText.match(/author\s*:\s*"([^"]+)"/i);
+      const artistMatch = htmlText.match(/artist\s*:\s*"([^"]+)"/i);
+      const author = authorMatch && authorMatch[1].trim() ? authorMatch[1] : undefined;
+      const artist = artistMatch && artistMatch[1].trim() ? artistMatch[1] : undefined;
+
+      // Extract regex chapters from HTML
+      const chRegex = /\{id:(\d+),slug:"([^"]+)",number:([\d.]+)(?:,title:"([^"]*)")?/g;
+      const parsedChapters: any[] = [];
+      let m;
+      while ((m = chRegex.exec(htmlText)) !== null) {
+        parsedChapters.push({
+          id: m[1],
+          slug: m[2],
+          number: parseFloat(m[3]),
+          title: m[4] || '',
+        });
+      }
+
+      const postObj = {
+        id: postId,
+        slug,
+        postTitle,
+        description,
+        postContent: description,
+        featuredImage,
+        author,
+        artist,
+        chapters: parsedChapters,
+      };
+
+      return { post: postObj, postId, html: htmlText, chapters: parsedChapters };
+    } catch {
+      // ignore
+    }
+
+    return { post: null };
   }
 
   public async getDetails(manga: SourceManga): Promise<SourceManga> {
@@ -102,51 +355,73 @@ export class IkenParser extends BaseParser {
         : manga.id.replace(new RegExp(`^${this.metadata.id}:`), '');
 
     try {
-      let post: any = null;
-      try {
-        const data = await sourceHttpClient.fetchJson<any>(
-          `${this.apiBaseUrl}/api/query?slug=${encodeURIComponent(slug)}`,
-          {
-            sourceId: this.metadata.name,
-            referer: `${this.apiBaseUrl}/`,
+      const { post } = await this.fetchPost(slug, manga.title);
+
+      if (post) {
+        const genres: string[] = [];
+        if (Array.isArray(post.genres)) {
+          for (const g of post.genres) {
+            const name = typeof g === 'string' ? g : g?.name || g?.title;
+            if (name) genres.push(name);
           }
-        );
-        post = this.extractItems(data)[0];
-      } catch {
-        // Fallback below
-      }
-
-      if (!post) {
-        const data = await sourceHttpClient.fetchJson<any>(
-          `${this.apiBaseUrl}/api/query?searchTerm=${encodeURIComponent(slug)}&perPage=1`,
-          {
-            sourceId: this.metadata.name,
-            referer: `${this.apiBaseUrl}/`,
-          }
-        );
-        post = this.extractItems(data)[0];
-      }
-
-      if (!post) return manga;
-
-      const genres: string[] = [];
-      if (Array.isArray(post.genres)) {
-        for (const g of post.genres) {
-          const name = typeof g === 'string' ? g : g?.name || g?.title;
-          if (name) genres.push(name);
         }
-      }
 
-      return {
-        ...manga,
-        title: post.postTitle || manga.title,
-        coverUrl: post.featuredImage || manga.coverUrl,
-        tags: genres.length ? genres.slice(0, 15) : manga.tags,
-        state: post.seriesStatus === 'COMPLETED' ? 'completed' : 'ongoing',
-      };
+        const authors: string[] = [];
+        if (typeof post.author === 'string' && post.author.trim()) {
+          authors.push(this.cleanText(post.author));
+        } else if (typeof post.postAuthor === 'string' && post.postAuthor.trim()) {
+          authors.push(this.cleanText(post.postAuthor));
+        } else if (typeof post.author?.name === 'string' && post.author.name.trim()) {
+          authors.push(this.cleanText(post.author.name));
+        } else if (Array.isArray(post.authors)) {
+          for (const a of post.authors) {
+            const name = typeof a === 'string' ? a : a?.name || a?.title;
+            if (name) authors.push(this.cleanText(name));
+          }
+        } else if (Array.isArray(post.taxonomies?.author)) {
+          for (const a of post.taxonomies.author) {
+            const name = typeof a === 'string' ? a : a?.name || a?.title;
+            if (name) authors.push(this.cleanText(name));
+          }
+        }
+        if (typeof post.artist === 'string' && post.artist.trim() && !authors.length) {
+          authors.push(this.cleanText(post.artist));
+        }
+
+        const rawDesc =
+          post.postContent ||
+          post.description ||
+          post.summary ||
+          post.content ||
+          post.excerpt ||
+          '';
+        const description = this.stripHtml(rawDesc) || manga.description;
+
+        const rawCover =
+          post.featuredImage ||
+          post.featured_image ||
+          post.cover ||
+          post.coverUrl ||
+          post.thumbnail ||
+          post.image ||
+          post.poster;
+        const coverUrl = rawCover ? this.toAbsoluteUrl(rawCover) : manga.coverUrl;
+
+        return {
+          ...manga,
+          title: this.cleanText(post.postTitle || post.title || manga.title),
+          coverUrl: coverUrl || manga.coverUrl,
+          description: description || manga.description,
+          authors: authors.length ? authors : manga.authors,
+          tags: genres.length ? genres.slice(0, 15) : manga.tags,
+          state: post.seriesStatus === 'COMPLETED' ? 'completed' : 'ongoing',
+        };
+      }
     } catch {
-      return manga;
+      // Fallback below
     }
+
+    return manga;
   }
 
   public async getChapters(manga: SourceManga): Promise<SourceChapter[]> {
@@ -157,39 +432,18 @@ export class IkenParser extends BaseParser {
         : manga.id.replace(new RegExp(`^${this.metadata.id}:`), '');
 
     try {
-      let post: any = null;
-      try {
-        const data = await sourceHttpClient.fetchJson<any>(
-          `${this.apiBaseUrl}/api/query?slug=${encodeURIComponent(slug)}`,
-          {
-            sourceId: this.metadata.name,
-            referer: `${this.apiBaseUrl}/`,
-          }
-        );
-        post = this.extractItems(data)[0];
-      } catch {
-        // Fallback below
-      }
-
-      if (!post) {
-        const data = await sourceHttpClient.fetchJson<any>(
-          `${this.apiBaseUrl}/api/query?searchTerm=${encodeURIComponent(slug)}&perPage=1`,
-          {
-            sourceId: this.metadata.name,
-            referer: `${this.apiBaseUrl}/`,
-          }
-        );
-        post = this.extractItems(data)[0];
-      }
-
-      const postId = post?.id ?? post?.series?.id ?? post?.seriesId;
+      const { post, postId, chapters: fallbackChapters } = await this.fetchPost(
+        slug,
+        manga.title
+      );
+      const effectivePostId = postId ?? post?.id ?? post?.series?.id ?? post?.seriesId;
       const postSlug = post?.slug ?? post?.series?.slug ?? slug;
 
       let chapters: any[] = [];
-      if (postId) {
+      if (effectivePostId) {
         try {
           const chapterData = await sourceHttpClient.fetchJson<any>(
-            `${this.apiBaseUrl}/api/chapters?postId=${encodeURIComponent(String(postId))}`,
+            `${this.apiBaseUrl}/api/chapters?postId=${encodeURIComponent(String(effectivePostId))}`,
             {
               sourceId: this.metadata.name,
               referer: `${this.apiBaseUrl}/`,
@@ -199,20 +453,28 @@ export class IkenParser extends BaseParser {
             ? chapterData.post.chapters
             : Array.isArray(chapterData?.chapters)
               ? chapterData.chapters
-              : [];
+              : Array.isArray(chapterData?.data)
+                ? chapterData.data
+                : [];
         } catch {
           // Fallback below
         }
       }
 
-      if (!chapters.length && Array.isArray(post?.chapters)) {
+      if (!chapters.length && Array.isArray(post?.chapters) && post.chapters.length > 0) {
         chapters = post.chapters;
+      }
+      if (!chapters.length && Array.isArray(fallbackChapters) && fallbackChapters.length > 0) {
+        chapters = fallbackChapters;
       }
 
       return chapters.map((ch: any, idx: number) => {
-        const num = typeof ch.number === 'number' ? ch.number : idx + 1;
+        const num =
+          typeof ch.number === 'number'
+            ? ch.number
+            : this.parseChapterNumber(ch.slug || ch.title || String(idx + 1));
         const chSlug = ch.slug || `chapter-${num}`;
-        const chName = ch.title || `Chapter ${num}`;
+        const chName = ch.title && ch.title.trim() ? ch.title.trim() : `Chapter ${num}`;
         const chUrl = `/series/${postSlug}/${chSlug}`;
 
         return {
@@ -346,11 +608,20 @@ export class IkenParser extends BaseParser {
   }
 
   private extractItems(data: any): any[] {
+    if (!data) return [];
     if (Array.isArray(data)) return data;
     if (Array.isArray(data?.posts)) return data.posts;
     if (Array.isArray(data?.data)) return data.data;
     if (Array.isArray(data?.data?.posts)) return data.data.posts;
-    return data?.data && typeof data.data === 'object' ? [data.data] : [];
+    if (Array.isArray(data?.data?.data)) return data.data.data;
+    if (Array.isArray(data?.data?.series)) return data.data.series;
+    if (Array.isArray(data?.series)) return data.series;
+    if (Array.isArray(data?.results)) return data.results;
+    if (Array.isArray(data?.items)) return data.items;
+    if (data?.post && typeof data.post === 'object') return [data.post];
+    if (data?.series && typeof data.series === 'object') return [data.series];
+    if (data?.data && typeof data.data === 'object' && !Array.isArray(data.data)) return [data.data];
+    return [];
   }
 
   private extractSlug(url: string): string {

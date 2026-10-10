@@ -26,13 +26,15 @@ import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as WebBrowser from 'expo-web-browser';
 import * as Haptics from 'expo-haptics';
+import { WebView } from 'react-native-webview';
 import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
 import { SourceManager } from '../../src/sources/SourceManager';
-import { CatalogSourceItem } from '../../src/sources/types';
+import { CatalogSourceItem, SourceTag, SourceSortOption } from '../../src/sources/types';
 import { CloudFlareCookieManager } from '../../src/sources/network/cloudflare';
+import { DEFAULT_USER_AGENT } from '../../src/sources/network/httpClient';
 import { triggerHaptic } from '../../src/utils/haptics';
 import {
   getPopularManga,
@@ -43,6 +45,7 @@ import {
   getBatchMangaStatistics,
 } from '../../src/api/mangadex';
 import type { Manga, SearchFilters } from '../../src/types';
+import { getLanguageInfo, detectMangaLanguage } from '../../src/utils/language';
 
 const STORAGE_KEY_INSTALLED_SOURCES = '@mangaapp_installed_sources_v2';
 
@@ -105,8 +108,8 @@ const CURATED_SOURCES: Record<string, CuratedSourceMeta> = {
     id: 'comick-fun',
     name: 'ComicK',
     displayName: 'ComicK',
-    domain: 'comick.io',
-    icon: 'https://www.google.com/s2/favicons?domain=comick.io&sz=64',
+    domain: 'comick.dev',
+    icon: 'https://www.google.com/s2/favicons?domain=comick.dev&sz=64',
     iconType: 'comick',
     letterColor: '#FFFFFF',
     bgColor: '#3B82F6',
@@ -305,20 +308,7 @@ const CONTENT_TYPES = [
   { id: 'comic', label: 'Comics' },
 ];
 
-const GENRE_CHIPS = [
-  { label: 'All', id: '' },
-  { label: 'Romance', id: '423e2eae-a7a2-4a8b-ac03-a8351462d71d' },
-  { label: 'Comedy', id: '4d32cc48-9f00-4cca-9b5a-a839f0764984' },
-  { label: 'Drama', id: 'b9af3a63-f058-424f-a1f0-a1f50431538c' },
-  { label: 'Fantasy', id: 'cdc58593-87dd-4cc7-bbc0-2ec27bf404cc' },
-  { label: 'Action', id: '391b0423-d847-456f-aff0-8b0cfc03066b' },
-  { label: 'Adventure', id: '87cc87cd-a395-47af-b27a-93258283bbc6' },
-  { label: 'Horror', id: 'cdad7e68-07dd-4270-a3ee-6344d6ee4321' },
-  { label: 'Sci-Fi', id: '256325d6-3d75-43c4-973c-ecd34df48668' },
-  { label: 'Mystery', id: 'ee9634b1-638e-4da0-a125-667adc0b4b24' },
-];
-
-const SORT_OPTIONS: { id: 'popular' | 'latest' | 'newest' | 'rating' | 'alphabetical'; label: string }[] = [
+const DEFAULT_SORT_OPTIONS: SourceSortOption[] = [
   { id: 'popular', label: 'Popular' },
   { id: 'latest', label: 'Latest Updates' },
   { id: 'newest', label: 'Newest Added' },
@@ -352,6 +342,7 @@ interface CatalogMangaItem {
   coverHeaders?: Record<string, string>;
   ratingPercent?: number | null;
   sourceId: string;
+  locale?: string;
 }
 
 /**
@@ -408,7 +399,7 @@ export function resolveSourceWebsiteUrl(
   if (sourceId === 'comix-to' || sourceId === 'comixto') return 'https://comix.to';
   if (sourceId === 'asurascans' || sourceId === 'asuracomic') return 'https://asuracomic.net';
   if (sourceId === 'mangapill') return 'https://mangapill.com';
-  if (sourceId === 'comick-fun' || sourceId === 'comick') return 'https://comick.io';
+  if (sourceId === 'comick-fun' || sourceId === 'comick') return 'https://comick.dev';
   if (sourceId === 'manganato') return 'https://manganato.com';
   if (sourceId === 'mangakakalot') return 'https://mangakakalot.com';
   if (sourceId === 'manhuafast') return 'https://manhuafast.com';
@@ -883,8 +874,11 @@ export default function ExtensionsScreen() {
     name: 'MangaDex',
     domain: 'mangadex.org',
   });
-  const [selectedSort, setSelectedSort] = useState<'popular' | 'latest' | 'newest' | 'rating' | 'alphabetical'>('popular');
+  const [selectedSort, setSelectedSort] = useState<string>('popular');
   const [selectedGenre, setSelectedGenre] = useState<string>('');
+  const [availableTags, setAvailableTags] = useState<SourceTag[]>([{ id: '', label: 'All' }]);
+  const [availableSorts, setAvailableSorts] = useState<SourceSortOption[]>(DEFAULT_SORT_OPTIONS);
+  const [isLoadingTags, setIsLoadingTags] = useState(false);
   const [isMangaSearchOpen, setIsMangaSearchOpen] = useState(false);
   const [mangaSearchQuery, setMangaSearchQuery] = useState('');
   const [debouncedMangaQuery, setDebouncedMangaQuery] = useState('');
@@ -903,6 +897,9 @@ export default function ExtensionsScreen() {
   const [modalError, setModalError] = useState<string | null>(null);
   const [modalIsCloudflare, setModalIsCloudflare] = useState(false);
   const [modalCfDomain, setModalCfDomain] = useState('');
+  const [isCfInAppModalOpen, setIsCfInAppModalOpen] = useState(false);
+  const [cfInAppUrl, setCfInAppUrl] = useState('');
+  const cfWebViewRef = useRef<any>(null);
   const [isCfCookieModalOpen, setIsCfCookieModalOpen] = useState(false);
   const [cfCookieInput, setCfCookieInput] = useState('');
   const [isModalLoading, setIsModalLoading] = useState(false);
@@ -1181,6 +1178,7 @@ export default function ExtensionsScreen() {
                 (parser!.metadata.id === 'hitomila' ? { Referer: 'https://hitomi.la/' } : undefined),
               ratingPercent: m.rating ? Math.round(m.rating > 10 ? m.rating : m.rating * 10) : null,
               sourceId: parser!.metadata.id,
+              locale: m.locale || detectMangaLanguage(m.title, undefined, m.tags, parser!.metadata.id),
             }));
 
             setModalMangas((prev) => (append ? [...prev, ...mapped] : mapped));
@@ -1200,6 +1198,7 @@ export default function ExtensionsScreen() {
               err.message.toLowerCase().includes('turnstile')));
         const cfDomain =
           err.domain ||
+          (activeMangaSource.id === 'comick-fun' || activeMangaSource.id === 'comick' ? 'comick.dev' : '') ||
           activeMangaSource.domain ||
           (activeMangaSource.id === 'comix-to' ? 'comix.to' : '') ||
           (activeMangaSource.id === 'reimanga' ? 'reimanga.net' : '');
@@ -1207,9 +1206,9 @@ export default function ExtensionsScreen() {
         setModalCfDomain(cfDomain);
 
         const errMsg = isCf
-          ? `${activeMangaSource.name} is protected by Cloudflare Turnstile anti-bot verification. Open in browser to complete verification, or paste your clearance cookie.`
+          ? `${activeMangaSource.name} requires a quick bot check to browse.`
           : err.response?.status === 404
-          ? 'Source catalog page returned 404 Not Found. The layout or API path may have changed.'
+          ? 'Catalog page not found. Please try again later.'
           : err.message || 'Unable to connect to source server.';
         if (!append) {
           setModalMangas([]);
@@ -1232,43 +1231,49 @@ export default function ExtensionsScreen() {
       allCatalog
     );
 
-    if (modalIsCloudflare) {
-      isSolvingCloudflareRef.current = true;
-    }
-
     try {
       if (Platform.OS === 'web') {
         if (typeof window !== 'undefined') {
-          if (modalIsCloudflare) {
-            const handleWindowFocus = () => {
-              window.removeEventListener('focus', handleWindowFocus);
-              if (isSolvingCloudflareRef.current) {
-                isSolvingCloudflareRef.current = false;
-                setModalError(null);
-                setModalIsCloudflare(false);
-                loadModalMangas(1, false);
-              }
-            };
-            window.addEventListener('focus', handleWindowFocus);
-          }
           window.open(targetUrl, '_blank', 'noopener,noreferrer');
         }
       } else {
         await WebBrowser.openBrowserAsync(targetUrl);
-        // Triggers when in-app browser is dismissed/closed on mobile
-        if (modalIsCloudflare && isSolvingCloudflareRef.current) {
-          isSolvingCloudflareRef.current = false;
-          setModalError(null);
-          setModalIsCloudflare(false);
-          loadModalMangas(1, false);
-        }
       }
     } catch {
       Linking.openURL(targetUrl).catch(() => {});
     }
-  }, [activeMangaSource, modalCfDomain, modalIsCloudflare, allCatalog, loadModalMangas]);
+  }, [activeMangaSource, modalCfDomain, allCatalog]);
 
-  const handleSolveCloudflare = handleOpenActiveSourceWebsite;
+  const handleSolveCloudflare = useCallback(() => {
+    triggerHaptic();
+    const targetUrl = resolveSourceWebsiteUrl(
+      activeMangaSource.id,
+      modalCfDomain || activeMangaSource.domain,
+      undefined,
+      allCatalog
+    );
+
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined') {
+        const handleWindowFocus = () => {
+          window.removeEventListener('focus', handleWindowFocus);
+          if (isSolvingCloudflareRef.current) {
+            isSolvingCloudflareRef.current = false;
+            setModalError(null);
+            setModalIsCloudflare(false);
+            loadModalMangas(1, false);
+          }
+        };
+        window.addEventListener('focus', handleWindowFocus);
+        isSolvingCloudflareRef.current = true;
+        window.open(targetUrl, '_blank', 'noopener,noreferrer');
+      }
+    } else {
+      // In-App verification modal keeps the user completely inside Yomite
+      setCfInAppUrl(targetUrl);
+      setIsCfInAppModalOpen(true);
+    }
+  }, [activeMangaSource, modalCfDomain, allCatalog, loadModalMangas]);
 
   // Auto-reload manga cards when returning back to Yomite app from external browser
   useEffect(() => {
@@ -1312,6 +1317,54 @@ export default function ExtensionsScreen() {
     }, [])
   );
 
+  const loadSourceFilters = useCallback(async (sourceId: string) => {
+    setIsLoadingTags(true);
+    try {
+      let parser = SourceManager.getParser(sourceId);
+      if (!parser) {
+        const item = allCatalog.find((c) => c.id === sourceId);
+        if (item) {
+          parser = SourceManager.createParserForCatalogSource(item) || undefined;
+        }
+      }
+
+      let tags: SourceTag[] = [];
+      let sorts: SourceSortOption[] = DEFAULT_SORT_OPTIONS;
+
+      if (parser) {
+        if (parser.getAvailableTags) {
+          try {
+            tags = await parser.getAvailableTags();
+          } catch (e) {
+            console.warn(`[Tags] Failed to fetch tags for ${sourceId}:`, e);
+          }
+        }
+        if (parser.getAvailableSorts) {
+          try {
+            const s = parser.getAvailableSorts();
+            if (Array.isArray(s) && s.length > 0) sorts = s;
+          } catch (e) {
+            console.warn(`[Sorts] Failed to fetch sorts for ${sourceId}:`, e);
+          }
+        }
+      }
+
+      setAvailableTags([{ id: '', label: 'All' }, ...(tags || [])]);
+      setAvailableSorts(sorts);
+
+      // If current selectedSort is not supported by this source, switch to its default/first sort
+      if (sorts.length > 0 && !sorts.some((s) => s.id === selectedSort)) {
+        setSelectedSort(sorts[0].id);
+      }
+    } catch (err) {
+      console.warn('Error loading source filters:', err);
+      setAvailableTags([{ id: '', label: 'All' }]);
+      setAvailableSorts(DEFAULT_SORT_OPTIONS);
+    } finally {
+      setIsLoadingTags(false);
+    }
+  }, [allCatalog, selectedSort]);
+
   // Restore catalog from deep link or browser refresh with reopenCatalog parameter
   useEffect(() => {
     if (reopenCatalog) {
@@ -1326,9 +1379,10 @@ export default function ExtensionsScreen() {
           domain: (src as any).domain,
         });
         setMangaModalVisible(true);
+        loadSourceFilters(src.id);
       }
     }
-  }, [reopenCatalog, displayGridSources, allCatalog]);
+  }, [reopenCatalog, displayGridSources, allCatalog, loadSourceFilters]);
 
   // Handle Android hardware back press when catalog is open
   useEffect(() => {
@@ -1364,7 +1418,8 @@ export default function ExtensionsScreen() {
     setDebouncedMangaQuery('');
     setIsMangaSearchOpen(false);
     setMangaModalVisible(true);
-  }, []);
+    loadSourceFilters(source.id);
+  }, [loadSourceFilters]);
 
   const handleLoadMoreModalMangas = useCallback(() => {
     if (!isModalLoading && !isModalLoadingMore && hasMoreMangas) {
@@ -2054,7 +2109,7 @@ export default function ExtensionsScreen() {
               >
                 <Ionicons name="filter-outline" size={14} color={colors.textSecondary} />
                 <Text style={[styles.sortFilterText, { color: colors.text }]}>
-                  {SORT_OPTIONS.find((s) => s.id === selectedSort)?.label || 'Popular'}
+                  {availableSorts.find((s) => s.id === selectedSort)?.label || selectedSort || 'Popular'}
                 </Text>
                 <Ionicons
                   name={sortPickerVisible ? 'chevron-up' : 'chevron-down'}
@@ -2064,18 +2119,18 @@ export default function ExtensionsScreen() {
               </Pressable>
             </View>
 
-            {/* Genre Filter Chips matching Image 2 */}
+            {/* Dynamic Genre / Tag / Category Filter Chips fetched from Source */}
             <View style={styles.genreChipsContainer}>
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.genreChipsScroll}
               >
-                {GENRE_CHIPS.map((genre) => {
+                {availableTags.map((genre) => {
                   const isSelected = selectedGenre === genre.id;
                   return (
                     <Pressable
-                      key={genre.label}
+                      key={genre.id ? `${genre.group || ''}_${genre.id}` : 'all'}
                       onPress={() => {
                         triggerHaptic();
                         setSelectedGenre(isSelected ? '' : genre.id);
@@ -2102,6 +2157,11 @@ export default function ExtensionsScreen() {
                     </Pressable>
                   );
                 })}
+                {isLoadingTags && (
+                  <View style={{ justifyContent: 'center', paddingHorizontal: 10 }}>
+                    <ActivityIndicator size="small" color={colors.accent} />
+                  </View>
+                )}
               </ScrollView>
             </View>
 
@@ -2111,87 +2171,172 @@ export default function ExtensionsScreen() {
                 <ActivityIndicator size="large" color={colors.accent} />
               </View>
             ) : modalError ? (
-              <View style={styles.modalEmptyBox}>
-                <Ionicons
-                  name={modalIsCloudflare ? 'shield-checkmark' : 'alert-circle-outline'}
-                  size={52}
-                  color={modalIsCloudflare ? '#F38020' : '#EF4444'}
-                />
-                <Text style={[styles.modalEmptyTitle, { color: colors.text }]}>
-                  {modalIsCloudflare
-                    ? `Cloudflare Challenge: ${activeMangaSource.name}`
-                    : `Unable to load from ${activeMangaSource.name}`}
-                </Text>
-                <Text style={[styles.modalEmptyDesc, { color: colors.textMuted }]}>
-                  {modalError}
-                </Text>
-
-                <View style={{ flexDirection: 'column', gap: 10, marginTop: 18, width: '100%', maxWidth: 360, alignItems: 'stretch' }}>
-                  {modalIsCloudflare && (
-                    <>
-                      <Pressable
-                        onPress={handleSolveCloudflare}
-                        style={[styles.modalRetryBtn, { backgroundColor: '#F38020', width: '100%', justifyContent: 'center' }]}
-                        aria-label="Solve Cloudflare in Browser"
-                      >
-                        <Ionicons name="globe" size={18} color="#FFFFFF" />
-                        <Text style={styles.modalRetryBtnText}>Open Browser to Solve Challenge</Text>
-                      </Pressable>
-                      <Text style={{ fontSize: 11, color: colors.textMuted, textAlign: 'center', marginTop: -4, marginBottom: 2 }}>
-                        After completing verification, return to Yomite to automatically reload manga cards.
-                      </Text>
-
-                      <Pressable
-                        onPress={handleOpenCookieModal}
-                        style={[
-                          styles.modalVisitBtn,
-                          {
-                            borderWidth: 0,
-                            backgroundColor: colors.surface,
-                            width: '100%',
-                            justifyContent: 'center',
-                          },
-                        ]}
-                        aria-label="Set Cloudflare Clearance Cookie"
-                      >
-                        <Ionicons name="key-outline" size={18} color={colors.text} />
-                        <Text style={[styles.modalVisitBtnText, { color: colors.text }]}>
-                          Paste Clearance Cookie (cf_clearance)
-                        </Text>
-                      </Pressable>
-                    </>
-                  )}
-
-                  <View style={{ flexDirection: 'row', gap: 10, width: '100%' }}>
-                    <Pressable
-                      onPress={() => {
-                        triggerHaptic();
-                        loadModalMangas(1, false);
+              <View style={[styles.modalEmptyBox, { paddingHorizontal: 24, paddingVertical: 32 }]}>
+                {modalIsCloudflare ? (
+                  <View style={{ alignItems: 'center', width: '100%', maxWidth: 320 }}>
+                    {/* Flat Minimal Icon Badge */}
+                    <View
+                      style={{
+                        width: 54,
+                        height: 54,
+                        borderRadius: 18,
+                        backgroundColor: colors.surfaceElevated || colors.surface,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginBottom: 16,
+                        borderWidth: 1,
+                        borderColor: colors.border,
                       }}
-                      style={[styles.modalRetryBtn, { backgroundColor: colors.accent, flex: 1, justifyContent: 'center' }]}
-                      aria-label="Retry loading mangas"
                     >
-                      <Ionicons name="refresh" size={16} color="#FFFFFF" />
-                      <Text style={styles.modalRetryBtnText}>Retry</Text>
-                    </Pressable>
+                      <Ionicons name="shield-checkmark" size={26} color={colors.accent} />
+                    </View>
 
-                    {activeMangaSource.domain ? (
+                    {/* Friendly Flat Title & Subtitle */}
+                    <Text style={{ fontSize: 17, fontWeight: '700', color: colors.text, textAlign: 'center' }}>
+                      Verification Required
+                    </Text>
+                    <Text
+                      style={{
+                        fontSize: 13,
+                        color: colors.textMuted,
+                        textAlign: 'center',
+                        marginTop: 6,
+                        lineHeight: 18,
+                      }}
+                    >
+                      {activeMangaSource.name} needs a quick human check to browse titles.
+                    </Text>
+
+                    {/* Flat Modern Action Buttons */}
+                    <View style={{ flexDirection: 'row', gap: 10, marginTop: 22, width: '100%' }}>
                       <Pressable
                         onPress={handleSolveCloudflare}
-                        style={[
-                          styles.modalVisitBtn,
-                          { borderWidth: 0, backgroundColor: colors.surface, flex: 1, justifyContent: 'center' },
-                        ]}
-                        aria-label="Visit Source Website"
+                        style={{
+                          flex: 1,
+                          height: 44,
+                          borderRadius: Radius.md,
+                          backgroundColor: colors.accent,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                        aria-label="Verify with Source"
                       >
-                        <Ionicons name="open-outline" size={16} color={colors.text} />
-                        <Text style={[styles.modalVisitBtnText, { color: colors.text }]}>
-                          Visit Website
+                        <Ionicons name="shield-checkmark-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                        <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>
+                          Verify
                         </Text>
                       </Pressable>
-                    ) : null}
+
+                      <Pressable
+                        onPress={() => {
+                          triggerHaptic();
+                          loadModalMangas(1, false);
+                        }}
+                        style={{
+                          flex: 1,
+                          height: 44,
+                          borderRadius: Radius.md,
+                          backgroundColor: colors.surfaceElevated || colors.surface,
+                          borderWidth: 1,
+                          borderColor: colors.border,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                        aria-label="Retry loading mangas"
+                      >
+                        <Ionicons name="refresh" size={15} color={colors.text} style={{ marginRight: 6 }} />
+                        <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>
+                          Retry
+                        </Text>
+                      </Pressable>
+                    </View>
+
+                    {/* Subtle Manual Cookie Option */}
+                    <Pressable
+                      onPress={handleOpenCookieModal}
+                      hitSlop={10}
+                      style={{ marginTop: 16, paddingVertical: 4 }}
+                      aria-label="Enter clearance cookie manually"
+                    >
+                      <Text style={{ fontSize: 11, color: colors.textMuted }}>
+                        Paste cookie manually
+                      </Text>
+                    </Pressable>
                   </View>
-                </View>
+                ) : (
+                  <View style={{ alignItems: 'center', width: '100%', maxWidth: 320 }}>
+                    <View
+                      style={{
+                        width: 50,
+                        height: 50,
+                        borderRadius: 16,
+                        backgroundColor: colors.surfaceElevated || colors.surface,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginBottom: 14,
+                        borderWidth: 1,
+                        borderColor: colors.border,
+                      }}
+                    >
+                      <Ionicons name="alert-circle-outline" size={24} color="#EF4444" />
+                    </View>
+                    <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text, textAlign: 'center' }}>
+                      Unable to Load
+                    </Text>
+                    <Text style={{ fontSize: 13, color: colors.textMuted, textAlign: 'center', marginTop: 4 }}>
+                      {modalError}
+                    </Text>
+
+                    <View style={{ flexDirection: 'row', gap: 10, marginTop: 20, width: '100%' }}>
+                      <Pressable
+                        onPress={() => {
+                          triggerHaptic();
+                          loadModalMangas(1, false);
+                        }}
+                        style={{
+                          flex: 1,
+                          height: 44,
+                          borderRadius: Radius.md,
+                          backgroundColor: colors.accent,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                        aria-label="Retry loading mangas"
+                      >
+                        <Ionicons name="refresh" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                        <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>
+                          Retry
+                        </Text>
+                      </Pressable>
+
+                      {activeMangaSource.domain ? (
+                        <Pressable
+                          onPress={handleOpenActiveSourceWebsite}
+                          style={{
+                            flex: 1,
+                            height: 44,
+                            borderRadius: Radius.md,
+                            backgroundColor: colors.surfaceElevated || colors.surface,
+                            borderWidth: 1,
+                            borderColor: colors.border,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                          aria-label="Visit Website"
+                        >
+                          <Ionicons name="open-outline" size={15} color={colors.text} style={{ marginRight: 6 }} />
+                          <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>
+                            Website
+                          </Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  </View>
+                )}
               </View>
             ) : modalMangas.length === 0 ? (
               <View style={styles.modalEmptyBox}>
@@ -2260,10 +2405,27 @@ export default function ExtensionsScreen() {
                             <Text style={styles.percentBadgeText}>{item.ratingPercent}%</Text>
                           </View>
                         )}
+
+                        {/* Language Flag Badge e.g. 🇯🇵 JA, 🇨🇳 ZH, 🇬🇧 EN - NHentai only */}
+                        {(item.sourceId === 'nhentai' || activeMangaSource?.id === 'nhentai') && item.locale ? (
+                          <View style={styles.localeBadge}>
+                            <Image
+                              source={{ uri: getLanguageInfo(item.locale).flagUrl }}
+                              style={styles.localeFlagImage}
+                              contentFit="cover"
+                            />
+                            <Text style={styles.localeBadgeText}>
+                              {item.locale.toUpperCase()}
+                            </Text>
+                          </View>
+                        ) : null}
                       </View>
 
-                      {/* Title truncated to 2 lines matching Image 2 */}
+                      {/* Title truncated to 2 lines matching Image 2 (Flag prefix for NHentai only) */}
                       <Text numberOfLines={2} style={[styles.mangaCardTitle, { color: colors.text }]}>
+                        {(item.sourceId === 'nhentai' || activeMangaSource?.id === 'nhentai') && item.locale
+                          ? `${getLanguageInfo(item.locale).flag} `
+                          : ''}
                         {item.title}
                       </Text>
                     </Pressable>
@@ -2312,7 +2474,7 @@ export default function ExtensionsScreen() {
                         SORT BY
                       </Text>
                     </View>
-                    {SORT_OPTIONS.map((opt) => {
+                    {availableSorts.map((opt) => {
                       const isSelected = selectedSort === opt.id;
                       return (
                         <Pressable
@@ -2359,11 +2521,11 @@ export default function ExtensionsScreen() {
             {isCfCookieModalOpen && (
               <ConfirmationModal
                 visible={isCfCookieModalOpen}
-                title="Cloudflare Cookie"
-                message={`Paste the 'cf_clearance' cookie from your browser session on ${modalCfDomain || activeMangaSource.name}:`}
+                title="Clearance Cookie"
+                message={`Paste the clearance cookie for ${modalCfDomain || activeMangaSource.name}:`}
                 iconName="shield-checkmark-outline"
-                iconColor="#F38020"
-                confirmText="Save & Retry"
+                iconColor={colors.accent}
+                confirmText="Save & Continue"
                 cancelText="Cancel"
                 onConfirm={handleSaveCookie}
                 onCancel={() => setIsCfCookieModalOpen(false)}
@@ -2380,7 +2542,7 @@ export default function ExtensionsScreen() {
                       minHeight: 56,
                       textAlignVertical: 'top',
                     }}
-                    placeholder="cf_clearance=... or paste full cookie string"
+                    placeholder="cf_clearance=... or full cookie"
                     placeholderTextColor={colors.textMuted}
                     value={cfCookieInput}
                     onChangeText={setCfCookieInput}
@@ -2405,6 +2567,152 @@ export default function ExtensionsScreen() {
                   )}
                 </View>
               </ConfirmationModal>
+            )}
+
+            {/* In-App Verification Modal */}
+            {isCfInAppModalOpen && (
+              <Modal
+                visible={isCfInAppModalOpen}
+                animationType="slide"
+                presentationStyle="pageSheet"
+                onRequestClose={() => setIsCfInAppModalOpen(false)}
+              >
+                <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+                  {/* Clean Flat Header */}
+                  <View
+                    style={{
+                      height: 54,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      paddingHorizontal: 16,
+                      borderBottomWidth: 1,
+                      borderBottomColor: colors.border,
+                      backgroundColor: colors.surface,
+                    }}
+                  >
+                    <Pressable
+                      onPress={() => setIsCfInAppModalOpen(false)}
+                      hitSlop={12}
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: 18,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: colors.surfaceElevated || colors.surface,
+                      }}
+                      aria-label="Close verification modal"
+                    >
+                      <Ionicons name="close" size={20} color={colors.text} />
+                    </Pressable>
+
+                    <View style={{ alignItems: 'center' }}>
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text }}>
+                        {activeMangaSource.name}
+                      </Text>
+                      <Text style={{ fontSize: 11, color: colors.textMuted }}>
+                        {modalCfDomain || activeMangaSource.domain}
+                      </Text>
+                    </View>
+
+                    <Pressable
+                      onPress={async () => {
+                        triggerHaptic();
+                        setIsCfInAppModalOpen(false);
+                        setModalError(null);
+                        setModalIsCloudflare(false);
+                        loadModalMangas(1, false);
+                      }}
+                      hitSlop={8}
+                      style={{
+                        paddingHorizontal: 14,
+                        paddingVertical: 7,
+                        borderRadius: Radius.md,
+                        backgroundColor: colors.accent,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                      }}
+                      aria-label="Done with verification"
+                    >
+                      <Ionicons name="checkmark" size={16} color="#FFFFFF" style={{ marginRight: 4 }} />
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#FFFFFF' }}>
+                        Done
+                      </Text>
+                    </Pressable>
+                  </View>
+
+                  {/* WebView Body */}
+                  {Platform.OS !== 'web' ? (
+                    <WebView
+                      ref={cfWebViewRef}
+                      source={{ uri: cfInAppUrl }}
+                      userAgent={DEFAULT_USER_AGENT}
+                      javaScriptEnabled={true}
+                      domStorageEnabled={true}
+                      sharedCookiesEnabled={true}
+                      thirdPartyCookiesEnabled={true}
+                      style={{ flex: 1, backgroundColor: colors.background }}
+                      injectedJavaScript={`
+                        (function() {
+                          var interval = setInterval(function() {
+                            var cookie = document.cookie || '';
+                            var title = (document.title || '').toLowerCase();
+                            var isChallenge = title.includes('just a moment') || title.includes('turnstile') || document.querySelector('#challenge-running');
+                            if (cookie.includes('cf_clearance') || (!isChallenge && title.length > 0)) {
+                              window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
+                                type: 'CF_SOLVED',
+                                cookie: cookie
+                              }));
+                            }
+                          }, 1200);
+                        })();
+                        true;
+                      `}
+                      onMessage={async (event) => {
+                        try {
+                          const parsed = JSON.parse(event.nativeEvent.data);
+                          if (parsed.type === 'CF_SOLVED') {
+                            const domain = modalCfDomain || activeMangaSource.domain;
+                            if (parsed.cookie && domain) {
+                              const match = parsed.cookie.match(/cf_clearance=([^;]+)/);
+                              if (match) {
+                                await CloudFlareCookieManager.setCookie(domain, match[0]);
+                              }
+                            }
+                            setIsCfInAppModalOpen(false);
+                            setModalError(null);
+                            setModalIsCloudflare(false);
+                            loadModalMangas(1, false);
+                          }
+                        } catch {}
+                      }}
+                    />
+                  ) : (
+                    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+                      <Text style={{ color: colors.text, fontSize: 14, textAlign: 'center', marginBottom: 16 }}>
+                        Verification opened in a new tab. When finished, click Done.
+                      </Text>
+                      <Pressable
+                        onPress={() => {
+                          setIsCfInAppModalOpen(false);
+                          setModalError(null);
+                          setModalIsCloudflare(false);
+                          loadModalMangas(1, false);
+                        }}
+                        style={{
+                          paddingHorizontal: 20,
+                          paddingVertical: 10,
+                          borderRadius: Radius.md,
+                          backgroundColor: colors.accent,
+                        }}
+                      >
+                        <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>Done</Text>
+                      </Pressable>
+                    </View>
+                  )}
+                </SafeAreaView>
+              </Modal>
             )}
           </SafeAreaView>
         </Modal>
@@ -2853,6 +3161,29 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 10,
     fontWeight: Typography.weights.bold,
+  },
+  localeBadge: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3.5,
+    backgroundColor: 'rgba(15, 23, 42, 0.82)',
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  localeFlagImage: {
+    width: 14,
+    height: 10,
+    borderRadius: 1.5,
+  },
+  localeBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 9.5,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   mangaCardTitle: {
     fontSize: 12,

@@ -11,7 +11,7 @@ export interface LanguageInfo {
 }
 
 const LANGUAGE_MAP: Record<string, { name: string; flag: string; countryCode: string }> = {
-  en: { name: 'English', flag: '🇺🇸', countryCode: 'us' },
+  en: { name: 'English', flag: '🇬🇧', countryCode: 'gb' },
   'en-us': { name: 'English (US)', flag: '🇺🇸', countryCode: 'us' },
   'en-gb': { name: 'English (UK)', flag: '🇬🇧', countryCode: 'gb' },
   ja: { name: 'Japanese', flag: '🇯🇵', countryCode: 'jp' },
@@ -91,4 +91,59 @@ export function getLanguageInfo(code: string): LanguageInfo {
     countryCode: 'un',
     flagUrl: 'https://flagcdn.com/w40/un.png',
   };
+}
+
+/**
+ * Detects the language code ('en', 'ja', 'zh', etc.) from title, tag IDs, or tags
+ */
+export function detectMangaLanguage(
+  title?: string,
+  tagIds?: number[],
+  tags?: string[],
+  sourceId?: string
+): string | undefined {
+  // 1. NHentai tag IDs (12227: english, 29963: chinese, 6346: japanese)
+  if (Array.isArray(tagIds)) {
+    if (tagIds.includes(12227)) return 'en';
+    if (tagIds.includes(29963)) return 'zh';
+    if (tagIds.includes(6346)) return 'ja';
+  }
+
+  // 2. Tags list inspection
+  if (Array.isArray(tags)) {
+    for (const t of tags) {
+      const lower = t.toLowerCase().trim();
+      if (lower === 'english' || lower === 'language:english' || lower === 'lang:english') return 'en';
+      if (lower === 'chinese' || lower === 'language:chinese' || lower === 'lang:chinese') return 'zh';
+      if (lower === 'japanese' || lower === 'language:japanese' || lower === 'lang:japanese') return 'ja';
+    }
+  }
+
+  // 3. Title patterns inspection
+  if (title) {
+    const t = title.toLowerCase();
+    // English indicators
+    if (/(?:\[|\()(?:english|eng)(?:\]|\))/i.test(t)) {
+      return 'en';
+    }
+    // Chinese indicators
+    if (/(?:\[|\()(?:chinese|中国翻訳|中國翻譯|漢化|汉化|中国語|個人漢化|臉腫漢化組|绅士仓库汉化)(?:\]|\))/i.test(title)) {
+      return 'zh';
+    }
+    // Japanese indicators
+    if (/(?:\[|\()(?:japanese|dl版|digital|無修正)(?:\]|\))/i.test(title)) {
+      return 'ja';
+    }
+    // Japanese Kana characters in title
+    if (/[\u3040-\u309F\u30A0-\u30FF]/.test(title)) {
+      return 'ja';
+    }
+  }
+
+  // 4. Default for Japanese-origin sources like NHentai / Hitomi
+  if (sourceId === 'nhentai' || sourceId === 'hitomila') {
+    return 'ja';
+  }
+
+  return undefined;
 }

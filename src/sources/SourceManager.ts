@@ -243,12 +243,12 @@ class SourceManagerService {
     const comick = new ComickParser({
       id: 'comick-fun',
       name: 'ComicK',
-      domain: 'comick.io',
-      baseUrl: 'https://comick.io',
+      domain: 'comick.dev',
+      baseUrl: 'https://comick.dev',
       locale: 'all',
       isNsfw: false,
       version: '1.0.0',
-      icon: 'https://www.google.com/s2/favicons?domain=comick.io&sz=64',
+      icon: 'https://www.google.com/s2/favicons?domain=comick.dev&sz=64',
       description: 'Multi-lingual scanlation aggregator with official metadata.',
       availableSortOrders: ['popular', 'latest'],
       enabled: true,
@@ -372,6 +372,7 @@ class SourceManagerService {
     if (
       item.id === 'comick-fun' ||
       item.id === 'comick' ||
+      item.domain === 'comick.dev' ||
       item.domain === 'comick.io' ||
       item.domain === 'comick.fun'
     ) {

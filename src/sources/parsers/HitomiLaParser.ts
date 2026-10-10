@@ -10,6 +10,8 @@ import {
   SourceFilter,
   SourceManga,
   SourcePage,
+  SourceSortOption,
+  SourceTag,
 } from '../types';
 import { sourceHttpClient, DEFAULT_USER_AGENT } from '../network/httpClient';
 
@@ -34,6 +36,41 @@ export class HitomiLaParser extends BaseParser {
       Referer: 'https://hitomi.la/',
       Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
     };
+  }
+
+  public override getAvailableSorts(): SourceSortOption[] {
+    return [
+      { id: 'popular', label: 'Popular Today' },
+      { id: 'latest', label: 'Latest Galleries' },
+    ];
+  }
+
+  public override async getAvailableTags(): Promise<SourceTag[]> {
+    return [
+      // Categories / Types
+      { id: 'type:doujinshi', label: 'Doujinshi', group: 'Type' },
+      { id: 'type:manga', label: 'Manga', group: 'Type' },
+      { id: 'type:artistcg', label: 'Artist CG', group: 'Type' },
+      { id: 'type:gamecg', label: 'Game CG', group: 'Type' },
+      { id: 'type:anime', label: 'Anime', group: 'Type' },
+      // Popular Tags
+      { id: 'tag:female:sole_female', label: 'Sole Female', group: 'Tag' },
+      { id: 'tag:male:sole_male', label: 'Sole Male', group: 'Tag' },
+      { id: 'tag:female:big_breasts', label: 'Big Breasts', group: 'Tag' },
+      { id: 'tag:female:schoolgirl_uniform', label: 'Schoolgirl Uniform', group: 'Tag' },
+      { id: 'tag:female:stockings', label: 'Stockings', group: 'Tag' },
+      { id: 'tag:female:anal', label: 'Anal', group: 'Tag' },
+      { id: 'tag:female:milf', label: 'MILF', group: 'Tag' },
+      { id: 'tag:group', label: 'Group', group: 'Tag' },
+      { id: 'tag:female:nakadashi', label: 'Nakadashi', group: 'Tag' },
+      { id: 'tag:female:blowjob', label: 'Blowjob', group: 'Tag' },
+      { id: 'tag:yuri', label: 'Yuri', group: 'Tag' },
+      { id: 'tag:female:glasses', label: 'Glasses', group: 'Tag' },
+      { id: 'tag:female:maid', label: 'Maid', group: 'Tag' },
+      { id: 'tag:female:swimsuit', label: 'Swimsuit', group: 'Tag' },
+      { id: 'tag:female:futanari', label: 'Futanari', group: 'Tag' },
+      { id: 'tag:female:incest', label: 'Incest', group: 'Tag' },
+    ];
   }
 
   private async refreshGg(): Promise<void> {
@@ -207,72 +244,125 @@ export class HitomiLaParser extends BaseParser {
   private async fetchGallery(id: number): Promise<SourceManga | null> {
     const url = `${this.ltnBaseUrl}/galleries/${id}.js`;
     try {
-      const resText = await sourceHttpClient.fetchJson<string>(url, {
+      const resText = await sourceHttpClient.fetchText(url, {
         sourceId: this.metadata.name,
         referer: 'https://hitomi.la/',
-        headers: { Accept: 'application/javascript, */*' },
+        headers: { Accept: 'application/javascript, text/plain, */*' },
         silent: true,
       });
 
-      if (typeof resText !== 'string') return null;
+      if (typeof resText === 'string') {
+        const jsonStr = resText.replace(/^var\s+galleryinfo\s*=\s*/, '').replace(/;\s*$/, '');
+        const data = JSON.parse(jsonStr);
 
-      const jsonStr = resText.replace(/^var\s+galleryinfo\s*=\s*/, '').replace(/;\s*$/, '');
-      const data = JSON.parse(jsonStr);
-
-      let coverUrl: string | null = null;
-      if (Array.isArray(data.files) && data.files.length > 0) {
-        const firstHash = data.files[0].hash;
-        if (firstHash) {
-          coverUrl = this.getThumbnailUrl(firstHash);
+        let coverUrl: string | null = null;
+        if (Array.isArray(data.files) && data.files.length > 0) {
+          const firstHash = data.files[0].hash;
+          if (firstHash) {
+            coverUrl = this.getThumbnailUrl(firstHash);
+          }
         }
+
+        const tags: string[] = [];
+        if (Array.isArray(data.tags)) {
+          for (const t of data.tags) {
+            const name = typeof t === 'string' ? t : t?.tag;
+            if (name) tags.push(name);
+          }
+        }
+
+        const authors: string[] = [];
+        if (Array.isArray(data.artists)) {
+          for (const a of data.artists) {
+            const name = typeof a === 'string' ? a : a?.artist;
+            if (name) authors.push(name);
+          }
+        }
+
+        const series: string[] = [];
+        if (Array.isArray(data.parodys)) {
+          for (const p of data.parodys) {
+            const name = typeof p === 'string' ? p : p?.parody;
+            if (name) series.push(name);
+          }
+        }
+
+        const characters: string[] = [];
+        if (Array.isArray(data.characters)) {
+          for (const c of data.characters) {
+            const name = typeof c === 'string' ? c : c?.character;
+            if (name) characters.push(name);
+          }
+        }
+
+        const descParts: string[] = [];
+        if (series.length) descParts.push(`Series: ${series.join(', ')}`);
+        if (characters.length) descParts.push(`Characters: ${characters.join(', ')}`);
+        if (data.language) descParts.push(`Language: ${data.language}`);
+        if (data.type) descParts.push(`Type: ${data.type}`);
+        if (data.files?.length) descParts.push(`Pages: ${data.files.length}`);
+
+        let locale: string = 'ja';
+        const langStr = (data.language || '').toLowerCase();
+        if (langStr.includes('english')) locale = 'en';
+        else if (langStr.includes('chinese')) locale = 'zh';
+        else if (langStr.includes('japanese')) locale = 'ja';
+        else if (/(?:\[|\()(?:english|eng)(?:\]|\))/i.test(data.title || '')) locale = 'en';
+        else if (/(?:\[|\()(?:chinese|中国翻訳|中國翻譯|漢化|汉化|中国語)(?:\]|\))/i.test(data.title || '')) locale = 'zh';
+
+        return {
+          id: `${this.metadata.id}:${id}`,
+          sourceId: this.metadata.id,
+          title: this.cleanText(data.title || `Gallery #${id}`),
+          url: `/doujinshi/${id}`,
+          publicUrl: `https://hitomi.la/doujinshi/${id}.html`,
+          coverUrl,
+          coverHeaders: { Referer: 'https://hitomi.la/' },
+          tags: tags.slice(0, 15),
+          authors: authors.length ? authors : undefined,
+          description: descParts.length ? descParts.join(' · ') : undefined,
+          locale,
+          state: 'completed' as const,
+        };
       }
+    } catch {
+      // Fall through to HTML fallback
+    }
+
+    // HTML fallback for Hitomi gallery details
+    try {
+      const $ = await this.fetchHtml(`https://hitomi.la/doujinshi/${id}.html`);
+      const title = this.cleanText($('h1').first().text() || `Gallery #${id}`);
+      const authors: string[] = [];
+      $('h2 a[href*="/artist/"], a[href*="/group/"], td:contains("Artist") + td a').each((_, a) => {
+        const name = this.cleanText(a.text());
+        if (name && !authors.includes(name)) authors.push(name);
+      });
 
       const tags: string[] = [];
-      if (Array.isArray(data.tags)) {
-        for (const t of data.tags) {
-          const name = typeof t === 'string' ? t : t?.tag;
-          if (name) tags.push(name);
-        }
-      }
-
-      const authors: string[] = [];
-      if (Array.isArray(data.artists)) {
-        for (const a of data.artists) {
-          const name = typeof a === 'string' ? a : a?.artist;
-          if (name) authors.push(name);
-        }
-      }
+      $('a[href*="/tag/"]').each((_, a) => {
+        const name = this.cleanText(a.text());
+        if (name && !tags.includes(name)) tags.push(name);
+      });
 
       const series: string[] = [];
-      if (Array.isArray(data.parodys)) {
-        for (const p of data.parodys) {
-          const name = typeof p === 'string' ? p : p?.parody;
-          if (name) series.push(name);
-        }
-      }
-
-      const characters: string[] = [];
-      if (Array.isArray(data.characters)) {
-        for (const c of data.characters) {
-          const name = typeof c === 'string' ? c : c?.character;
-          if (name) characters.push(name);
-        }
-      }
+      $('a[href*="/series/"]').each((_, a) => {
+        const name = this.cleanText(a.text());
+        if (name && !series.includes(name)) series.push(name);
+      });
 
       const descParts: string[] = [];
       if (series.length) descParts.push(`Series: ${series.join(', ')}`);
-      if (characters.length) descParts.push(`Characters: ${characters.join(', ')}`);
-      if (data.language) descParts.push(`Language: ${data.language}`);
-      if (data.type) descParts.push(`Type: ${data.type}`);
-      if (data.files?.length) descParts.push(`Pages: ${data.files.length}`);
+      if (authors.length) descParts.push(`Artist: ${authors.join(', ')}`);
+      if (tags.length) descParts.push(`Tags: ${tags.slice(0, 5).join(', ')}`);
 
       return {
         id: `${this.metadata.id}:${id}`,
         sourceId: this.metadata.id,
-        title: this.cleanText(data.title || `Gallery #${id}`),
+        title,
         url: `/doujinshi/${id}`,
         publicUrl: `https://hitomi.la/doujinshi/${id}.html`,
-        coverUrl,
+        coverUrl: null,
         coverHeaders: { Referer: 'https://hitomi.la/' },
         tags: tags.slice(0, 15),
         authors: authors.length ? authors : undefined,

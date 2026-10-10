@@ -54,6 +54,7 @@ export interface SourceManga {
   contentRating?: ContentRating;
   chaptersCount?: number;
   lastUpdated?: number; // Unix timestamp ms
+  locale?: string; // Language / locale code, e.g. "ja", "zh", "en"
 }
 
 export interface SourceChapter {
@@ -65,6 +66,7 @@ export interface SourceChapter {
   number: number; // e.g. 1.0 or 1.5
   dateUpload?: number | null; // Timestamp ms
   scanlator?: string | null;
+  locale?: string; // Language / locale code, e.g. "ja", "zh", "en"
 }
 
 export interface SourcePage {
@@ -73,10 +75,21 @@ export interface SourcePage {
   headers?: Record<string, string>; // Essential for Hotlink protection (Referer, User-Agent)
 }
 
+export interface SourceTag {
+  id: string; // Query ID, slug, or search syntax
+  label: string; // Clean display label
+  group?: string; // e.g. "Genre", "Category", "Tag", "Format"
+}
+
+export interface SourceSortOption {
+  id: SourceSortOrder | string;
+  label: string;
+}
+
 export interface SourceFilter {
   query?: string;
   page?: number;
-  order?: SourceSortOrder;
+  order?: SourceSortOrder | string;
   tags?: string[];
   tagsExclude?: string[];
   state?: MangaState;
@@ -99,6 +112,16 @@ export interface MangaSourceMetadata {
 
 export interface MangaParser {
   readonly metadata: MangaSourceMetadata;
+
+  /**
+   * Returns supported tags/genres for catalog browsing
+   */
+  getAvailableTags?(): Promise<SourceTag[]> | SourceTag[];
+
+  /**
+   * Returns supported sort options for catalog browsing
+   */
+  getAvailableSorts?(): Promise<SourceSortOption[]> | SourceSortOption[];
 
   /**
    * Search or browse the catalog with pagination

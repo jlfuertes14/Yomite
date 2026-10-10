@@ -82,6 +82,7 @@ export class CloudFlareDetector {
       lower.includes('just a moment...') ||
       lower.includes('challenge-error-title') ||
       lower.includes('challenge-error-text') ||
+      lower.includes('challenge-platform') ||
       lower.includes('cf-turnstile') ||
       lower.includes('challenges.cloudflare.com') ||
       lower.includes('cf-chl-bypass') ||
@@ -94,6 +95,22 @@ export class CloudFlareDetector {
     }
 
     return CloudFlareStatus.NOT_DETECTED;
+  }
+
+  /**
+   * Checks if an HTML content contains Cloudflare / Turnstile challenge signals
+   */
+  public static isChallengePage(htmlContent: string): boolean {
+    if (!htmlContent) return false;
+    const lower = htmlContent.toLowerCase();
+    return (
+      lower.includes('challenge-platform') ||
+      lower.includes('challenges.cloudflare.com') ||
+      lower.includes('cf-turnstile') ||
+      lower.includes('just a moment...') ||
+      lower.includes('verify you are human') ||
+      lower.includes('challenge-error-title')
+    );
   }
 }
 

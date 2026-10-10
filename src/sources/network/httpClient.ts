@@ -226,6 +226,78 @@ export class SourceHttpClient {
   }
 
   /**
+   * Fetches plain text or raw string payload (e.g. for JS files or non-JSON endpoints)
+   */
+  public async fetchText(
+    url: string,
+    options: RequestOptions = {}
+  ): Promise<string> {
+    const startTime = Date.now();
+    const sourceId = options.sourceId || 'Source';
+
+    const headers: Record<string, string> = {
+      'User-Agent': DEFAULT_USER_AGENT,
+      Accept: 'text/plain, application/javascript, */*',
+      ...(options.referer ? { Referer: options.referer } : {}),
+      ...(options.headers as Record<string, string>),
+    };
+
+    this.applyCookies(url, headers);
+
+    try {
+      const response = await axios.get<string>(url, {
+        timeout: 15000,
+        ...options,
+        headers,
+        responseType: 'text',
+      });
+
+      if (!options.silent) {
+        ApiLogger.logRequest({
+          timestamp: Date.now(),
+          method: `GET_TEXT:${sourceId}`,
+          url,
+          status: response.status,
+          durationMs: Date.now() - startTime,
+        });
+      }
+
+      return response.data;
+    } catch (err: any) {
+      const durationMs = Date.now() - startTime;
+      const status = err.response?.status || null;
+      const responseData = typeof err.response?.data === 'string' ? err.response.data : '';
+      const domain = this.extractDomain(url);
+
+      if (status) {
+        const cfStatus = CloudFlareDetector.check(status, responseData, err.response?.headers);
+        if (cfStatus === CloudFlareStatus.CAPTCHA_CHALLENGE) {
+          const cfErr = new CloudFlareError(
+            `[${sourceId}] Cloudflare verification challenge detected at ${url}.`,
+            sourceId,
+            url,
+            domain,
+            CloudFlareStatus.CAPTCHA_CHALLENGE
+          );
+          throw cfErr;
+        }
+      }
+
+      if (!options.silent) {
+        ApiLogger.logRequest({
+          timestamp: Date.now(),
+          method: `GET_TEXT:${sourceId}`,
+          url,
+          status: err.response?.status || null,
+          durationMs,
+          error: err.message,
+        });
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Fetches binary ArrayBuffer payload (for Nozomi index and range requests)
    */
   public async fetchBuffer(

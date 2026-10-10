@@ -1,7 +1,7 @@
 /**
  * Manga Detail Screen — Editorial Swiss Dark Theme
  */
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -54,10 +54,16 @@ import { ChapterSkeleton } from '../../src/components/Skeleton';
 import { ZoomableImage } from '../../src/components/ZoomableImage';
 import { triggerHaptic } from '../../src/utils/haptics';
 import { formatChapterDate } from '../../src/utils/date';
-import { getLanguageInfo } from '../../src/utils/language';
+import { getLanguageInfo, detectMangaLanguage } from '../../src/utils/language';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 import { ApiLogger } from '../../src/services/apiLogger';
+import { CloudFlareCookieManager } from '../../src/sources/network/cloudflare';
 import type { Manga, Chapter, LibraryCategory } from '../../src/types';
+
+let WebView: any = null;
+try {
+  WebView = require('react-native-webview').WebView;
+} catch {}
 
 export default function MangaDetailScreen() {
   const { id, fromCatalog } = useLocalSearchParams<{ id: string; fromCatalog?: string }>();
@@ -76,6 +82,30 @@ export default function MangaDetailScreen() {
   const [synopsisExpanded, setSynopsisExpanded] = useState(false);
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [error, setError] = useState<string | null>(null);
+
+  // Cloudflare verification state
+  const [chaptersIsCloudflare, setChaptersIsCloudflare] = useState(false);
+  const [chaptersCfDomain, setChaptersCfDomain] = useState('comix.to');
+  const [isCfInAppModalOpen, setIsCfInAppModalOpen] = useState(false);
+  const [cfInAppUrl, setCfInAppUrl] = useState('');
+  const isSolvingCloudflareRef = React.useRef(false);
+
+  // Source tracking state for NHentai source
+  const [isNHentaiSource, setIsNHentaiSource] = useState<boolean>(() => {
+    return Boolean(
+      id?.startsWith('nhentai:') ||
+      fromCatalog === 'nhentai'
+    );
+  });
+
+  useEffect(() => {
+    const isNH = Boolean(
+      id?.startsWith('nhentai:') ||
+      fromCatalog === 'nhentai' ||
+      manga?.attributes?.links?.raw?.includes('nhentai.net')
+    );
+    setIsNHentaiSource(isNH);
+  }, [id, fromCatalog, manga]);
 
   // Keep this calculation unconditional. Hooks must run before any loading
   // or error return, otherwise source failures cause React's hook order error.
@@ -162,6 +192,20 @@ export default function MangaDetailScreen() {
       setStats(statistics);
     } catch (err: any) {
       console.error('Failed to load manga details:', err);
+      const isCf =
+        err?.isCloudFlare ||
+        err?.name === 'CloudFlareError' ||
+        (typeof err?.message === 'string' &&
+          (err.message.toLowerCase().includes('cloudflare') ||
+            err.message.toLowerCase().includes('challenge') ||
+            err.message.toLowerCase().includes('turnstile')));
+      if (isCf) {
+        setChaptersIsCloudflare(true);
+        const resolvedDomain =
+          err?.domain ||
+          (id?.includes('comix') ? 'comix.to' : id?.includes('comick') ? 'comick.dev' : 'comix.to');
+        setChaptersCfDomain(resolvedDomain);
+      }
       ApiLogger.logRequest({
         timestamp: Date.now(),
         method: 'MANGA_DETAILS',
@@ -171,7 +215,11 @@ export default function MangaDetailScreen() {
         durationMs: 0,
         error: err?.message || String(err),
       });
-      setError('Unable to load manga details from source. Please check your connection and try again.');
+      setError(
+        isCf
+          ? 'Cloudflare verification required to view this title.'
+          : 'Unable to load manga details from source. Please check your connection and try again.'
+      );
     } finally {
       setIsLoading(false);
     }
@@ -180,6 +228,7 @@ export default function MangaDetailScreen() {
   const loadChapters = async (lang = selectedLanguage, order = sortOrder) => {
     try {
       setIsLoadingChapters(true);
+      setChaptersIsCloudflare(false);
       const isExt = isExternalSource(id!);
       let chs: Chapter[] = [];
 
@@ -222,6 +271,21 @@ export default function MangaDetailScreen() {
       }
     } catch (err: any) {
       console.error('Failed to load chapters:', err);
+      const isCf =
+        err?.isCloudFlare ||
+        err?.name === 'CloudFlareError' ||
+        (typeof err?.message === 'string' &&
+          (err.message.toLowerCase().includes('cloudflare') ||
+            err.message.toLowerCase().includes('challenge') ||
+            err.message.toLowerCase().includes('turnstile') ||
+            err.message.toLowerCase().includes('verification required')));
+      if (isCf) {
+        setChaptersIsCloudflare(true);
+        const resolvedDomain =
+          err?.domain ||
+          (id?.includes('comix') ? 'comix.to' : id?.includes('comick') ? 'comick.dev' : 'comix.to');
+        setChaptersCfDomain(resolvedDomain);
+      }
       ApiLogger.logRequest({
         timestamp: Date.now(),
         method: 'MANGA_CHAPTERS',
@@ -235,6 +299,34 @@ export default function MangaDetailScreen() {
       setIsLoadingChapters(false);
     }
   };
+
+  const handleSolveCloudflare = useCallback(() => {
+    triggerHaptic();
+    const sourceDomain = chaptersCfDomain || (id?.includes('comick') ? 'comick.dev' : 'comix.to');
+    const targetUrl =
+      manga?.attributes?.links?.raw ||
+      (sourceDomain.startsWith('http') ? sourceDomain : `https://${sourceDomain}`);
+
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined') {
+        const handleWindowFocus = () => {
+          window.removeEventListener('focus', handleWindowFocus);
+          if (isSolvingCloudflareRef.current) {
+            isSolvingCloudflareRef.current = false;
+            setChaptersIsCloudflare(false);
+            loadMangaDetails();
+            loadChapters();
+          }
+        };
+        window.addEventListener('focus', handleWindowFocus);
+        isSolvingCloudflareRef.current = true;
+        window.open(targetUrl, '_blank', 'noopener,noreferrer');
+      }
+    } else {
+      setCfInAppUrl(targetUrl);
+      setIsCfInAppModalOpen(true);
+    }
+  }, [chaptersCfDomain, manga, id]);
 
   const handleSelectCategory = useCallback(
     (category: LibraryCategory) => {
@@ -434,11 +526,18 @@ export default function MangaDetailScreen() {
 
   const coverFileName = extractCoverFileName(manga);
   const coverUrl = getCoverUrl(manga.id, coverFileName, '512');
-  const title = getMangaTitle(manga);
+  const rawTitle = getMangaTitle(manga);
+  // Strip any leading flag emojis so chapter list manga title is completely clean
+  const title = useMemo(() => {
+    return rawTitle.replace(/^[\uD83C][\uDDE6-\uDDFF][\uD83C][\uDDE6-\uDDFF]\s*/, '').trim();
+  }, [rawTitle]);
   const description = getMangaDescription(manga);
   const author = extractAuthorName(manga);
   const artist = extractArtistName(manga);
   const tags = manga.attributes.tags.slice(0, 8);
+  const mangaLang = isNHentaiSource
+    ? (manga.attributes.originalLanguage || detectMangaLanguage(rawTitle, undefined, manga.attributes.tags.map((t) => t.attributes?.name?.en), id))
+    : null;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -519,6 +618,19 @@ export default function MangaDetailScreen() {
                   {artist !== author ? ` · Art: ${artist}` : ''}
                 </Text>
                 <View style={styles.statusRow}>
+                  {isNHentaiSource && mangaLang ? (
+                    <View style={[styles.statusPill, { backgroundColor: colors.surfaceElevated || colors.surface, flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 6, borderWidth: 0 }]}>
+                      <Image
+                        source={{ uri: getLanguageInfo(mangaLang).flagUrl }}
+                        style={{ width: 14, height: 10, borderRadius: 2 }}
+                        contentFit="cover"
+                      />
+                      <Text style={[styles.statusPillText, { color: colors.text, textTransform: 'uppercase', fontSize: 10, fontWeight: '700' }]}>
+                        {getLanguageInfo(mangaLang).code.toUpperCase()}
+                      </Text>
+                    </View>
+                  ) : null}
+
                   {stats?.rating?.bayesian || stats?.rating?.average ? (
                     <View style={[styles.statusPill, { backgroundColor: 'transparent', borderWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 3 }]}>
                       <Ionicons name="star" size={10} color="#F59E0B" />
@@ -828,6 +940,91 @@ export default function MangaDetailScreen() {
             {Array.from({ length: 8 }).map((_, i) => (
               <ChapterSkeleton key={i} />
             ))}
+          </View>
+        ) : chaptersIsCloudflare ? (
+          <View style={{ padding: 32, alignItems: 'center', justifyContent: 'center' }}>
+            <View
+              style={{
+                width: 54,
+                height: 54,
+                borderRadius: 18,
+                backgroundColor: colors.surfaceElevated || colors.surface,
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 16,
+                borderWidth: 1,
+                borderColor: colors.border,
+              }}
+            >
+              <Ionicons name="shield-checkmark" size={26} color={colors.accent} />
+            </View>
+            <Text style={{ fontSize: 17, fontWeight: '700', color: colors.text, textAlign: 'center' }}>
+              Verification Required
+            </Text>
+            <Text
+              style={{
+                fontSize: 13,
+                color: colors.textMuted,
+                textAlign: 'center',
+                marginTop: 6,
+                lineHeight: 18,
+                maxWidth: 280,
+              }}
+            >
+              This source requires a quick bot check to display chapters.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 20, width: '100%', maxWidth: 280 }}>
+              <Pressable
+                onPress={handleSolveCloudflare}
+                style={{
+                  flex: 1,
+                  height: 44,
+                  borderRadius: Radius.md,
+                  backgroundColor: colors.accent,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                accessibilityRole="button"
+                aria-label="Verify with Source"
+              >
+                <Ionicons name="shield-checkmark-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>
+                  Verify
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => loadChapters()}
+                style={{
+                  height: 44,
+                  paddingHorizontal: 16,
+                  borderRadius: Radius.md,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  backgroundColor: colors.surface,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                accessibilityRole="button"
+                aria-label="Retry Loading Chapters"
+              >
+                <Ionicons name="reload-outline" size={16} color={colors.text} style={{ marginRight: 6 }} />
+                <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>
+                  Retry
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : chapters.length === 0 ? (
+          <View style={{ padding: 36, alignItems: 'center', justifyContent: 'center' }}>
+            <Ionicons name="document-text-outline" size={36} color={colors.textMuted} style={{ marginBottom: 10 }} />
+            <Text style={{ color: colors.text, fontSize: 15, fontWeight: Typography.weights.semibold as any }}>
+              No chapters available
+            </Text>
+            <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 4, textAlign: 'center' }}>
+              This series does not have any readable chapters on this source yet.
+            </Text>
           </View>
         ) : (
           chapters.map((chapter, idx) => {
@@ -1239,6 +1436,122 @@ export default function MangaDetailScreen() {
           )}
         </Pressable>
       </Modal>
+
+      {/* In-App Cloudflare WebView Verification Modal */}
+      {isCfInAppModalOpen && (
+        <Modal
+          visible={isCfInAppModalOpen}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setIsCfInAppModalOpen(false)}
+        >
+          <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+            {/* Header */}
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                paddingHorizontal: 16,
+                height: 52,
+                borderBottomWidth: 1,
+                borderBottomColor: colors.border,
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="shield-checkmark" size={18} color={colors.accent} />
+                <Text style={{ color: colors.text, fontSize: 15, fontWeight: '700' }}>
+                  Human Verification
+                </Text>
+              </View>
+              <Pressable
+                onPress={() => {
+                  setIsCfInAppModalOpen(false);
+                  loadChapters();
+                }}
+                style={{
+                  paddingHorizontal: 14,
+                  paddingVertical: 6,
+                  borderRadius: Radius.full,
+                  backgroundColor: colors.accent,
+                }}
+                accessibilityRole="button"
+                aria-label="Close Verification"
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>Done</Text>
+              </Pressable>
+            </View>
+
+            {WebView && Platform.OS !== 'web' ? (
+              <WebView
+                source={{ uri: cfInAppUrl }}
+                userAgent="Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                sharedCookiesEnabled={true}
+                thirdPartyCookiesEnabled={true}
+                style={{ flex: 1, backgroundColor: colors.background }}
+                injectedJavaScript={`
+                  (function() {
+                    var interval = setInterval(function() {
+                      var cookie = document.cookie || '';
+                      var title = (document.title || '').toLowerCase();
+                      var isChallenge = title.includes('just a moment') || title.includes('turnstile') || document.querySelector('#challenge-running');
+                      if (cookie.includes('cf_clearance') || (!isChallenge && title.length > 0)) {
+                        window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
+                          type: 'CF_SOLVED',
+                          cookie: cookie
+                        }));
+                      }
+                    }, 1200);
+                  })();
+                  true;
+                `}
+                onMessage={async (event: any) => {
+                  try {
+                    const parsed = JSON.parse(event.nativeEvent.data);
+                    if (parsed.type === 'CF_SOLVED') {
+                      const domain = chaptersCfDomain;
+                      if (parsed.cookie && domain) {
+                        const match = parsed.cookie.match(/cf_clearance=([^;]+)/);
+                        if (match) {
+                          await CloudFlareCookieManager.setCookie(domain, match[0]);
+                        }
+                      }
+                      setIsCfInAppModalOpen(false);
+                      setChaptersIsCloudflare(false);
+                      loadMangaDetails();
+                      loadChapters();
+                    }
+                  } catch {}
+                }}
+              />
+            ) : (
+              <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+                <Text style={{ color: colors.text, fontSize: 14, textAlign: 'center', marginBottom: 16 }}>
+                  Verification opened in a new tab. When finished, tap Done.
+                </Text>
+                <Pressable
+                  onPress={() => {
+                    setIsCfInAppModalOpen(false);
+                    setChaptersIsCloudflare(false);
+                    loadMangaDetails();
+                    loadChapters();
+                  }}
+                  style={{
+                    paddingHorizontal: 20,
+                    paddingVertical: 10,
+                    borderRadius: Radius.md,
+                    backgroundColor: colors.accent,
+                  }}
+                  accessibilityRole="button"
+                  aria-label="Done Verification"
+                >
+                  <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>Done</Text>
+                </Pressable>
+              </View>
+            )}
+          </SafeAreaView>
+        </Modal>
+      )}
     </View>
   );
 }

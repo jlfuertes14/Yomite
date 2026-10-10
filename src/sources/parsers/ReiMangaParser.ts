@@ -18,6 +18,8 @@ import {
   SourceFilter,
   SourceManga,
   SourcePage,
+  SourceSortOption,
+  SourceTag,
 } from '../types';
 import { BaseParser } from './BaseParser';
 
@@ -51,15 +53,52 @@ export class ReiMangaParser extends BaseParser {
     };
   }
 
+  public override getAvailableSorts(): SourceSortOption[] {
+    return [
+      { id: 'popular', label: 'Trending' },
+      { id: 'latest', label: 'Latest Updates' },
+      { id: 'newest', label: 'New Manga' },
+      { id: 'rating', label: 'Top Rated' },
+    ];
+  }
+
+  public override async getAvailableTags(): Promise<SourceTag[]> {
+    return [
+      { id: 'Action', label: 'Action', group: 'Genre' },
+      { id: 'Adventure', label: 'Adventure', group: 'Genre' },
+      { id: 'Comedy', label: 'Comedy', group: 'Genre' },
+      { id: 'Drama', label: 'Drama', group: 'Genre' },
+      { id: 'Fantasy', label: 'Fantasy', group: 'Genre' },
+      { id: 'Isekai', label: 'Isekai', group: 'Genre' },
+      { id: 'Martial Arts', label: 'Martial Arts', group: 'Genre' },
+      { id: 'Manhwa', label: 'Manhwa', group: 'Genre' },
+      { id: 'Manhua', label: 'Manhua', group: 'Genre' },
+      { id: 'Manga', label: 'Manga', group: 'Genre' },
+      { id: 'Mystery', label: 'Mystery', group: 'Genre' },
+      { id: 'Psychological', label: 'Psychological', group: 'Genre' },
+      { id: 'Romance', label: 'Romance', group: 'Genre' },
+      { id: 'School Life', label: 'School Life', group: 'Genre' },
+      { id: 'Sci-Fi', label: 'Sci-Fi', group: 'Genre' },
+      { id: 'Seinen', label: 'Seinen', group: 'Genre' },
+      { id: 'Shounen', label: 'Shounen', group: 'Genre' },
+      { id: 'Slice of Life', label: 'Slice of Life', group: 'Genre' },
+      { id: 'Supernatural', label: 'Supernatural', group: 'Genre' },
+      { id: 'Tragedy', label: 'Tragedy', group: 'Genre' },
+      { id: 'Ecchi', label: 'Ecchi', group: 'Genre' },
+    ];
+  }
+
   public async getList(filter: SourceFilter): Promise<SourceManga[]> {
     const page = filter.page || 1;
+    const genre = filter.tags && filter.tags.length > 0 ? filter.tags[0] : '';
 
-    // 1. If searching with a text query, use the advanced search API
-    if (filter.query?.trim()) {
-      const q = encodeURIComponent(filter.query.trim());
+    // 1. If searching with a text query or filtering by genre, use advanced search
+    if (filter.query?.trim() || genre) {
+      const q = encodeURIComponent(filter.query?.trim() || '');
+      const genreParam = genre ? `&genre=${encodeURIComponent(genre)}` : '';
       try {
         const json = await sourceHttpClient.fetchJson<any>(
-          `${this.metadata.baseUrl}/api/manga/search/advanced?title=${q}&limit=24`,
+          `${this.metadata.baseUrl}/api/manga/search/advanced?title=${q}${genreParam}&limit=24`,
           { headers: this.getRequestHeaders() }
         );
         if (json?.data && Array.isArray(json.data) && json.data.length > 0) {
@@ -69,7 +108,7 @@ export class ReiMangaParser extends BaseParser {
         // Fallback to HTML scraping below
       }
 
-      return this.scrapeHtmlCatalog(`${this.metadata.baseUrl}/advanced-search?q=${q}&page=${page}`);
+      return this.scrapeHtmlCatalog(`${this.metadata.baseUrl}/advanced-search?q=${q}${genreParam}&page=${page}`);
     }
 
     // 2. Filter / Sort Order API mappings
@@ -132,15 +171,68 @@ export class ReiMangaParser extends BaseParser {
 
     // HTML fallback
     try {
-      const $ = await this.fetchHtml(manga.url);
+      const seriesUrl = this.toSeriesUrl(manga.url || manga.id);
+      const $ = await this.fetchHtml(seriesUrl);
       const title = this.cleanText($('h1').first().text() || manga.title);
-      const desc = this.cleanText($('p.text-gray-300, .description, p').first().text() || manga.description);
+
+      // 1. Try __NEXT_DATA__ Next.js hydration payload
+      const nextDataText = $('#__NEXT_DATA__').text();
+      if (nextDataText) {
+        try {
+          const parsed = JSON.parse(nextDataText);
+          const m = parsed?.props?.pageProps?.manga || parsed?.props?.pageProps?.series;
+          if (m) {
+            const genres = Array.isArray(m.genres) ? m.genres.map((g: any) => g.name || g).filter(Boolean) : [];
+            const authors = Array.isArray(m.authors) ? m.authors.map((a: any) => a.name || a).filter(Boolean) : [];
+            const desc = this.stripHtml(m.description || m.ai_description || m.summary);
+            const cover = m.cover_image || m.thumbnail || (m.id ? `https://reimanga.net/covers/${m.id}/thumbnail.webp` : null);
+
+            return {
+              ...manga,
+              title: m.title || title,
+              altTitles: m.alt_title ? [m.alt_title] : manga.altTitles,
+              description: desc || manga.description,
+              rating: m.rating ? parseFloat(m.rating) : manga.rating,
+              tags: genres.length > 0 ? genres : manga.tags,
+              authors: authors.length > 0 ? authors : manga.authors,
+              state: m.status === 1 ? 'completed' : 'ongoing',
+              coverUrl: cover ? this.toAbsoluteUrl(cover) : manga.coverUrl,
+            };
+          }
+        } catch {}
+      }
+
+      // 2. Extract authors from HTML anchors or labels
+      const authors: string[] = [];
+      $('a[href*="/author/"], a[href*="/artist/"]').each((_, a) => {
+        const name = this.cleanText(a.text());
+        if (name && !authors.includes(name)) authors.push(name);
+      });
+
+      if (!authors.length) {
+        $('h3, span, div, b, strong, p').each((_, el) => {
+          const txt = this.cleanText(el.text());
+          if (/^author/i.test(txt) && !authors.length) {
+            const val = txt.replace(/^author[s]?\s*[:\-]?\s*/i, '').trim();
+            if (val && !/^(n\/a|tba|-|updating|unknown)$/i.test(val)) authors.push(val);
+          }
+        });
+      }
+
+      // 3. Extract description
+      const metaDesc = $('meta[property="og:description"]').attr('content') ||
+        $('meta[name="description"]').attr('content') || '';
+      const bodyDesc = this.stripHtml(
+        $('[class*="description"], [class*="synopsis"], .description, .synopsis, p.text-gray-300, p.text-sm').first().text()
+      );
+      const desc = (!metaDesc || /read free|reimanga/i.test(metaDesc)) ? bodyDesc : this.cleanText(metaDesc);
       const cover = $('img[src*="/covers/"]').first().attr('src') || manga.coverUrl;
 
       return {
         ...manga,
         title,
-        description: desc,
+        description: desc || manga.description,
+        authors: authors.length ? authors : manga.authors,
         coverUrl: cover ? this.toAbsoluteUrl(cover) : manga.coverUrl,
       };
     } catch {
@@ -153,7 +245,7 @@ export class ReiMangaParser extends BaseParser {
     const slug = this.extractSlug(manga.url || manga.id);
     let chapterCount = 0;
 
-    // 1. Try to get chapter count from API
+    // 1. Try to get chapters from JSON API
     if (numericId) {
       try {
         const json = await sourceHttpClient.fetchJson<any>(
@@ -163,14 +255,62 @@ export class ReiMangaParser extends BaseParser {
         if (json?.manga?.chapter_count) {
           chapterCount = parseInt(json.manga.chapter_count, 10) || 0;
         }
+
+        const apiChapters = Array.isArray(json?.chapters)
+          ? json.chapters
+          : Array.isArray(json?.manga?.chapters)
+          ? json.manga.chapters
+          : [];
+
+        if (apiChapters.length > 0) {
+          return apiChapters.map((ch: any, idx: number) => {
+            const chNum = typeof ch.number === 'number' ? ch.number : parseFloat(ch.chapter || ch.name || `${idx + 1}`) || idx + 1;
+            const chSlug = ch.slug || ch.id || String(chNum);
+            return {
+              id: `${this.metadata.id}:${slug}:${chSlug}`,
+              sourceId: this.metadata.id,
+              mangaId: manga.id,
+              url: `${this.metadata.baseUrl}/manga/${slug}/${chSlug}`,
+              name: ch.title || ch.name || `Chapter ${chNum}`,
+              number: chNum,
+              dateUpload: ch.created_at ? Date.parse(ch.created_at) : undefined,
+            };
+          });
+        }
       } catch {
         // Ignore and continue
       }
     }
 
-    // 2. Try scraping HTML for chapters list
+    // 2. Try scraping series HTML for chapters list
     try {
-      const $ = await this.fetchHtml(manga.url);
+      const seriesUrl = this.toSeriesUrl(manga.url || manga.id);
+      const $ = await this.fetchHtml(seriesUrl);
+
+      // Check __NEXT_DATA__
+      const nextDataText = $('#__NEXT_DATA__').text();
+      if (nextDataText) {
+        try {
+          const parsed = JSON.parse(nextDataText);
+          const chList = parsed?.props?.pageProps?.chapters || parsed?.props?.pageProps?.manga?.chapters;
+          if (Array.isArray(chList) && chList.length > 0) {
+            return chList.map((ch: any, idx: number) => {
+              const chNum = typeof ch.number === 'number' ? ch.number : parseFloat(ch.chapter || ch.name || `${idx + 1}`) || idx + 1;
+              const chSlug = ch.slug || ch.id || String(chNum);
+              return {
+                id: `${this.metadata.id}:${slug}:${chSlug}`,
+                sourceId: this.metadata.id,
+                mangaId: manga.id,
+                url: `${this.metadata.baseUrl}/manga/${slug}/${chSlug}`,
+                name: ch.title || ch.name || `Chapter ${chNum}`,
+                number: chNum,
+                dateUpload: ch.created_at ? Date.parse(ch.created_at) : undefined,
+              };
+            });
+          }
+        } catch {}
+      }
+
       const chapters: SourceChapter[] = [];
       const seen = new Set<string>();
 
@@ -201,10 +341,10 @@ export class ReiMangaParser extends BaseParser {
         return chapters;
       }
     } catch {
-      // HTML scraping failed (e.g. Cloudflare)
+      // HTML scraping failed
     }
 
-    // 3. If HTML was blocked by Cloudflare but we know chapterCount from API, generate chapter stubs
+    // 3. If HTML was blocked but we know chapterCount from API, generate chapter stubs
     if (chapterCount > 0 && slug) {
       const generatedChapters: SourceChapter[] = [];
       for (let i = chapterCount; i >= 1; i--) {
@@ -223,13 +363,20 @@ export class ReiMangaParser extends BaseParser {
     return [];
   }
 
+  private toSeriesUrl(input: string): string {
+    if (!input) return `${this.metadata.baseUrl}/latest-update`;
+    if (input.startsWith('http://') || input.startsWith('https://')) return input;
+    const clean = input.replace(/^(?:reimanga:)?(?:\/manga\/)?/, '').replace(/^\/+/, '');
+    return `${this.metadata.baseUrl}/manga/${clean}`;
+  }
+
   public async getPages(chapter: SourceChapter): Promise<SourcePage[]> {
     const $ = await this.fetchHtml(chapter.url);
     const pages: SourcePage[] = [];
     const seen = new Set<string>();
 
     $('img[src*="covers/"], img[src*="reimanga.net"], img[src*="cdn"]').each((i, el) => {
-      const src = el.attr('src') || el.attr('data-src');
+      const src = $(el).attr('src') || $(el).attr('data-src');
       if (!src || src.includes('logo') || src.includes('icon') || src.includes('avatar')) return;
       const absUrl = this.toAbsoluteUrl(src);
       if (seen.has(absUrl)) return;
@@ -275,7 +422,7 @@ export class ReiMangaParser extends BaseParser {
     const seen = new Set<string>();
 
     $('a[href*="/manga/"]').each((_, el) => {
-      const href = el.attr('href') || '';
+      const href = $(el).attr('href') || '';
       // Only match manga detail links: /manga/{name}-{id} (exclude chapter links with /manga/{name}-{id}/{ch})
       const m = href.match(/\/manga\/([^/?#]+)$/i);
       if (!m) return;
@@ -284,14 +431,14 @@ export class ReiMangaParser extends BaseParser {
       seen.add(slug);
 
       const title = this.cleanText(
-        el.find('h3, .title, span').first().text() ||
-        el.attr('title') ||
-        el.find('img').first().attr('alt') ||
+        $(el).find('h3, .title, span').first().text() ||
+        $(el).attr('title') ||
+        $(el).find('img').first().attr('alt') ||
         slug
       );
       if (!title || /chapter/i.test(title)) return;
 
-      const img = el.find('img').first();
+      const img = $(el).find('img').first();
       let cover = img.attr('src') || img.attr('data-src') || null;
       if (!cover) {
         const numId = this.extractNumericId(slug);

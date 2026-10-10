@@ -10,6 +10,8 @@ import {
   SourceFilter,
   SourceManga,
   SourcePage,
+  SourceSortOption,
+  SourceTag,
 } from '../types';
 import { sourceHttpClient, DEFAULT_USER_AGENT } from '../network/httpClient';
 
@@ -33,16 +35,77 @@ export class HeanCmsParser extends BaseParser {
     };
   }
 
+  public override getAvailableSorts(): SourceSortOption[] {
+    return [
+      { id: 'popular', label: 'Most Views' },
+      { id: 'latest', label: 'Latest Chapters' },
+      { id: 'newest', label: 'Newest Series' },
+      { id: 'alphabetical', label: 'A-Z' },
+    ];
+  }
+
+  private static readonly OMEGA_TAG_MAP: Record<string, number> = {
+    drama: 2,
+    '2': 2,
+    harem: 8,
+    '8': 8,
+    romance: 1,
+    '1': 1,
+    fantasy: 3,
+    '3': 3,
+    milf: 16,
+    '16': 16,
+  };
+
+  public override async getAvailableTags(): Promise<SourceTag[]> {
+    try {
+      const url = `https://${this.apiDomain}/tags`;
+      const res = await sourceHttpClient.fetchJson<any>(url, {
+        sourceId: this.metadata.name,
+        referer: `https://${this.metadata.domain}/`,
+        silent: true,
+      });
+      if (Array.isArray(res) && res.length > 0) {
+        return res.map((t: any) => ({
+          id: String(t.id),
+          label: t.name,
+          group: 'Genre',
+        }));
+      }
+    } catch {
+      // Fallback to the 5 official genres
+    }
+
+    return [
+      { id: '2', label: 'Drama', group: 'Genre' },
+      { id: '8', label: 'Harem', group: 'Genre' },
+      { id: '1', label: 'Romance', group: 'Genre' },
+      { id: '3', label: 'Fantasy', group: 'Genre' },
+      { id: '16', label: 'MILF', group: 'Genre' },
+    ];
+  }
+
   public async getList(filter: SourceFilter): Promise<SourceManga[]> {
     const page = filter.page || 1;
-    const query = filter.query ? encodeURIComponent(filter.query.trim()) : '';
+    const query = filter.query?.trim() ? encodeURIComponent(filter.query.trim()) : '';
 
     let orderBy = 'latest&order=desc';
     if (filter.order === 'popular') orderBy = 'total_views&order=desc';
     else if (filter.order === 'newest') orderBy = 'created_at&order=desc';
     else if (filter.order === 'alphabetical') orderBy = 'title&order=asc';
 
-    const url = `https://${this.apiDomain}/query?query_string=${query}&series_type=Comic&perPage=20&orderBy=${orderBy}&page=${page}`;
+    let tagParam = '';
+    if (filter.tags && filter.tags.length > 0) {
+      const rawTag = filter.tags[0].trim().toLowerCase();
+      const tagId =
+        HeanCmsParser.OMEGA_TAG_MAP[rawTag] ??
+        (/^\d+$/.test(rawTag) ? Number(rawTag) : null);
+      if (tagId !== null) {
+        tagParam = `&tags_ids=[${tagId}]`;
+      }
+    }
+
+    const url = `https://${this.apiDomain}/query?query_string=${query}&series_type=Comic&perPage=20&orderBy=${orderBy}&page=${page}${tagParam}`;
 
     const res = await sourceHttpClient.fetchJson<any>(url, {
       sourceId: this.metadata.name,
@@ -105,14 +168,67 @@ export class HeanCmsParser extends BaseParser {
         }
       }
 
+      const authors: string[] = [];
+      if (typeof data?.author === 'string' && data.author.trim()) {
+        authors.push(this.cleanText(data.author));
+      } else if (Array.isArray(data?.authors)) {
+        for (const a of data.authors) {
+          const name = typeof a === 'string' ? a : a?.name || a?.author;
+          if (name) authors.push(this.cleanText(name));
+        }
+      } else if (typeof data?.creator === 'string' && data.creator.trim()) {
+        authors.push(this.cleanText(data.creator));
+      } else if (typeof data?.author_name === 'string' && data.author_name.trim()) {
+        authors.push(this.cleanText(data.author_name));
+      }
+
+      const rawDesc = data?.description || data?.raw_description || data?.summary || data?.synopsis || '';
+      const description = this.stripHtml(rawDesc) || manga.description;
+
+      if (data?.id || data?.title) {
+        return {
+          ...manga,
+          title: this.cleanText(data?.title || manga.title),
+          coverUrl,
+          description: description || manga.description,
+          authors: authors.length ? authors : manga.authors,
+          tags: tags.length ? tags.slice(0, 15) : manga.tags,
+          state: data?.status === 'Completed' ? 'completed' : 'ongoing',
+        };
+      }
+    } catch {
+      // Fall through to HTML scraping fallback below
+    }
+
+    // HTML fallback if API is unreachable or returned incomplete data
+    try {
+      const $ = await this.fetchHtml(`https://${this.metadata.domain}/series/${slug}`);
+      const title = this.cleanText($('h1').first().text()) || manga.title;
+      const metaDesc = $('meta[property="og:description"]').attr('content') ||
+        $('meta[name="description"]').attr('content') || '';
+      const descText = this.stripHtml(
+        $('[class*="description"], [class*="synopsis"], .description, .synopsis, p.text-sm').first().text()
+      );
+      const description = (!metaDesc || /read free|omega scans/i.test(metaDesc)) ? descText : this.cleanText(metaDesc);
+
+      const authors: string[] = [];
+      $('h3, span, div, b, strong, p').each((_, el) => {
+        const txt = this.cleanText(el.text());
+        if (/^author/i.test(txt) && !authors.length) {
+          const val = txt.replace(/^author[s]?\s*[:\-]?\s*/i, '').trim();
+          if (val && !/^(n\/a|tba|-|updating|unknown)$/i.test(val)) authors.push(val);
+        }
+      });
+
+      const cover = $('meta[property="og:image"]').attr('content') ||
+        $('img[src*="thumbnail"], img[src*="cover"]').first().attr('src');
+
       return {
         ...manga,
-        title: data?.title || manga.title,
-        coverUrl,
-        description: data?.description ? this.cleanText(data.description) : manga.description,
-        authors: data?.author ? [data.author] : undefined,
-        tags: tags.slice(0, 15),
-        state: data?.status === 'Completed' ? 'completed' : 'ongoing',
+        title,
+        coverUrl: cover ? this.toAbsoluteUrl(cover) : manga.coverUrl,
+        description: description || manga.description,
+        authors: authors.length ? authors : manga.authors,
       };
     } catch {
       return manga;
