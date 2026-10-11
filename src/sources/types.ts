@@ -91,6 +91,7 @@ export interface SourceFilter {
   page?: number;
   order?: SourceSortOrder | string;
   tags?: string[];
+  includedTags?: string[];
   tagsExclude?: string[];
   state?: MangaState;
   author?: string;
@@ -112,6 +113,11 @@ export interface MangaSourceMetadata {
 
 export interface MangaParser {
   readonly metadata: MangaSourceMetadata;
+
+  /**
+   * Returns anti-hotlinking headers (Referer, User-Agent)
+   */
+  getRequestHeaders?(): Record<string, string>;
 
   /**
    * Returns supported tags/genres for catalog browsing

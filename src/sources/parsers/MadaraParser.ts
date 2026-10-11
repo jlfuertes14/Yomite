@@ -10,6 +10,8 @@ import {
   SourceFilter,
   SourceManga,
   SourcePage,
+  SourceSortOption,
+  SourceTag,
 } from '../types';
 import { sourceHttpClient, DEFAULT_USER_AGENT } from '../network/httpClient';
 import { loadHtml } from '../network/htmlParser';
@@ -22,21 +24,87 @@ export class MadaraParser extends BaseParser {
     this.metadata = metadata;
   }
 
+  public override getAvailableSorts(): SourceSortOption[] {
+    return [
+      { id: 'popular', label: 'Most Popular' },
+      { id: 'latest', label: 'Latest Updates' },
+      { id: 'alphabetical', label: 'A to Z' },
+      { id: 'rating', label: 'Highest Rated' },
+      { id: 'newest', label: 'Recently Added' },
+    ];
+  }
+
+  public override async getAvailableTags(): Promise<SourceTag[]> {
+    const TOONILY_GENRES = [
+      'Action',
+      'Adventure',
+      'Comedy',
+      'Crime',
+      'Drama',
+      'Fantasy',
+      'Gossip',
+      'Historical',
+      'Horror',
+      'Isekai',
+      'Josei',
+      'Magic',
+      'Mature',
+      'Mystery',
+      'Psychological',
+      'Romance',
+      'School Life',
+      'Sci-Fi',
+      'Seinen',
+      'Shoujo',
+      'Shounen',
+      'Slice of Life',
+      'Sports',
+      'Supernatural',
+      'Thriller',
+      'Tragedy',
+      'Villainess',
+      'Wuxia',
+      'Yaoi',
+      'Yuri',
+    ];
+    return TOONILY_GENRES.map((g) => ({
+      id: g.toLowerCase().replace(/\s+/g, '-'),
+      label: g,
+      group: 'Genre',
+    }));
+  }
+
   public async getList(filter: SourceFilter): Promise<SourceManga[]> {
     const page = filter.page || 1;
-    let url: string;
+    let orderParam = 'latest';
+    if (filter.order === 'popular') orderParam = 'views';
+    else if (filter.order === 'newest') orderParam = 'new-manga';
+    else if (filter.order === 'alphabetical') orderParam = 'alphabet';
+    else if (filter.order === 'rating') orderParam = 'rating-manga';
 
+    const isToonily =
+      this.metadata.id === 'toonily' ||
+      this.metadata.domain?.includes('toonily') ||
+      this.metadata.baseUrl?.includes('toonily');
+
+    const selectedTags = filter.tags || filter.includedTags;
+    const tag = selectedTags && selectedTags.length > 0 ? selectedTags[0] : null;
+
+    let url: string;
     if (filter.query && filter.query.trim().length > 0) {
       const q = encodeURIComponent(filter.query.trim());
-      url = `${this.metadata.baseUrl}/page/${page}/?s=${q}&post_type=wp-manga`;
+      url = `${this.metadata.baseUrl}/page/${page}/?s=${q}&post_type=wp-manga&m_orderby=${orderParam}`;
+    } else if (tag) {
+      let cleanTag = tag.toLowerCase().trim().replace(/\s+/g, '-');
+      if (isToonily && (cleanTag === 'sci-fi' || cleanTag === 'scifi')) {
+        cleanTag = 'scifi-webtoon';
+      }
+      const tagSlug = encodeURIComponent(cleanTag);
+      const prefix = isToonily ? 'webtoon-genre' : 'genre';
+      url = `${this.metadata.baseUrl}/${prefix}/${tagSlug}/page/${page}/?m_orderby=${orderParam}`;
     } else {
-      let orderParam = 'latest';
-      if (filter.order === 'popular') orderParam = 'views';
-      else if (filter.order === 'newest') orderParam = 'new-manga';
-      else if (filter.order === 'alphabetical') orderParam = 'alphabet';
-      else if (filter.order === 'rating') orderParam = 'rating-manga';
-
-      url = `${this.metadata.baseUrl}/manga/page/${page}/?m_orderby=${orderParam}`;
+      const basePath = isToonily ? 'webtoons' : 'manga';
+      url = `${this.metadata.baseUrl}/${basePath}/page/${page}/?m_orderby=${orderParam}`;
     }
 
     let $;
@@ -44,20 +112,32 @@ export class MadaraParser extends BaseParser {
       $ = await this.fetchHtml(url);
     } catch (err: any) {
       if (err.response?.status === 404) {
-        // Fallback: try root /page/${page}/?m_orderby=
-        try {
-          const fallbackUrl = `${this.metadata.baseUrl}/page/${page}/?m_orderby=${
-            filter.order === 'popular' ? 'views' : 'latest'
-          }`;
-          $ = await this.fetchHtml(fallbackUrl);
-        } catch (innerErr: any) {
-          if (innerErr.response?.status === 404) {
-            // Try homepage with page query
-            const homeUrl = `${this.metadata.baseUrl}/?page=${page}`;
-            $ = await this.fetchHtml(homeUrl);
-          } else {
-            throw innerErr;
+        // Fallback sequence: try alternative paths
+        const fallbackPaths = isToonily
+          ? [
+              tag ? `/genre/${encodeURIComponent(tag.toLowerCase().trim().replace(/\s+/g, '-'))}/page/${page}/?m_orderby=${orderParam}` : '',
+              `/page/${page}/?m_orderby=${orderParam}`,
+            ].filter(Boolean)
+          : [
+              `/webtoons/page/${page}/?m_orderby=${orderParam}`,
+              `/series/page/${page}/?m_orderby=${orderParam}`,
+              `/page/${page}/?m_orderby=${orderParam}`,
+            ];
+
+        let loaded = false;
+        for (const fbPath of fallbackPaths) {
+          try {
+            const fallbackUrl = `${this.metadata.baseUrl}${fbPath.startsWith('/') ? '' : '/'}${fbPath}`;
+            $ = await this.fetchHtml(fallbackUrl);
+            loaded = true;
+            break;
+          } catch {
+            // continue next fallback
           }
+        }
+        if (!loaded) {
+          const homeUrl = `${this.metadata.baseUrl}/?page=${page}`;
+          $ = await this.fetchHtml(homeUrl);
         }
       } else {
         throw err;
@@ -94,6 +174,10 @@ export class MadaraParser extends BaseParser {
         });
       }
     });
+
+    if (filter.order === 'alphabetical') {
+      mangaList.sort((a, b) => a.title.localeCompare(b.title));
+    }
 
     return mangaList;
   }

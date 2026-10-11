@@ -2366,7 +2366,7 @@ export default function ExtensionsScreen() {
                         isRestoringFromDetailRef.current = true;
                         isViewingMangaFromCatalogRef.current = true;
                         setMangaModalVisible(false);
-                        router.push(`/manga/${item.id}?fromCatalog=${activeMangaSource.id}` as any);
+                        router.push(`/manga/${encodeURIComponent(item.id)}?fromCatalog=${activeMangaSource.id}` as any);
                       }}
                       style={({ pressed }) => [
                         styles.mangaCardItem,

@@ -39,6 +39,7 @@ export class IkenParser extends BaseParser {
     return [
       { id: 'popular', label: 'Most Popular' },
       { id: 'latest', label: 'Latest Chapter' },
+      { id: 'alphabetical', label: 'A to Z' },
     ];
   }
 
@@ -67,14 +68,21 @@ export class IkenParser extends BaseParser {
 
   public async getList(filter: SourceFilter): Promise<SourceManga[]> {
     const page = filter.page || 1;
+    const selectedTags = filter.tags || filter.includedTags;
     const searchTerm = filter.query?.trim()
       ? filter.query.trim()
-      : filter.tags && filter.tags.length > 0
-      ? filter.tags[0]
+      : selectedTags && selectedTags.length > 0
+      ? selectedTags[0]
       : '';
     const query = encodeURIComponent(searchTerm);
 
-    const url = `${this.apiBaseUrl}/api/query?page=${page}&perPage=18&searchTerm=${query}`;
+    let orderBy = 'updatedAt';
+    if (filter.order === 'popular') orderBy = 'views';
+    else if (filter.order === 'alphabetical') orderBy = 'postTitle';
+    else if (filter.order === 'newest') orderBy = 'createdAt';
+    else if (filter.order === 'latest') orderBy = 'updatedAt';
+
+    const url = `${this.apiBaseUrl}/api/query?page=${page}&perPage=18&searchTerm=${query}&orderBy=${orderBy}`;
 
     let data;
     try {
@@ -84,7 +92,7 @@ export class IkenParser extends BaseParser {
       });
     } catch {
       // Fallback without api subdomain
-      const fallbackUrl = `https://${this.metadata.domain}/api/query?page=${page}&perPage=18&searchTerm=${query}`;
+      const fallbackUrl = `https://${this.metadata.domain}/api/query?page=${page}&perPage=18&searchTerm=${query}&orderBy=${orderBy}`;
       data = await sourceHttpClient.fetchJson<any>(fallbackUrl, {
         sourceId: this.metadata.name,
         referer: `https://${this.metadata.domain}/`,
@@ -92,6 +100,14 @@ export class IkenParser extends BaseParser {
     }
 
     const posts = this.extractItems(data);
+
+    if (filter.order === 'alphabetical' && posts.length > 0) {
+      posts.sort((a: any, b: any) => {
+        const titleA = a.postTitle || a.title || a.slug || '';
+        const titleB = b.postTitle || b.title || b.slug || '';
+        return titleA.localeCompare(titleB);
+      });
+    }
 
     if (posts.length === 0 && !query) {
       // HTML fallback for series catalog if API returns empty

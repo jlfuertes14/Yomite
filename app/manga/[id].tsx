@@ -66,7 +66,8 @@ try {
 } catch {}
 
 export default function MangaDetailScreen() {
-  const { id, fromCatalog } = useLocalSearchParams<{ id: string; fromCatalog?: string }>();
+  const { id: paramId, fromCatalog } = useLocalSearchParams<{ id: string; fromCatalog?: string }>();
+  const id = useMemo(() => (paramId ? decodeURIComponent(paramId) : paramId), [paramId]);
   const router = useRouter();
   const colors = useThemeColors();
 
@@ -109,9 +110,17 @@ export default function MangaDetailScreen() {
 
   // Keep this calculation unconditional. Hooks must run before any loading
   // or error return, otherwise source failures cause React's hook order error.
-  const coverHeaders = id?.startsWith('hitomila:')
-    ? { Referer: 'https://hitomi.la/' }
-    : undefined;
+  const coverHeaders = useMemo(() => {
+    if (!id) return undefined;
+    if (id.startsWith('hitomila:')) return { Referer: 'https://hitomi.la/' };
+    if (isExternalSource(id)) {
+      const resolved = SourceManager.resolveSource(id);
+      if (resolved && resolved.parser.getRequestHeaders) {
+        return resolved.parser.getRequestHeaders();
+      }
+    }
+    return undefined;
+  }, [id]);
 
   const libraryEntry = useLibraryStore((s) => s.entries[id!]);
   const isInLibrary = useLibraryStore((s) => s.isInLibrary(id!));
@@ -528,9 +537,7 @@ export default function MangaDetailScreen() {
   const coverUrl = getCoverUrl(manga.id, coverFileName, '512');
   const rawTitle = getMangaTitle(manga);
   // Strip any leading flag emojis so chapter list manga title is completely clean
-  const title = useMemo(() => {
-    return rawTitle.replace(/^[\uD83C][\uDDE6-\uDDFF][\uD83C][\uDDE6-\uDDFF]\s*/, '').trim();
-  }, [rawTitle]);
+  const title = rawTitle.replace(/^[\uD83C][\uDDE6-\uDDFF][\uD83C][\uDDE6-\uDDFF]\s*/, '').trim();
   const description = getMangaDescription(manga);
   const author = extractAuthorName(manga);
   const artist = extractArtistName(manga);

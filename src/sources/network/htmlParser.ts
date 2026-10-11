@@ -18,6 +18,21 @@ export class HtmlElementWrapper {
 
   public find(selector: string): HtmlElementList {
     if (!this.raw) return new HtmlElementList([]);
+    if (selector.includes(',')) {
+      const parts = selector.split(',').map((s) => s.trim()).filter(Boolean);
+      const seen = new Set<HTMLElement>();
+      const matched: HTMLElement[] = [];
+      for (const p of parts) {
+        const items = this.raw.querySelectorAll(p);
+        for (const item of items) {
+          if (!seen.has(item)) {
+            seen.add(item);
+            matched.push(item);
+          }
+        }
+      }
+      return new HtmlElementList(matched);
+    }
     const nodes = this.raw.querySelectorAll(selector);
     return new HtmlElementList(nodes);
   }
@@ -141,6 +156,22 @@ export function loadHtml(html: string): HtmlQueryFunction {
           );
           return new HtmlElementList(filtered);
         }
+      }
+
+      if (selectorOrElement.includes(',')) {
+        const parts = selectorOrElement.split(',').map((s) => s.trim()).filter(Boolean);
+        const seen = new Set<HTMLElement>();
+        const matched: HTMLElement[] = [];
+        for (const p of parts) {
+          const items = root.querySelectorAll(p);
+          for (const item of items) {
+            if (!seen.has(item)) {
+              seen.add(item);
+              matched.push(item);
+            }
+          }
+        }
+        return new HtmlElementList(matched);
       }
 
       const elements = root.querySelectorAll(selectorOrElement);
