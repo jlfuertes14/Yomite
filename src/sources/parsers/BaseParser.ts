@@ -77,9 +77,13 @@ export abstract class BaseParser implements MangaParser {
   /**
    * Helper to strip whitespace, newlines, and unicode spaces
    */
-  protected cleanText(text: string | null | undefined): string {
-    if (!text) return '';
-    return text
+  protected cleanText(text: any): string {
+    if (text === null || text === undefined) return '';
+    if (Array.isArray(text)) {
+      return text.map((t) => this.cleanText(t)).filter(Boolean).join(', ');
+    }
+    const str = typeof text === 'string' ? text : String(text);
+    return str
       .replace(/<[^>]+>/g, '')
       .replace(/&nbsp;/gi, ' ')
       .replace(/&amp;/gi, '&')
@@ -95,9 +99,13 @@ export abstract class BaseParser implements MangaParser {
   /**
    * Helper to strip HTML tags, decode entities, and preserve paragraphs
    */
-  protected stripHtml(html: string | null | undefined): string {
-    if (!html) return '';
-    return html
+  protected stripHtml(html: any): string {
+    if (html === null || html === undefined) return '';
+    if (Array.isArray(html)) {
+      return html.map((h) => this.stripHtml(h)).filter(Boolean).join('\n\n');
+    }
+    const str = typeof html === 'string' ? html : String(html);
+    return str
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/<\/p>/gi, '\n\n')
       .replace(/<[^>]+>/g, '')

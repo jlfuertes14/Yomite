@@ -403,7 +403,7 @@ export function ListOptionsModal<SortType extends string>({
                 <View style={styles.sectionTitleRow}>
                   <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Grid size</Text>
                   <View style={styles.badge}>
-                    <Text style={[styles.badgeText, { color: colors.text }]}> 
+                    <Text style={[styles.badgeText, { color: '#FFFFFF' }]}> 
                       {gridColumns} Columns
                     </Text>
                   </View>
@@ -501,7 +501,7 @@ export function ListOptionsModal<SortType extends string>({
                     triggerHaptic();
                     onToggleGroupByDate(!groupByDate);
                   }}
-                  style={styles.toggleRow}
+                  style={[styles.toggleRow, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
                   accessibilityRole="button"
                   accessibilityLabel="Toggle group by date"
                 >
@@ -634,7 +634,7 @@ const styles = StyleSheet.create({
   badgeText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#CBD5E1',
+    color: '#FFFFFF',
   },
 
   /* 1. Flat Apple-Style Segmented Tray (No Colored Borders) */
@@ -821,7 +821,6 @@ const sliderStyles = StyleSheet.create({
     fontWeight: '500',
   },
   stepLabelTextSelected: {
-    color: '#F8FAFC',
     fontWeight: '700',
   },
 });

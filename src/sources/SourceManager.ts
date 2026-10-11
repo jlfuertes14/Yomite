@@ -28,6 +28,9 @@ import { ComickParser } from './parsers/ComickParser';
 import { AsuraScansParser } from './parsers/AsuraScansParser';
 import { ComixToParser } from './parsers/ComixToParser';
 import { ReiMangaParser } from './parsers/ReiMangaParser';
+import { FlameComicsParser } from './parsers/FlameComicsParser';
+import { PhiliaScansParser } from './parsers/PhiliaScansParser';
+import { HiveToonParser } from './parsers/HiveToonParser';
 import rawCatalog from './catalog/sourcesCatalog.json';
 
 const STORAGE_KEY_ENABLED_SOURCES = '@mangaapp_enabled_sources_v1';
@@ -202,7 +205,7 @@ class SourceManagerService {
       version: '1.0.0',
       icon: 'https://www.google.com/s2/favicons?domain=vortexscans.org&sz=64',
       description: 'Action, leveling, and fantasy manhwa powered by Iken API.',
-      availableSortOrders: ['popular', 'latest'],
+      availableSortOrders: ['popular', 'latest', 'alphabetical'],
       enabled: true,
     });
     this.parsers.set(vortexscans.metadata.id, vortexscans);
@@ -265,7 +268,37 @@ class SourceManagerService {
     this.parsers.set(reimanga.metadata.id, reimanga);
     this.parsers.set('reimanga.net', reimanga);
 
-    // Default enabled: MangaDex, Manganato, ManhuaFast, NHentai, OmegaScans, VortexScans, AsuraScans, Comix, ReiManga
+    const flamecomics = new FlameComicsParser();
+    this.parsers.set(flamecomics.metadata.id, flamecomics);
+    this.parsers.set('flamecomics.xyz', flamecomics);
+
+    const philiascans = new PhiliaScansParser();
+    this.parsers.set(philiascans.metadata.id, philiascans);
+    this.parsers.set('philiascans.org', philiascans);
+
+    const hivetoon = new HiveToonParser();
+    this.parsers.set(hivetoon.metadata.id, hivetoon);
+    this.parsers.set('hivetoons.org', hivetoon);
+    this.parsers.set('hivecomic', hivetoon);
+    this.parsers.set('hivetoon.com', hivetoon);
+
+    const ravenscans = new MangaReaderParser({
+      id: 'ravenscans',
+      name: 'RavenScans',
+      domain: 'ravenscans.org',
+      baseUrl: 'https://ravenscans.org',
+      locale: 'en',
+      isNsfw: false,
+      version: '1.0.0',
+      icon: 'https://www.google.com/s2/favicons?domain=ravenscans.org&sz=64',
+      description: 'Action, martial arts, and cultivation manhwa scanlations.',
+      availableSortOrders: ['popular', 'latest', 'alphabetical', 'rating', 'newest'],
+      enabled: true,
+    });
+    this.parsers.set(ravenscans.metadata.id, ravenscans);
+    this.parsers.set('ravenscans.org', ravenscans);
+
+    // Default enabled: MangaDex, Manganato, ManhuaFast, NHentai, OmegaScans, VortexScans, AsuraScans, Comix, ReiManga, FlameComics, PhiliaScans, HiveToon, RavenScans
     this.enabledSourceIds = new Set([
       'mangadex',
       'manganato',
@@ -276,6 +309,10 @@ class SourceManagerService {
       'asurascans',
       'comix-to',
       'reimanga',
+      'flamecomics',
+      'philiascans',
+      'hivetoon',
+      'ravenscans',
     ]);
   }
 
@@ -401,6 +438,37 @@ class SourceManagerService {
       item.title?.toLowerCase() === 'reimanga'
     ) {
       return new ReiMangaParser(baseMetadata);
+    }
+
+    if (
+      item.id === 'philiascans' ||
+      item.domain === 'philiascans.org' ||
+      item.title?.toLowerCase().includes('philia')
+    ) {
+      return new PhiliaScansParser(baseMetadata);
+    }
+
+    if (
+      item.id === 'hivetoon' ||
+      item.id === 'hivecomic' ||
+      item.domain === 'hivetoons.org' ||
+      item.domain === 'hivetoon.com' ||
+      item.title?.toLowerCase().includes('hivetoon')
+    ) {
+      return new HiveToonParser(baseMetadata);
+    }
+
+    if (
+      item.id === 'ravenscans' ||
+      item.domain === 'ravenscans.org' ||
+      item.domain === 'ravenscans.com' ||
+      item.title?.toLowerCase().includes('ravenscans')
+    ) {
+      return new MangaReaderParser({
+        ...baseMetadata,
+        domain: 'ravenscans.org',
+        baseUrl: 'https://ravenscans.org',
+      });
     }
 
     // 5. Adult Gallery sites (Kotatsu GalleryAdults engine)

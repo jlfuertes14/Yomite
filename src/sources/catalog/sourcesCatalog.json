@@ -1833,6 +1833,18 @@
     "icon": "https://www.google.com/s2/favicons?domain=id.shinigami.asia&sz=64"
   },
   {
+    "id": "hivetoon",
+    "name": "HIVETOON",
+    "title": "HiveToon",
+    "domain": "hivetoons.org",
+    "baseUrl": "https://hivetoons.org",
+    "locale": "en",
+    "contentType": "manga",
+    "engine": "custom",
+    "isBroken": false,
+    "icon": "https://www.google.com/s2/favicons?domain=hivetoons.org&sz=64"
+  },
+  {
     "id": "hivecomic",
     "name": "HIVECOMIC",
     "title": "HiveComic",
@@ -9938,13 +9950,13 @@
     "id": "ravenscans",
     "name": "RAVENSCANS",
     "title": "RavenScans",
-    "domain": "ravenscans.com",
-    "baseUrl": "https://ravenscans.com",
+    "domain": "ravenscans.org",
+    "baseUrl": "https://ravenscans.org",
     "locale": "en",
     "contentType": "manga",
     "engine": "mangareader",
     "isBroken": false,
-    "icon": "https://www.google.com/s2/favicons?domain=ravenscans.com&sz=64"
+    "icon": "https://www.google.com/s2/favicons?domain=ravenscans.org&sz=64"
   },
   {
     "id": "readerspoint",
