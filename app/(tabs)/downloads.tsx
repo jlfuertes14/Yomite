@@ -297,7 +297,7 @@ export default function DownloadsScreen() {
 
   const handleReadChapter = (item: DownloadedChapter) => {
     triggerHaptic();
-    router.push(`/reader/${item.chapterId}?mangaId=${item.mangaId}` as any);
+    router.push(`/reader/${encodeURIComponent(item.chapterId)}?mangaId=${encodeURIComponent(item.mangaId)}` as any);
   };
 
   const handleDeleteItem = (item: DownloadedChapter) => {

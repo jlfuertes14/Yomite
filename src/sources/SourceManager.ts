@@ -16,6 +16,8 @@ import {
 } from './types';
 import { MangaDexParser } from './parsers/MangaDexParser';
 import { MangaBoxParser } from './parsers/MangaBoxParser';
+import { ManganatoParser } from './parsers/ManganatoParser';
+import { MangaDotParser } from './parsers/MangaDotParser';
 import { MadaraParser } from './parsers/MadaraParser';
 import { NHentaiParser } from './parsers/NHentaiParser';
 import { GalleryAdultsParser } from './parsers/GalleryAdultsParser';
@@ -76,19 +78,19 @@ class SourceManagerService {
     const mangadex = new MangaDexParser();
     this.parsers.set(mangadex.metadata.id, mangadex);
 
-    // 2. Manganato (MangaBox Engine)
-    const manganato = new MangaBoxParser({
+    // 2. Manganato (Dedicated Parser for manganato.gg)
+    const manganato = new ManganatoParser({
       id: 'manganato',
       name: 'Manganato',
-      domain: 'manganato.com',
-      baseUrl: 'https://manganato.com',
+      domain: 'manganato.gg',
+      baseUrl: 'https://www.manganato.gg',
       locale: 'en',
       isNsfw: false,
-      version: '1.2.0',
+      version: '2.0.0',
       icon: 'library-outline',
       description:
         'Massive manga catalog with fast page loads and extensive ongoing series.',
-      availableSortOrders: ['popular', 'latest', 'newest'],
+      availableSortOrders: ['latest', 'popular', 'newest'],
       enabled: true,
     });
     this.parsers.set(manganato.metadata.id, manganato);
@@ -298,10 +300,16 @@ class SourceManagerService {
     this.parsers.set(ravenscans.metadata.id, ravenscans);
     this.parsers.set('ravenscans.org', ravenscans);
 
-    // Default enabled: MangaDex, Manganato, ManhuaFast, NHentai, OmegaScans, VortexScans, AsuraScans, Comix, ReiManga, FlameComics, PhiliaScans, HiveToon, RavenScans
+    // MangaDot (Fast REST JSON API)
+    const mangadot = new MangaDotParser();
+    this.parsers.set(mangadot.metadata.id, mangadot);
+    this.parsers.set('mangadot.net', mangadot);
+
+    // Default enabled: MangaDex, Manganato, MangaDot, ManhuaFast, NHentai, OmegaScans, VortexScans, AsuraScans, Comix, ReiManga, FlameComics, PhiliaScans, HiveToon, RavenScans
     this.enabledSourceIds = new Set([
       'mangadex',
       'manganato',
+      'mangadot',
       'manhuafast',
       'nhentai',
       'omegascans',
@@ -487,6 +495,16 @@ class SourceManagerService {
 
     if (item.engine === 'galleryadults' || isGalleryDomain) {
       return new GalleryAdultsParser(baseMetadata);
+    }
+
+    // 5b. Manganato dedicated parser
+    if (item.id === 'manganato' || item.domain?.includes('manganato')) {
+      return new ManganatoParser(baseMetadata);
+    }
+
+    // 5c. MangaDot dedicated parser
+    if (item.id === 'mangadot' || item.domain?.includes('mangadot')) {
+      return new MangaDotParser(baseMetadata);
     }
 
     // 6. MangaBox engine (Manganato, Mangakakalot, etc.)

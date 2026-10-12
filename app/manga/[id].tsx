@@ -13,6 +13,7 @@ import {
   Alert,
   Modal,
   FlatList,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -58,6 +59,7 @@ import { getLanguageInfo, detectMangaLanguage } from '../../src/utils/language';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 import { ApiLogger } from '../../src/services/apiLogger';
 import { CloudFlareCookieManager } from '../../src/sources/network/cloudflare';
+import { webViewBridge } from '../../src/sources/network/webViewBridge';
 import type { Manga, Chapter, LibraryCategory } from '../../src/types';
 
 let WebView: any = null;
@@ -113,6 +115,8 @@ export default function MangaDetailScreen() {
   const coverHeaders = useMemo(() => {
     if (!id) return undefined;
     if (id.startsWith('hitomila:')) return { Referer: 'https://hitomi.la/' };
+    if (id.startsWith('manganato:') || id.includes('manganato')) return { Referer: 'https://www.manganato.gg/' };
+    if (id.startsWith('mangadot:') || id.includes('mangadot')) return { Referer: 'https://mangadot.net/' };
     if (isExternalSource(id)) {
       const resolved = SourceManager.resolveSource(id);
       if (resolved && resolved.parser.getRequestHeaders) {
@@ -212,7 +216,15 @@ export default function MangaDetailScreen() {
         setChaptersIsCloudflare(true);
         const resolvedDomain =
           err?.domain ||
-          (id?.includes('comix') ? 'comix.to' : id?.includes('comick') ? 'comick.dev' : 'comix.to');
+          (id?.includes('manganato')
+            ? 'manganato.gg'
+            : id?.includes('mangadot')
+            ? 'mangadot.net'
+            : id?.includes('comix')
+            ? 'comix.to'
+            : id?.includes('comick')
+            ? 'comick.dev'
+            : 'comix.to');
         setChaptersCfDomain(resolvedDomain);
       }
       ApiLogger.logRequest({
@@ -292,7 +304,15 @@ export default function MangaDetailScreen() {
         setChaptersIsCloudflare(true);
         const resolvedDomain =
           err?.domain ||
-          (id?.includes('comix') ? 'comix.to' : id?.includes('comick') ? 'comick.dev' : 'comix.to');
+          (id?.includes('manganato')
+            ? 'manganato.gg'
+            : id?.includes('mangadot')
+            ? 'mangadot.net'
+            : id?.includes('comix')
+            ? 'comix.to'
+            : id?.includes('comick')
+            ? 'comick.dev'
+            : 'comix.to');
         setChaptersCfDomain(resolvedDomain);
       }
       ApiLogger.logRequest({
@@ -311,10 +331,21 @@ export default function MangaDetailScreen() {
 
   const handleSolveCloudflare = useCallback(() => {
     triggerHaptic();
-    const sourceDomain = chaptersCfDomain || (id?.includes('comick') ? 'comick.dev' : 'comix.to');
-    const targetUrl =
+    const sourceDomain =
+      chaptersCfDomain ||
+      (id?.includes('manganato')
+        ? 'manganato.gg'
+        : id?.includes('mangadot')
+        ? 'mangadot.net'
+        : id?.includes('comick')
+        ? 'comick.dev'
+        : 'comix.to');
+    let targetUrl =
       manga?.attributes?.links?.raw ||
       (sourceDomain.startsWith('http') ? sourceDomain : `https://${sourceDomain}`);
+    if (targetUrl.includes('/api/')) {
+      targetUrl = sourceDomain.startsWith('http') ? sourceDomain : `https://${sourceDomain}/`;
+    }
 
     if (Platform.OS === 'web') {
       if (typeof window !== 'undefined') {
@@ -386,8 +417,14 @@ export default function MangaDetailScreen() {
 
   const handleReadChapter = useCallback(
     (chapterId: string, pageIndex?: number) => {
-      const pageParam = pageIndex !== undefined ? `&page=${pageIndex}` : '';
-      router.push(`/reader/${chapterId}?mangaId=${id}${pageParam}` as any);
+      router.push({
+        pathname: '/reader/[chapterId]',
+        params: {
+          chapterId,
+          mangaId: id,
+          ...(pageIndex !== undefined ? { page: String(pageIndex) } : {}),
+        },
+      } as any);
     },
     [router, id]
   );
@@ -1471,22 +1508,44 @@ export default function MangaDetailScreen() {
                   Human Verification
                 </Text>
               </View>
-              <Pressable
-                onPress={() => {
-                  setIsCfInAppModalOpen(false);
-                  loadChapters();
-                }}
-                style={{
-                  paddingHorizontal: 14,
-                  paddingVertical: 6,
-                  borderRadius: Radius.full,
-                  backgroundColor: colors.accent,
-                }}
-                accessibilityRole="button"
-                aria-label="Close Verification"
-              >
-                <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>Done</Text>
-              </Pressable>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Pressable
+                  onPress={() => {
+                    setIsCfInAppModalOpen(false);
+                    loadChapters();
+                  }}
+                  style={{
+                    paddingHorizontal: 14,
+                    paddingVertical: 6,
+                    borderRadius: Radius.full,
+                    backgroundColor: colors.accent,
+                  }}
+                  accessibilityRole="button"
+                  aria-label="Close Verification"
+                >
+                  <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>Done</Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => {
+                    if (cfInAppUrl) {
+                      Linking.openURL(cfInAppUrl).catch(() => {});
+                    }
+                  }}
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 16,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: colors.surfaceElevated || colors.surface,
+                  }}
+                  accessibilityRole="button"
+                  aria-label="Open in external browser"
+                >
+                  <Ionicons name="open-outline" size={16} color={colors.text} />
+                </Pressable>
+              </View>
             </View>
 
             {WebView && Platform.OS !== 'web' ? (
@@ -1499,13 +1558,42 @@ export default function MangaDetailScreen() {
                 injectedJavaScript={`
                   (function() {
                     var interval = setInterval(function() {
-                      var cookie = document.cookie || '';
+                      var href = window.location.href || '';
                       var title = (document.title || '').toLowerCase();
-                      var isChallenge = title.includes('just a moment') || title.includes('turnstile') || document.querySelector('#challenge-running');
-                      if (cookie.includes('cf_clearance') || (!isChallenge && title.length > 0)) {
+                      var isChallenge = title.includes('just a moment') ||
+                                        title.includes('turnstile') ||
+                                        title.includes('security check') ||
+                                        title.includes('attention required') ||
+                                        href.includes('challenges.cloudflare.com') ||
+                                        document.querySelector('#challenge-running') ||
+                                        document.querySelector('.cf-turnstile') ||
+                                        document.querySelector('#challenge-stage') ||
+                                        document.querySelector('#cf-wrapper') ||
+                                        document.querySelector('iframe[src*="cloudflare"]') ||
+                                        document.querySelector('iframe[src*="turnstile"]');
+
+                      if (isChallenge) {
+                        return;
+                      }
+
+                      var rawPre = document.querySelector('pre');
+                      var rawText = (rawPre ? rawPre.innerText : '') || (document.body ? document.body.innerText : '') || '';
+                      var trimmed = rawText.trim();
+                      var isJson = (trimmed.startsWith('{') || trimmed.startsWith('[')) && (trimmed.includes('"chapters"') || trimmed.includes('"data"') || trimmed.includes('"manga"'));
+
+                      var hasRealContent = isJson || (
+                        document.querySelectorAll('.row-content-chapter, .chapter-list, .panel-story-info-description, #contentBox, .story-info-right, .manga-info-text, h1, .chapter-name').length > 0
+                      );
+
+                      var cookie = document.cookie || '';
+                      var hasClearance = cookie.includes('cf_clearance');
+
+                      if (hasClearance || hasRealContent || (document.readyState === 'complete' && !isChallenge)) {
+                        clearInterval(interval);
                         window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
                           type: 'CF_SOLVED',
-                          cookie: cookie
+                          cookie: cookie,
+                          url: href
                         }));
                       }
                     }, 1200);
@@ -1517,6 +1605,9 @@ export default function MangaDetailScreen() {
                     const parsed = JSON.parse(event.nativeEvent.data);
                     if (parsed.type === 'CF_SOLVED') {
                       const domain = chaptersCfDomain;
+                      if (domain) {
+                        webViewBridge.setDomainVerified(domain, true);
+                      }
                       if (parsed.cookie && domain) {
                         const match = parsed.cookie.match(/cf_clearance=([^;]+)/);
                         if (match) {

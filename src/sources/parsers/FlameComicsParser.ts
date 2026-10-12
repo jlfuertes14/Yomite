@@ -50,7 +50,7 @@ export class FlameComicsParser extends BaseParser {
       locale: 'en',
       isNsfw: false,
       version: '1.1.0',
-      icon: 'https://www.google.com/s2/favicons?domain=flamecomics.xyz&sz=64',
+      icon: 'https://icon.horse/icon/flamecomics.xyz',
       description:
         'Official Flame Comics scanlations featuring popular manhwa, leveling action, and fantasy series.',
       availableSortOrders: ['popular', 'latest', 'alphabetical'],

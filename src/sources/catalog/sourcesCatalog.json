@@ -1,5 +1,17 @@
 [
   {
+    "id": "mangadot",
+    "name": "MANGADOT",
+    "title": "MangaDot",
+    "domain": "mangadot.net",
+    "baseUrl": "https://mangadot.net",
+    "locale": "en",
+    "contentType": "manga",
+    "engine": "custom",
+    "isBroken": false,
+    "icon": "https://icon.horse/icon/mangadot.net"
+  },
+  {
     "id": "reimanga",
     "name": "REIMANGA",
     "title": "ReiManga",
@@ -510,7 +522,7 @@
     "contentType": "manga",
     "engine": "custom",
     "isBroken": false,
-    "icon": "https://www.google.com/s2/favicons?domain=flamecomics.xyz&sz=64"
+    "icon": "https://icon.horse/icon/flamecomics.xyz"
   },
   {
     "id": "flixscansorg",
@@ -9221,14 +9233,13 @@
     "id": "manganato",
     "name": "MANGANATO",
     "title": "Manganato",
-    "domain": "natomanga.com",
-    "baseUrl": "https://natomanga.com",
+    "domain": "manganato.gg",
+    "baseUrl": "https://www.manganato.gg",
     "locale": "en",
     "contentType": "manga",
     "engine": "mangabox",
-    "isBroken": true,
-    "brokenReason": "Source reported broken or offline",
-    "icon": "https://www.google.com/s2/favicons?domain=natomanga.com&sz=64"
+    "isBroken": false,
+    "icon": "https://www.google.com/s2/favicons?domain=www.manganato.gg&sz=64"
   },
   {
     "id": "manganelo-com",

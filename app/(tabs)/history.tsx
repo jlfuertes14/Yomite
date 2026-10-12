@@ -309,7 +309,7 @@ export default function HistoryScreen() {
 
   const handleResume = useCallback(
     (entry: HistoryEntry) => {
-      router.push(`/reader/${entry.chapterId}?mangaId=${entry.mangaId}&page=${entry.pageIndex}` as any);
+      router.push(`/reader/${encodeURIComponent(entry.chapterId)}?mangaId=${encodeURIComponent(entry.mangaId)}&page=${entry.pageIndex}` as any);
     },
     [router]
   );

@@ -3,6 +3,7 @@
  * Provides User-Agent rotation, anti-hotlinking headers, Cheerio HTML parsing,
  * timeout handling, Cloudflare detection, and Cloudflare clearance cookie injection.
  */
+import { Platform } from 'react-native';
 import axios, { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { ApiLogger } from '../../services/apiLogger';
 import {
@@ -12,9 +13,12 @@ import {
   CloudFlareCookieManager,
 } from './cloudflare';
 import { loadHtml, ParsedHtml } from './htmlParser';
+import { webViewBridge } from './webViewBridge';
 
 export const DEFAULT_USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+  Platform.OS === 'android'
+    ? 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
+    : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 export interface RequestOptions extends AxiosRequestConfig {
   referer?: string;
@@ -59,6 +63,27 @@ export class SourceHttpClient {
   ): Promise<ParsedHtml> {
     const startTime = Date.now();
     const sourceId = options.sourceId || 'Source';
+    const domain = this.extractDomain(url);
+
+    // If domain has an active verified WebView session, route through the bridge
+    if (webViewBridge.isDomainVerified(domain) && webViewBridge.hasSender()) {
+      try {
+        const html = await webViewBridge.fetchText(url);
+        if (!options.silent) {
+          ApiLogger.logRequest({
+            timestamp: Date.now(),
+            method: `BRIDGE_HTML:${sourceId}`,
+            url,
+            status: 200,
+            statusText: 'OK (WebView Bridge)',
+            durationMs: Date.now() - startTime,
+          });
+        }
+        return loadHtml(html);
+      } catch {
+        // Fallback to Axios if bridge fails or times out
+      }
+    }
 
     const headers: Record<string, string> = {
       'User-Agent': DEFAULT_USER_AGENT,
@@ -163,6 +188,27 @@ export class SourceHttpClient {
   ): Promise<T> {
     const startTime = Date.now();
     const sourceId = options.sourceId || 'Source';
+    const domain = this.extractDomain(url);
+
+    // If domain has an active verified WebView session, route through the bridge
+    if (webViewBridge.isDomainVerified(domain) && webViewBridge.hasSender()) {
+      try {
+        const json = await webViewBridge.fetchJson<T>(url);
+        if (!options.silent) {
+          ApiLogger.logRequest({
+            timestamp: Date.now(),
+            method: `BRIDGE_JSON:${sourceId}`,
+            url,
+            status: 200,
+            statusText: 'OK (WebView Bridge)',
+            durationMs: Date.now() - startTime,
+          });
+        }
+        return json;
+      } catch {
+        // Fallback to Axios if bridge fails or times out
+      }
+    }
 
     const headers: Record<string, string> = {
       'User-Agent': DEFAULT_USER_AGENT,

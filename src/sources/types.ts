@@ -23,7 +23,8 @@ export type SourceSortOrder =
   | 'latest'
   | 'newest'
   | 'alphabetical'
-  | 'rating';
+  | 'rating'
+  | 'chapters';
 
 export type MangaState =
   | 'ongoing'

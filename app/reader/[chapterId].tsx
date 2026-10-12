@@ -253,11 +253,33 @@ export default function ReaderScreen() {
   const colors = useThemeColors();
   const { checkNetwork } = useNetworkStatus();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const { chapterId, mangaId, page } = useLocalSearchParams<{
+  const {
+    chapterId: rawChapterParam,
+    mangaId: rawMangaParam,
+    page,
+  } = useLocalSearchParams<{
     chapterId: string;
     mangaId?: string;
     page?: string;
   }>();
+
+  const chapterId = useMemo(() => {
+    if (!rawChapterParam) return '';
+    try {
+      return decodeURIComponent(rawChapterParam);
+    } catch {
+      return rawChapterParam;
+    }
+  }, [rawChapterParam]);
+
+  const mangaId = useMemo(() => {
+    if (!rawMangaParam) return undefined;
+    try {
+      return decodeURIComponent(rawMangaParam);
+    } catch {
+      return rawMangaParam;
+    }
+  }, [rawMangaParam]);
 
   // Dynamic Tap zones for page turning
   const TAP_LEFT = windowWidth * 0.3;
@@ -424,7 +446,14 @@ export default function ReaderScreen() {
         if (isExt) {
           const result = await getUniversalChapterPages(chapterId!);
           loadedPages = result.pages;
-          setPageHeaders(result.headers);
+          const fallbackHeaders =
+            result.headers ||
+            (chapterId.includes('manganato')
+              ? { Referer: 'https://www.manganato.gg/' }
+              : chapterId.includes('mangadot')
+              ? { Referer: 'https://mangadot.net/' }
+              : undefined);
+          setPageHeaders(fallbackHeaders);
         } else {
           const result = await getChapterPages(chapterId!, dataSaver);
           loadedPages = result.pages;
@@ -463,8 +492,12 @@ export default function ReaderScreen() {
 
   const loadMangaMeta = async () => {
     try {
-      if (!(await checkNetwork())) return;
       let targetMangaId = mangaId || resolvedMangaId;
+      if (!targetMangaId && isExternalSource(chapterId) && chapterId.includes('__')) {
+        const parts = chapterId.split('__');
+        targetMangaId = parts[0];
+        setResolvedMangaId(parts[0]);
+      }
       let chapterLang = 'en';
 
       const isExt = isExternalSource(chapterId!);
@@ -589,7 +622,14 @@ export default function ReaderScreen() {
         ? await getUniversalChapterPages(nextChapterId)
         : await getChapterPages(nextChapterId, dataSaver);
       setNextChapterPages(result.pages);
-      if ('headers' in result) setNextChapterPageHeaders(result.headers);
+      const fallbackNextHeaders =
+        ('headers' in result && result.headers) ||
+        (nextChapterId.includes('manganato')
+          ? { Referer: 'https://www.manganato.gg/' }
+          : nextChapterId.includes('mangadot')
+          ? { Referer: 'https://mangadot.net/' }
+          : undefined);
+      setNextChapterPageHeaders(fallbackNextHeaders);
     } catch (err) {
       nextChapterLoadRequestedRef.current = false;
       console.warn('Unable to load next chapter webtoon pages:', err);
@@ -685,8 +725,8 @@ export default function ReaderScreen() {
     (targetChapterId: string) => {
       setSideMenuVisible(false);
       const mId = mangaId || resolvedMangaId;
-      const query = mId ? `?mangaId=${mId}` : '';
-      router.replace(`/reader/${targetChapterId}${query}` as any);
+      const query = mId ? `?mangaId=${encodeURIComponent(mId)}` : '';
+      router.replace(`/reader/${encodeURIComponent(targetChapterId)}${query}` as any);
     },
     [mangaId, resolvedMangaId, router]
   );
