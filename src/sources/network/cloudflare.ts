@@ -185,6 +185,7 @@ class CloudFlareCookieManagerService {
     clean = clean.replace(/^https?:\/\//, '');
     clean = clean.replace(/\/.*$/, '');
     clean = clean.replace(/:\d+$/, '');
+    clean = clean.replace(/^www\./, '');
     return clean;
   }
 }

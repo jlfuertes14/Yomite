@@ -43,15 +43,16 @@ export class MangaBoxParser extends BaseParser {
     const $ = await this.fetchHtml(url);
     const mangaList: SourceManga[] = [];
 
-    // MangaBox items are usually in .content-genres-item or .search-story-item or .list-truyen-item-wrap
-    const items = $('.content-genres-item, .search-story-item, .list-truyen-item-wrap');
+    // MangaBox items are usually in .content-genres-item, .search-story-item, .list-truyen-item-wrap, or .list-comic-item-wrap
+    const items = $('.list-comic-item-wrap, .content-genres-item, .search-story-item, .list-truyen-item-wrap, .item-story');
 
     items.each((_, el) => {
       const item = $(el);
-      const titleLink = item.find('.genres-item-name, .item-title, h3 a, .story-name a').first();
+      const titleLink = item.find('a.list-story-item, .genres-item-name, .item-title, h3 a, .story-name a').first();
       const href = titleLink.attr('href') || '';
-      const title = this.cleanText(titleLink.text());
-      const cover = item.find('img').first().attr('src') || null;
+      const title = this.cleanText(titleLink.attr('title') || titleLink.text());
+      const img = item.find('img').first();
+      const cover = img.attr('data-src') || img.attr('src') || null;
       const ratingStr = item.find('.genres-item-rate').text();
       const rating = ratingStr ? parseFloat(ratingStr) : undefined;
 

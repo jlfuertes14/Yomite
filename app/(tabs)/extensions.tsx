@@ -34,6 +34,7 @@ import { SidebarDrawer } from '../../src/components/SidebarDrawer';
 import { SourceManager } from '../../src/sources/SourceManager';
 import { CatalogSourceItem, SourceTag, SourceSortOption } from '../../src/sources/types';
 import { CloudFlareCookieManager } from '../../src/sources/network/cloudflare';
+import { webViewBridge } from '../../src/sources/network/webViewBridge';
 import { DEFAULT_USER_AGENT } from '../../src/sources/network/httpClient';
 import { triggerHaptic } from '../../src/utils/haptics';
 import {
@@ -132,6 +133,39 @@ const CURATED_SOURCES: Record<string, CuratedSourceMeta> = {
     icon: 'https://www.google.com/s2/favicons?domain=mangadex.org&sz=64',
     iconType: 'mangadex',
     letterColor: '#FF6740',
+    bgColor: '#1E202A',
+  },
+  manganato: {
+    id: 'manganato',
+    name: 'Manganato',
+    displayName: 'Manganato',
+    domain: 'manganato.gg',
+    icon: 'https://www.google.com/s2/favicons?domain=www.manganato.gg&sz=64',
+    iconType: 'custom',
+    letter: 'M',
+    letterColor: '#F97316',
+    bgColor: '#1E202A',
+  },
+  mangadot: {
+    id: 'mangadot',
+    name: 'MangaDot',
+    displayName: 'MangaDot',
+    domain: 'mangadot.net',
+    icon: 'https://icon.horse/icon/mangadot.net',
+    iconType: 'custom',
+    letter: 'M',
+    letterColor: '#8B5CF6',
+    bgColor: '#1E202A',
+  },
+  flamecomics: {
+    id: 'flamecomics',
+    name: 'FlameComics',
+    displayName: 'FlameC...',
+    domain: 'flamecomics.xyz',
+    icon: 'https://icon.horse/icon/flamecomics.xyz',
+    iconType: 'custom',
+    letter: 'F',
+    letterColor: '#F59E0B',
     bgColor: '#1E202A',
   },
   mangafire: {
@@ -400,7 +434,8 @@ export function resolveSourceWebsiteUrl(
   if (sourceId === 'asurascans' || sourceId === 'asuracomic') return 'https://asuracomic.net';
   if (sourceId === 'mangapill') return 'https://mangapill.com';
   if (sourceId === 'comick-fun' || sourceId === 'comick') return 'https://comick.dev';
-  if (sourceId === 'manganato') return 'https://manganato.com';
+  if (sourceId === 'manganato') return 'https://www.manganato.gg';
+  if (sourceId === 'mangadot') return 'https://mangadot.net';
   if (sourceId === 'mangakakalot') return 'https://mangakakalot.com';
   if (sourceId === 'manhuafast') return 'https://manhuafast.com';
   if (sourceId === 'topmanhua') return 'https://topmanhua.com';
@@ -509,6 +544,40 @@ function makeBgShatterShards(bgGray: string): ExplosionParticle[] {
     }
   }
   return shards;
+}
+
+function SourceFavicon({
+  icon,
+  letter,
+  letterColor,
+  imageStyle,
+  textStyle,
+}: {
+  icon?: string;
+  letter: string;
+  letterColor?: string;
+  imageStyle: any;
+  textStyle: any;
+}) {
+  const [hasError, setHasError] = useState(false);
+
+  if (icon && !hasError) {
+    return (
+      <Image
+        source={{ uri: icon }}
+        style={imageStyle}
+        contentFit="contain"
+        transition={150}
+        onError={() => setHasError(true)}
+      />
+    );
+  }
+
+  return (
+    <Text style={[textStyle, letterColor ? { color: letterColor } : null]}>
+      {letter}
+    </Text>
+  );
 }
 
 /**
@@ -731,23 +800,13 @@ function SourceGridCell({
             opacity: iconOpacity,
           }}
         >
-          {source.icon ? (
-            <Image
-              source={{ uri: source.icon }}
-              style={styles.sourceGridFavicon}
-              contentFit="contain"
-              transition={150}
-            />
-          ) : (
-            <Text
-              style={[
-                styles.monogramLetter,
-                { color: source.letterColor || colors.accent },
-              ]}
-            >
-              {source.letter || source.name.charAt(0)}
-            </Text>
-          )}
+          <SourceFavicon
+            icon={source.icon}
+            letter={source.letter || source.name.charAt(0)}
+            letterColor={source.letterColor || colors.accent}
+            imageStyle={styles.sourceGridFavicon}
+            textStyle={styles.monogramLetter}
+          />
         </Animated.View>
 
         {/* Light-gray impact flash washing over the tile background */}
@@ -897,15 +956,34 @@ export default function ExtensionsScreen() {
   const [modalError, setModalError] = useState<string | null>(null);
   const [modalIsCloudflare, setModalIsCloudflare] = useState(false);
   const [modalCfDomain, setModalCfDomain] = useState('');
+  const [modalCfUrl, setModalCfUrl] = useState('');
   const [isCfInAppModalOpen, setIsCfInAppModalOpen] = useState(false);
   const [cfInAppUrl, setCfInAppUrl] = useState('');
   const cfWebViewRef = useRef<any>(null);
+  const [persistentBridgeUrl, setPersistentBridgeUrl] = useState('https://mangadot.net/');
+  const persistentBridgeRef = useRef<any>(null);
   const [isCfCookieModalOpen, setIsCfCookieModalOpen] = useState(false);
   const [cfCookieInput, setCfCookieInput] = useState('');
   const [isModalLoading, setIsModalLoading] = useState(false);
   const [isModalLoadingMore, setIsModalLoadingMore] = useState(false);
   const [modalPage, setModalPage] = useState(1);
   const [hasMoreMangas, setHasMoreMangas] = useState(true);
+
+  // Register WebView script dispatcher for authenticated requests
+  useEffect(() => {
+    webViewBridge.registerSender((script: string) => {
+      if (cfWebViewRef.current) {
+        cfWebViewRef.current.injectJavaScript(script);
+        return;
+      }
+      if (persistentBridgeRef.current) {
+        persistentBridgeRef.current.injectJavaScript(script);
+      }
+    });
+    return () => {
+      webViewBridge.unregisterSender();
+    };
+  }, []);
 
   // Load installed sources from AsyncStorage
   useEffect(() => {
@@ -1175,7 +1253,13 @@ export default function ExtensionsScreen() {
               coverUrl: m.coverUrl,
               coverHeaders:
                 m.coverHeaders ||
-                (parser!.metadata.id === 'hitomila' ? { Referer: 'https://hitomi.la/' } : undefined),
+                (parser!.metadata.id === 'manganato'
+                  ? { Referer: 'https://www.manganato.gg/' }
+                  : parser!.metadata.id === 'mangadot'
+                  ? { Referer: 'https://mangadot.net/' }
+                  : parser!.metadata.id === 'hitomila'
+                  ? { Referer: 'https://hitomi.la/' }
+                  : undefined),
               ratingPercent: m.rating ? Math.round(m.rating > 10 ? m.rating : m.rating * 10) : null,
               sourceId: parser!.metadata.id,
               locale: m.locale || detectMangaLanguage(m.title, undefined, m.tags, parser!.metadata.id),
@@ -1198,12 +1282,15 @@ export default function ExtensionsScreen() {
               err.message.toLowerCase().includes('turnstile')));
         const cfDomain =
           err.domain ||
+          (activeMangaSource.id === 'manganato' ? 'manganato.gg' : '') ||
+          (activeMangaSource.id === 'mangadot' ? 'mangadot.net' : '') ||
           (activeMangaSource.id === 'comick-fun' || activeMangaSource.id === 'comick' ? 'comick.dev' : '') ||
           activeMangaSource.domain ||
           (activeMangaSource.id === 'comix-to' ? 'comix.to' : '') ||
           (activeMangaSource.id === 'reimanga' ? 'reimanga.net' : '');
         setModalIsCloudflare(!!isCf);
         setModalCfDomain(cfDomain);
+        setModalCfUrl(err.url || '');
 
         const errMsg = isCf
           ? `${activeMangaSource.name} requires a quick bot check to browse.`
@@ -1224,12 +1311,14 @@ export default function ExtensionsScreen() {
 
   const handleOpenActiveSourceWebsite = useCallback(async () => {
     triggerHaptic();
-    const targetUrl = resolveSourceWebsiteUrl(
-      activeMangaSource.id,
-      modalCfDomain || activeMangaSource.domain,
-      undefined,
-      allCatalog
-    );
+    const targetUrl =
+      modalCfUrl ||
+      resolveSourceWebsiteUrl(
+        activeMangaSource.id,
+        modalCfDomain || activeMangaSource.domain,
+        undefined,
+        allCatalog
+      );
 
     try {
       if (Platform.OS === 'web') {
@@ -1242,16 +1331,25 @@ export default function ExtensionsScreen() {
     } catch {
       Linking.openURL(targetUrl).catch(() => {});
     }
-  }, [activeMangaSource, modalCfDomain, allCatalog]);
+  }, [activeMangaSource, modalCfDomain, modalCfUrl, allCatalog]);
 
   const handleSolveCloudflare = useCallback(() => {
     triggerHaptic();
-    const targetUrl = resolveSourceWebsiteUrl(
-      activeMangaSource.id,
-      modalCfDomain || activeMangaSource.domain,
-      undefined,
-      allCatalog
-    );
+    const targetDomain = modalCfDomain || activeMangaSource.domain;
+    let targetUrl =
+      modalCfUrl ||
+      resolveSourceWebsiteUrl(
+        activeMangaSource.id,
+        targetDomain,
+        undefined,
+        allCatalog
+      );
+
+    // If the challenge occurred on a REST API endpoint (/api/search), load the clean website homepage!
+    // This avoids rendering raw JSON and ugly browser pretty-print checkboxes to the user.
+    if (targetUrl.includes('/api/')) {
+      targetUrl = targetDomain.startsWith('http') ? targetDomain : `https://${targetDomain}/`;
+    }
 
     if (Platform.OS === 'web') {
       if (typeof window !== 'undefined') {
@@ -1273,7 +1371,7 @@ export default function ExtensionsScreen() {
       setCfInAppUrl(targetUrl);
       setIsCfInAppModalOpen(true);
     }
-  }, [activeMangaSource, modalCfDomain, allCatalog, loadModalMangas]);
+  }, [activeMangaSource, modalCfDomain, modalCfUrl, allCatalog, loadModalMangas]);
 
   // Auto-reload manga cards when returning back to Yomite app from external browser
   useEffect(() => {
@@ -1417,6 +1515,7 @@ export default function ExtensionsScreen() {
     setMangaSearchQuery('');
     setDebouncedMangaQuery('');
     setIsMangaSearchOpen(false);
+    setModalCfUrl('');
     setMangaModalVisible(true);
     loadSourceFilters(source.id);
   }, [loadSourceFilters]);
@@ -1551,22 +1650,13 @@ export default function ExtensionsScreen() {
                     },
                     ]}
                   >
-                    {selectedSourceForAction.icon ? (
-                      <Image
-                        source={{ uri: selectedSourceForAction.icon }}
-                        style={styles.actionModalFavicon}
-                        contentFit="contain"
-                      />
-                    ) : (
-                      <Text
-                        style={[
-                          styles.actionModalMonogram,
-                          { color: colors.accent },
-                        ]}
-                      >
-                        {selectedSourceForAction.name.charAt(0).toUpperCase()}
-                      </Text>
-                    )}
+                    <SourceFavicon
+                      icon={selectedSourceForAction.icon}
+                      letter={selectedSourceForAction.name.charAt(0).toUpperCase()}
+                      letterColor={colors.accent}
+                      imageStyle={styles.actionModalFavicon}
+                      textStyle={styles.actionModalMonogram}
+                    />
                   </View>
                   <View style={{ flex: 1, gap: 2 }}>
                     <Text style={[styles.actionModalTitle, { color: colors.text }]}>
@@ -1821,18 +1911,13 @@ export default function ExtensionsScreen() {
                   <View style={[styles.sourceRowItem, { borderBottomColor: colors.border }]}>
                     {/* Left: Squircle Icon */}
                     <View style={[styles.sourceListSquircle, { backgroundColor: colors.surface, borderWidth: 0 }]}>
-                      {item.icon ? (
-                        <Image
-                          source={{ uri: item.icon }}
-                          style={styles.sourceListFavicon}
-                          contentFit="contain"
-                          transition={150}
-                        />
-                      ) : (
-                        <Text style={[styles.sourceListMonogram, { color: colors.textSecondary }]}>
-                          {firstLetter}
-                        </Text>
-                      )}
+                      <SourceFavicon
+                        icon={item.icon}
+                        letter={firstLetter}
+                        letterColor={colors.textSecondary}
+                        imageStyle={styles.sourceListFavicon}
+                        textStyle={styles.sourceListMonogram}
+                      />
                     </View>
 
                     {/* Middle: Title & Subtitle */}
@@ -2619,6 +2704,14 @@ export default function ExtensionsScreen() {
                     <Pressable
                       onPress={async () => {
                         triggerHaptic();
+                        const domain = modalCfDomain || activeMangaSource.domain;
+                        if (domain) {
+                          webViewBridge.setDomainVerified(domain, true);
+                          setPersistentBridgeUrl(`https://${domain}/`);
+                          if (persistentBridgeRef.current) {
+                            persistentBridgeRef.current.reload();
+                          }
+                        }
                         setIsCfInAppModalOpen(false);
                         setModalError(null);
                         setModalIsCloudflare(false);
@@ -2640,6 +2733,28 @@ export default function ExtensionsScreen() {
                         Done
                       </Text>
                     </Pressable>
+
+                    <Pressable
+                      onPress={() => {
+                        triggerHaptic();
+                        if (cfInAppUrl) {
+                          Linking.openURL(cfInAppUrl).catch(() => {});
+                        }
+                      }}
+                      hitSlop={8}
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: 18,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: colors.surfaceElevated || colors.surface,
+                        marginLeft: 8,
+                      }}
+                      aria-label="Open in external browser"
+                    >
+                      <Ionicons name="open-outline" size={17} color={colors.text} />
+                    </Pressable>
                   </View>
 
                   {/* WebView Body */}
@@ -2647,7 +2762,11 @@ export default function ExtensionsScreen() {
                     <WebView
                       ref={cfWebViewRef}
                       source={{ uri: cfInAppUrl }}
-                      userAgent={DEFAULT_USER_AGENT}
+                      userAgent={
+                        Platform.OS === 'android'
+                          ? 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
+                          : DEFAULT_USER_AGENT
+                      }
                       javaScriptEnabled={true}
                       domStorageEnabled={true}
                       sharedCookiesEnabled={true}
@@ -2656,34 +2775,182 @@ export default function ExtensionsScreen() {
                       injectedJavaScript={`
                         (function() {
                           var interval = setInterval(function() {
-                            var cookie = document.cookie || '';
-                            var title = (document.title || '').toLowerCase();
-                            var isChallenge = title.includes('just a moment') || title.includes('turnstile') || document.querySelector('#challenge-running');
-                            if (cookie.includes('cf_clearance') || (!isChallenge && title.length > 0)) {
-                              window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
-                                type: 'CF_SOLVED',
-                                cookie: cookie
-                              }));
-                            }
-                          }, 1200);
+                            try {
+                              var href = window.location.href || '';
+                              var title = (document.title || '').toLowerCase();
+                              var isChallenge = title.includes('just a moment') ||
+                                                title.includes('turnstile') ||
+                                                title.includes('security check') ||
+                                                title.includes('attention required') ||
+                                                href.includes('challenges.cloudflare.com') ||
+                                                document.querySelector('#challenge-running') ||
+                                                document.querySelector('.cf-turnstile') ||
+                                                document.querySelector('#challenge-stage') ||
+                                                document.querySelector('#cf-wrapper') ||
+                                                document.querySelector('iframe[src*="cloudflare"]') ||
+                                                document.querySelector('iframe[src*="turnstile"]');
+
+                              if (isChallenge) {
+                                return;
+                              }
+
+                              var cookie = document.cookie || '';
+
+                              // 1. Check for JSON API Response (MangaDot, REST endpoints)
+                              var rawPre = document.querySelector('pre');
+                              var rawText = (rawPre ? rawPre.innerText : '') || (document.body ? document.body.innerText : '') || '';
+                              rawText = rawText.trim();
+
+                              if (rawText.startsWith('{') || rawText.startsWith('[')) {
+                                try {
+                                  var jsonData = JSON.parse(rawText);
+                                  var list = jsonData.manga_list || jsonData.data || jsonData.results || jsonData.items || (Array.isArray(jsonData) ? jsonData : null);
+                                  if (Array.isArray(list)) {
+                                    var jsonCards = [];
+                                    var seenIds = {};
+                                    for (var k = 0; k < list.length; k++) {
+                                      var it = list[k];
+                                      var id = it.id != null ? String(it.id) : (it.slug || '');
+                                      var t = (it.title || it.name || 'Untitled').trim();
+                                      var p = it.photo || it.cover || it.thumbnail || it.image || '';
+                                      var h = id ? ('/manga/' + id) : '';
+                                      if (h && t && !seenIds[h]) {
+                                        seenIds[h] = true;
+                                        jsonCards.push({ href: h, title: t, cover: p });
+                                      }
+                                    }
+                                    clearInterval(interval);
+                                    window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
+                                      type: 'CF_SOLVED',
+                                      cookie: cookie,
+                                      cards: jsonCards,
+                                      url: href,
+                                      isJson: true
+                                    }));
+                                    return;
+                                  }
+                                } catch (jsonErr) {}
+                              }
+
+                              // 2. Check for HTML Cards
+                              var cards = [];
+                              var seen = {};
+                              var items = document.querySelectorAll(
+                                '.search-story-item, .item, .content-genres-item, .list-truyen-item-wrap, .panel-story-chapter-list, .story-info-right, .manga-card, article'
+                              );
+                              for (var i = 0; i < items.length; i++) {
+                                var el = items[i];
+                                var a = el.querySelector('h3 a, a.genres-item-name, a.item-title, .story-name a, a[href*="/manga/"], a[href*="/series/"]') || el.querySelector('a');
+                                if (!a) continue;
+                                var cardHref = a.getAttribute('href') || '';
+                                var cardTitle = (a.getAttribute('title') || a.textContent || '').trim();
+                                if (!cardHref || cardHref.includes('/chapter-') || cardHref.includes('/chapter/') || seen[cardHref]) continue;
+                                seen[cardHref] = true;
+                                var img = el.querySelector('img');
+                                var cardCover = img ? (img.getAttribute('data-src') || img.getAttribute('src') || '') : '';
+                                cards.push({ href: cardHref, title: cardTitle, cover: cardCover });
+                              }
+
+                              if (cards.length === 0) {
+                                var links = document.querySelectorAll('a[href*="/manga/"], a[href*="/series/"]');
+                                for (var j = 0; j < links.length; j++) {
+                                  var lk = links[j];
+                                  var lkHref = lk.getAttribute('href') || '';
+                                  if (!lkHref || lkHref.includes('/chapter-') || lkHref.includes('/chapter/') || lkHref.includes('/manga-list/') || seen[lkHref]) continue;
+                                  var lkTitle = (lk.getAttribute('title') || lk.textContent || '').trim();
+                                  if (!lkTitle) continue;
+                                  seen[lkHref] = true;
+                                  var lkImg = lk.querySelector('img') || (lk.parentNode ? lk.parentNode.querySelector('img') : null);
+                                  var lkCover = lkImg ? (lkImg.getAttribute('data-src') || lkImg.getAttribute('src') || '') : '';
+                                  cards.push({ href: lkHref, title: lkTitle, cover: lkCover });
+                                }
+                              }
+
+                              var isNoResults = document.body && (
+                                document.body.innerText.includes('No matches found') ||
+                                document.body.innerText.includes('No results found') ||
+                                document.body.innerText.includes('Cannot find') ||
+                                !!document.querySelector('.no-result, .search-no-result, .panel-no-content')
+                              );
+
+                              var isFinished = document.readyState === 'complete' && !isChallenge;
+
+                              if (cards.length > 0 || isNoResults || isFinished) {
+                                clearInterval(interval);
+                                window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
+                                  type: 'CF_SOLVED',
+                                  cookie: cookie,
+                                  cards: cards,
+                                  url: href,
+                                  isNoResults: isNoResults && cards.length === 0
+                                }));
+                              }
+                            } catch (e) {}
+                          }, 1000);
                         })();
                         true;
                       `}
                       onMessage={async (event) => {
                         try {
                           const parsed = JSON.parse(event.nativeEvent.data);
+                          if (webViewBridge.handleMessage(parsed)) {
+                            return;
+                          }
+
                           if (parsed.type === 'CF_SOLVED') {
                             const domain = modalCfDomain || activeMangaSource.domain;
-                            if (parsed.cookie && domain) {
-                              const match = parsed.cookie.match(/cf_clearance=([^;]+)/);
-                              if (match) {
-                                await CloudFlareCookieManager.setCookie(domain, match[0]);
+                            if (domain) {
+                              webViewBridge.setDomainVerified(domain, true);
+                              setPersistentBridgeUrl(`https://${domain}/`);
+                              if (persistentBridgeRef.current) {
+                                persistentBridgeRef.current.reload();
+                              }
+                              if (parsed.cookie) {
+                                const match = parsed.cookie.match(/cf_clearance=([^;]+)/);
+                                if (match) {
+                                  await CloudFlareCookieManager.setCookie(domain, match[0]);
+                                }
                               }
                             }
-                            setIsCfInAppModalOpen(false);
-                            setModalError(null);
-                            setModalIsCloudflare(false);
-                            loadModalMangas(1, false);
+
+                            if (parsed.isJson && Array.isArray(parsed.cards) && parsed.cards.length > 0) {
+                              const mappedCards: CatalogMangaItem[] = parsed.cards.map((c: any) => {
+                                const rawHref = c.href || '';
+                                const absHref = rawHref.startsWith('http')
+                                  ? rawHref
+                                  : `https://${domain}/${rawHref.replace(/^\/+/, '')}`;
+                                const cover = c.cover
+                                  ? c.cover.startsWith('http')
+                                    ? c.cover
+                                    : `https://${domain}/${c.cover.replace(/^\/+/, '')}`
+                                  : null;
+                                const slugMatch = absHref.match(/\/manga\/([^/?#]+)/);
+                                const cardId = slugMatch
+                                  ? `${activeMangaSource.id}:${slugMatch[1]}`
+                                  : `${activeMangaSource.id}:${absHref}`;
+
+                                return {
+                                  id: cardId,
+                                  title: c.title,
+                                  coverUrl: cover,
+                                  coverHeaders: {
+                                    Referer: `https://${domain}/`,
+                                    'User-Agent': DEFAULT_USER_AGENT,
+                                  },
+                                  sourceId: activeMangaSource.id,
+                                  locale: 'en',
+                                };
+                              });
+                              setModalMangas(mappedCards);
+                              setIsCfInAppModalOpen(false);
+                              setModalError(null);
+                              setModalIsCloudflare(false);
+                            } else {
+                              setIsCfInAppModalOpen(false);
+                              setModalError(null);
+                              setModalIsCloudflare(false);
+                              loadModalMangas(1, false);
+                            }
                           }
                         } catch {}
                       }}
@@ -2695,6 +2962,10 @@ export default function ExtensionsScreen() {
                       </Text>
                       <Pressable
                         onPress={() => {
+                          const domain = modalCfDomain || activeMangaSource.domain;
+                          if (domain) {
+                            webViewBridge.setDomainVerified(domain, true);
+                          }
                           setIsCfInAppModalOpen(false);
                           setModalError(null);
                           setModalIsCloudflare(false);
@@ -2719,6 +2990,41 @@ export default function ExtensionsScreen() {
 
         {/* Navigation Drawer */}
         <SidebarDrawer visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
+
+        {/* Persistent Background Cloudflare & Network Bridge */}
+        {Platform.OS !== 'web' && (
+          <View
+            style={{
+              position: 'absolute',
+              top: -9999,
+              left: -9999,
+              width: 1,
+              height: 1,
+              opacity: 0,
+              pointerEvents: 'none',
+            }}
+          >
+            <WebView
+              ref={persistentBridgeRef}
+              source={{ uri: persistentBridgeUrl }}
+              userAgent={
+                Platform.OS === 'android'
+                  ? 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
+                  : DEFAULT_USER_AGENT
+              }
+              javaScriptEnabled={true}
+              domStorageEnabled={true}
+              sharedCookiesEnabled={true}
+              thirdPartyCookiesEnabled={true}
+              onMessage={(event) => {
+                try {
+                  const parsed = JSON.parse(event.nativeEvent.data);
+                  webViewBridge.handleMessage(parsed);
+                } catch {}
+              }}
+            />
+          </View>
+        )}
       </View>
     </SafeAreaView>
   );
