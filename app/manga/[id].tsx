@@ -59,6 +59,7 @@ import { getLanguageInfo, detectMangaLanguage } from '../../src/utils/language';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 import { ApiLogger } from '../../src/services/apiLogger';
 import { CloudFlareCookieManager } from '../../src/sources/network/cloudflare';
+import { DEFAULT_USER_AGENT } from '../../src/sources/network/httpClient';
 import { webViewBridge } from '../../src/sources/network/webViewBridge';
 import type { Manga, Chapter, LibraryCategory } from '../../src/types';
 
@@ -79,6 +80,8 @@ export default function MangaDetailScreen() {
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [selectedLanguage, setSelectedLanguage] = useState<string>('en');
   const [isLanguageDropdownOpen, setIsLanguageDropdownOpen] = useState(false);
+  const [selectedScanlator, setSelectedScanlator] = useState<string>('all');
+  const [isScanlatorDropdownOpen, setIsScanlatorDropdownOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingChapters, setIsLoadingChapters] = useState(true);
   const [isStartingReading, setIsStartingReading] = useState(false);
@@ -114,9 +117,29 @@ export default function MangaDetailScreen() {
   // or error return, otherwise source failures cause React's hook order error.
   const coverHeaders = useMemo(() => {
     if (!id) return undefined;
-    if (id.startsWith('hitomila:')) return { Referer: 'https://hitomi.la/' };
-    if (id.startsWith('manganato:') || id.includes('manganato')) return { Referer: 'https://www.manganato.gg/' };
-    if (id.startsWith('mangadot:') || id.includes('mangadot')) return { Referer: 'https://mangadot.net/' };
+    const lowerId = id.toLowerCase();
+    if (lowerId.startsWith('hitomila:') || lowerId.includes('hitomila')) {
+      return { Referer: 'https://hitomi.la/', 'User-Agent': DEFAULT_USER_AGENT };
+    }
+    if (lowerId.startsWith('nhentai:') || lowerId.includes('nhentai')) {
+      return { Referer: 'https://nhentai.net/', 'User-Agent': DEFAULT_USER_AGENT };
+    }
+    if (lowerId.startsWith('manganato:') || lowerId.includes('manganato')) {
+      const cfCookie = CloudFlareCookieManager.getCookie('manganato.gg');
+      return {
+        Referer: 'https://www.manganato.gg/',
+        'User-Agent': DEFAULT_USER_AGENT,
+        ...(cfCookie ? { Cookie: cfCookie } : {}),
+      };
+    }
+    if (lowerId.startsWith('mangadot:') || lowerId.includes('mangadot')) {
+      const cfCookie = CloudFlareCookieManager.getCookie('mangadot.net');
+      return {
+        Referer: 'https://mangadot.net/',
+        'User-Agent': DEFAULT_USER_AGENT,
+        ...(cfCookie ? { Cookie: cfCookie } : {}),
+      };
+    }
     if (isExternalSource(id)) {
       const resolved = SourceManager.resolveSource(id);
       if (resolved && resolved.parser.getRequestHeaders) {
@@ -157,6 +180,73 @@ export default function MangaDetailScreen() {
       }
     }
   }, [manga]);
+
+  // Helper to extract scanlation group name from a chapter
+  const getChapterScanlator = useCallback((chapter: Chapter): string => {
+    const group = chapter.relationships?.find((r) => r.type === 'scanlation_group');
+    const groupName = group?.attributes?.name;
+    if (groupName && groupName.trim()) return groupName.trim();
+    const user = chapter.relationships?.find((r) => r.type === 'user');
+    const userName = user?.attributes?.username;
+    if (userName && userName.trim()) return userName.trim();
+    return 'Unknown';
+  }, []);
+
+  // Compute list of available scanlation groups with chapter counts
+  const availableScanlators = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const c of chapters) {
+      const sc = getChapterScanlator(c);
+      counts[sc] = (counts[sc] || 0) + 1;
+    }
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name, count]) => ({ name, count }));
+  }, [chapters, getChapterScanlator]);
+
+  // Count unique chapters (for deduplicated view)
+  const uniqueChapterCount = useMemo(() => {
+    const seen = new Set<string>();
+    for (const c of chapters) {
+      const num = c.attributes.chapter?.trim() || c.id;
+      seen.add(num);
+    }
+    return seen.size;
+  }, [chapters]);
+
+  // Filtered chapters according to selected scanlation group
+  const displayedChapters = useMemo(() => {
+    if (selectedScanlator === 'deduplicated') {
+      const seen = new Set<string>();
+      return chapters.filter((c) => {
+        const num = c.attributes.chapter?.trim() || c.id;
+        if (seen.has(num)) return false;
+        seen.add(num);
+        return true;
+      });
+    }
+    if (selectedScanlator !== 'all') {
+      return chapters.filter((c) => getChapterScanlator(c) === selectedScanlator);
+    }
+    return chapters;
+  }, [chapters, selectedScanlator, getChapterScanlator]);
+
+  // Reset selected scanlator when switching manga
+  useEffect(() => {
+    setSelectedScanlator('all');
+  }, [id]);
+
+  // Reconcile selected scanlator if it no longer exists
+  useEffect(() => {
+    if (
+      selectedScanlator !== 'all' &&
+      selectedScanlator !== 'deduplicated' &&
+      availableScanlators.length > 0 &&
+      !availableScanlators.some((s) => s.name === selectedScanlator)
+    ) {
+      setSelectedScanlator('all');
+    }
+  }, [availableScanlators, selectedScanlator]);
 
   // Modals state
   const [categoryModalVisible, setCategoryModalVisible] = useState(false);
@@ -442,7 +532,7 @@ export default function MangaDetailScreen() {
       // External parsers already populated `chapters`. Calling the MangaDex
       // endpoint here causes false 404s such as /manga/omegascans:54/feed.
       const firstChapter = isExternalSource(id)
-        ? [...chapters].sort(
+        ? [...displayedChapters].sort(
             (a, b) =>
               parseFloat(a.attributes.chapter || '0') -
               parseFloat(b.attributes.chapter || '0')
@@ -473,7 +563,7 @@ export default function MangaDetailScreen() {
   };
 
   const handleSelectAllDownloads = () => {
-    const unDownloadedChapters = chapters.filter((c) => downloadMap[c.id]?.status !== 'completed');
+    const unDownloadedChapters = displayedChapters.filter((c) => downloadMap[c.id]?.status !== 'completed');
     if (selectedDownloadIds.size === unDownloadedChapters.length) {
       setSelectedDownloadIds(new Set());
     } else {
@@ -485,7 +575,7 @@ export default function MangaDetailScreen() {
     if (selectedDownloadIds.size === 0 || !manga) return;
     const coverFileName = extractCoverFileName(manga);
     const coverUrl = getCoverUrl(manga.id, coverFileName, '512');
-    const selectedList = chapters.filter(
+    const selectedList = displayedChapters.filter(
       (c) => selectedDownloadIds.has(c.id) && downloadMap[c.id]?.status !== 'completed'
     );
     setDownloadModalVisible(false);
@@ -831,7 +921,8 @@ export default function MangaDetailScreen() {
         <View style={styles.chapterHeader}>
           <View style={styles.chapterHeaderLeft}>
             <Text style={[styles.chapterHeaderTitle, { color: colors.text }]}>
-              Chapters ({chapters.length})
+              Chapters ({displayedChapters.length}
+              {displayedChapters.length !== chapters.length ? ` / ${chapters.length}` : ''})
             </Text>
           </View>
 
@@ -940,6 +1031,223 @@ export default function MangaDetailScreen() {
                               <View style={[styles.langCodeBadge, { backgroundColor: colors.borderSubtle }]}>
                                 <Text style={[styles.langCodeBadgeText, { color: colors.textSecondary }]}>
                                   {langCode.toUpperCase()}
+                                </Text>
+                              </View>
+                              {isSelected && (
+                                <Ionicons name="checkmark" size={15} color={colors.accent} />
+                              )}
+                            </Pressable>
+                          );
+                        })}
+                      </ScrollView>
+                    </View>
+                  </>
+                )}
+              </View>
+            )}
+
+            {/* Scanlation Group Dropdown (when 2 or more groups exist) */}
+            {availableScanlators.length > 1 && (
+              <View style={styles.groupPickerContainer}>
+                <Pressable
+                  onPress={() => {
+                    triggerHaptic();
+                    setIsScanlatorDropdownOpen((prev) => !prev);
+                  }}
+                  style={[
+                    styles.sortButton,
+                    {
+                      backgroundColor: colors.surfaceElevated,
+                      borderWidth: 0,
+                      maxWidth: 160,
+                    },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Select scanlation group"
+                >
+                  <Ionicons name="people-outline" size={13} color={colors.accent} />
+                  <Text
+                    style={[styles.sortText, { color: colors.accent, flexShrink: 1 }]}
+                    numberOfLines={1}
+                  >
+                    {selectedScanlator === 'all'
+                      ? 'All Groups'
+                      : selectedScanlator === 'deduplicated'
+                      ? 'Deduplicated'
+                      : selectedScanlator}
+                  </Text>
+                  <Ionicons
+                    name={isScanlatorDropdownOpen ? 'chevron-up' : 'chevron-down'}
+                    size={11}
+                    color={colors.accent}
+                  />
+                </Pressable>
+
+                {/* Floating Dropdown Modal / Popup on Web */}
+                {Platform.OS === 'web' && isScanlatorDropdownOpen && (
+                  <>
+                    <Pressable
+                      style={styles.languageWebBackdrop}
+                      onPress={(e: any) => {
+                        e?.stopPropagation?.();
+                        setIsScanlatorDropdownOpen(false);
+                      }}
+                    />
+                    <View
+                      style={[
+                        styles.groupDropdownMenu,
+                        {
+                          backgroundColor: colors.surface,
+                          borderWidth: 0,
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.languageDropdownTitle, { color: colors.textMuted }]}>
+                        SCANLATION GROUPS ({availableScanlators.length})
+                      </Text>
+                      <ScrollView
+                        style={styles.languageDropdownScroll}
+                        showsVerticalScrollIndicator={true}
+                      >
+                        {/* Option 1: All Groups */}
+                        <Pressable
+                          onPress={(e: any) => {
+                            e?.stopPropagation?.();
+                            triggerHaptic();
+                            setSelectedScanlator('all');
+                            setIsScanlatorDropdownOpen(false);
+                          }}
+                          style={({ pressed }) => [
+                            styles.languageDropdownItem,
+                            {
+                              backgroundColor:
+                                selectedScanlator === 'all'
+                                  ? colors.accent + '22'
+                                  : pressed
+                                  ? colors.surfaceElevated
+                                  : 'transparent',
+                            },
+                          ]}
+                        >
+                          <Ionicons
+                            name="albums-outline"
+                            size={16}
+                            color={selectedScanlator === 'all' ? colors.accent : colors.textSecondary}
+                          />
+                          <Text
+                            style={[
+                              styles.languageDropdownItemName,
+                              {
+                                color: selectedScanlator === 'all' ? colors.accent : colors.text,
+                                fontWeight: selectedScanlator === 'all' ? 'bold' : 'normal',
+                              },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            All Groups
+                          </Text>
+                          <View style={[styles.langCodeBadge, { backgroundColor: colors.borderSubtle }]}>
+                            <Text style={[styles.langCodeBadgeText, { color: colors.textSecondary }]}>
+                              {chapters.length}
+                            </Text>
+                          </View>
+                          {selectedScanlator === 'all' && (
+                            <Ionicons name="checkmark" size={15} color={colors.accent} />
+                          )}
+                        </Pressable>
+
+                        {/* Option 2: Deduplicated (No duplicates like 1.1, 1.1) */}
+                        <Pressable
+                          onPress={(e: any) => {
+                            e?.stopPropagation?.();
+                            triggerHaptic();
+                            setSelectedScanlator('deduplicated');
+                            setIsScanlatorDropdownOpen(false);
+                          }}
+                          style={({ pressed }) => [
+                            styles.languageDropdownItem,
+                            {
+                              backgroundColor:
+                                selectedScanlator === 'deduplicated'
+                                  ? colors.accent + '22'
+                                  : pressed
+                                  ? colors.surfaceElevated
+                                  : 'transparent',
+                            },
+                          ]}
+                        >
+                          <Ionicons
+                            name="filter-outline"
+                            size={16}
+                            color={
+                              selectedScanlator === 'deduplicated' ? colors.accent : colors.textSecondary
+                            }
+                          />
+                          <Text
+                            style={[
+                              styles.languageDropdownItemName,
+                              {
+                                color: selectedScanlator === 'deduplicated' ? colors.accent : colors.text,
+                                fontWeight: selectedScanlator === 'deduplicated' ? 'bold' : 'normal',
+                              },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            All (Deduplicated)
+                          </Text>
+                          <View style={[styles.langCodeBadge, { backgroundColor: colors.borderSubtle }]}>
+                            <Text style={[styles.langCodeBadgeText, { color: colors.textSecondary }]}>
+                              {uniqueChapterCount}
+                            </Text>
+                          </View>
+                          {selectedScanlator === 'deduplicated' && (
+                            <Ionicons name="checkmark" size={15} color={colors.accent} />
+                          )}
+                        </Pressable>
+
+                        {/* Individual Scanlator Groups */}
+                        {availableScanlators.map((group) => {
+                          const isSelected = selectedScanlator === group.name;
+                          return (
+                            <Pressable
+                              key={group.name}
+                              onPress={(e: any) => {
+                                e?.stopPropagation?.();
+                                triggerHaptic();
+                                setSelectedScanlator(group.name);
+                                setIsScanlatorDropdownOpen(false);
+                              }}
+                              style={({ pressed }) => [
+                                styles.languageDropdownItem,
+                                {
+                                  backgroundColor: isSelected
+                                    ? colors.accent + '22'
+                                    : pressed
+                                    ? colors.surfaceElevated
+                                    : 'transparent',
+                                },
+                              ]}
+                            >
+                              <Ionicons
+                                name="people-outline"
+                                size={16}
+                                color={isSelected ? colors.accent : colors.textSecondary}
+                              />
+                              <Text
+                                style={[
+                                  styles.languageDropdownItemName,
+                                  {
+                                    color: isSelected ? colors.accent : colors.text,
+                                    fontWeight: isSelected ? 'bold' : 'normal',
+                                  },
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {group.name}
+                              </Text>
+                              <View style={[styles.langCodeBadge, { backgroundColor: colors.borderSubtle }]}>
+                                <Text style={[styles.langCodeBadgeText, { color: colors.textSecondary }]}>
+                                  {group.count}
                                 </Text>
                               </View>
                               {isSelected && (
@@ -1070,8 +1378,32 @@ export default function MangaDetailScreen() {
               This series does not have any readable chapters on this source yet.
             </Text>
           </View>
+        ) : displayedChapters.length === 0 ? (
+          <View style={{ padding: 36, alignItems: 'center', justifyContent: 'center' }}>
+            <Ionicons name="filter-outline" size={36} color={colors.textMuted} style={{ marginBottom: 10 }} />
+            <Text style={{ color: colors.text, fontSize: 15, fontWeight: Typography.weights.semibold as any }}>
+              No chapters found
+            </Text>
+            <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 4, textAlign: 'center' }}>
+              No chapters match the selected scanlation group ({selectedScanlator}).
+            </Text>
+            <Pressable
+              onPress={() => setSelectedScanlator('all')}
+              style={{
+                marginTop: 12,
+                paddingHorizontal: 14,
+                paddingVertical: 8,
+                borderRadius: Radius.md,
+                backgroundColor: colors.surfaceElevated,
+              }}
+            >
+              <Text style={{ color: colors.accent, fontSize: 13, fontWeight: Typography.weights.semibold as any }}>
+                Show All Groups
+              </Text>
+            </Pressable>
+          </View>
         ) : (
-          chapters.map((chapter, idx) => {
+          displayedChapters.map((chapter, idx) => {
             const chapterNum = chapter.attributes.chapter;
             const chapterTitle = chapter.attributes.title;
             const dlItem = downloadMap[chapter.id];
@@ -1223,6 +1555,186 @@ export default function MangaDetailScreen() {
         onRemoveFromLibrary={() => removeFromLibrary(id!)}
       />
 
+      {/* Native Mobile Chapter Scanlation Group Selection Modal */}
+      {Platform.OS !== 'web' && (
+        <Modal
+          visible={isScanlatorDropdownOpen}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setIsScanlatorDropdownOpen(false)}
+        >
+          <Pressable
+            style={styles.modalOverlay}
+            onPress={() => setIsScanlatorDropdownOpen(false)}
+          >
+            <Pressable
+              style={[
+                styles.modalContent,
+                { backgroundColor: colors.surface, borderTopColor: 'transparent' },
+              ]}
+              onPress={(e) => e.stopPropagation()}
+            >
+              <View style={[styles.modalHeader, { borderBottomColor: 'transparent' }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.modalTitle, { color: colors.text }]}>Scanlation Group</Text>
+                  <Text style={[styles.modalSub, { color: colors.textSecondary }]}>
+                    Select translation group ({availableScanlators.length} available)
+                  </Text>
+                </View>
+              </View>
+
+              <ScrollView
+                contentContainerStyle={{ padding: Spacing.md, gap: Spacing.xs, paddingBottom: Spacing['2xl'] }}
+                showsVerticalScrollIndicator={true}
+              >
+                {/* Option 1: All Groups */}
+                <Pressable
+                  onPress={() => {
+                    triggerHaptic();
+                    setSelectedScanlator('all');
+                    setIsScanlatorDropdownOpen(false);
+                  }}
+                  style={({ pressed }) => [
+                    styles.mobileLanguageRow,
+                    {
+                      backgroundColor:
+                        selectedScanlator === 'all'
+                          ? colors.surfaceElevated
+                          : pressed
+                          ? colors.surfaceElevated
+                          : 'transparent',
+                      borderWidth: 0,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name="albums-outline"
+                    size={22}
+                    color={selectedScanlator === 'all' ? colors.accent : colors.textSecondary}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        styles.mobileLanguageName,
+                        {
+                          color: selectedScanlator === 'all' ? colors.accent : colors.text,
+                          fontWeight: selectedScanlator === 'all' ? 'bold' : 'normal',
+                        },
+                      ]}
+                    >
+                      All Groups
+                    </Text>
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }}>
+                      Show all chapters from every group ({chapters.length})
+                    </Text>
+                  </View>
+                  {selectedScanlator === 'all' && (
+                    <Ionicons name="checkmark-circle" size={20} color={colors.accent} />
+                  )}
+                </Pressable>
+
+                {/* Option 2: Deduplicated */}
+                <Pressable
+                  onPress={() => {
+                    triggerHaptic();
+                    setSelectedScanlator('deduplicated');
+                    setIsScanlatorDropdownOpen(false);
+                  }}
+                  style={({ pressed }) => [
+                    styles.mobileLanguageRow,
+                    {
+                      backgroundColor:
+                        selectedScanlator === 'deduplicated'
+                          ? colors.surfaceElevated
+                          : pressed
+                          ? colors.surfaceElevated
+                          : 'transparent',
+                      borderWidth: 0,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name="filter-outline"
+                    size={22}
+                    color={selectedScanlator === 'deduplicated' ? colors.accent : colors.textSecondary}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        styles.mobileLanguageName,
+                        {
+                          color: selectedScanlator === 'deduplicated' ? colors.accent : colors.text,
+                          fontWeight: selectedScanlator === 'deduplicated' ? 'bold' : 'normal',
+                        },
+                      ]}
+                    >
+                      All (Deduplicated)
+                    </Text>
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }}>
+                      No duplicates like 1.1, 1.1 ({uniqueChapterCount} unique chapters)
+                    </Text>
+                  </View>
+                  {selectedScanlator === 'deduplicated' && (
+                    <Ionicons name="checkmark-circle" size={20} color={colors.accent} />
+                  )}
+                </Pressable>
+
+                {/* Option 3+: Individual groups */}
+                {availableScanlators.map((group) => {
+                  const isSelected = selectedScanlator === group.name;
+                  return (
+                    <Pressable
+                      key={group.name}
+                      onPress={() => {
+                        triggerHaptic();
+                        setSelectedScanlator(group.name);
+                        setIsScanlatorDropdownOpen(false);
+                      }}
+                      style={({ pressed }) => [
+                        styles.mobileLanguageRow,
+                        {
+                          backgroundColor: isSelected
+                            ? colors.surfaceElevated
+                            : pressed
+                            ? colors.surfaceElevated
+                            : 'transparent',
+                          borderWidth: 0,
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name="people-outline"
+                        size={22}
+                        color={isSelected ? colors.accent : colors.textSecondary}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[
+                            styles.mobileLanguageName,
+                            {
+                              color: isSelected ? colors.accent : colors.text,
+                              fontWeight: isSelected ? 'bold' : 'normal',
+                            },
+                          ]}
+                        >
+                          {group.name}
+                        </Text>
+                        <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }}>
+                          {group.count} {group.count === 1 ? 'chapter' : 'chapters'}
+                        </Text>
+                      </View>
+                      {isSelected && (
+                        <Ionicons name="checkmark-circle" size={20} color={colors.accent} />
+                      )}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
       {/* Native Mobile Chapter Language Selection Modal */}
       {Platform.OS !== 'web' && (
         <Modal
@@ -1356,23 +1868,31 @@ export default function MangaDetailScreen() {
                 ]}
               >
                 <Ionicons
-                  name={selectedDownloadIds.size === chapters.length ? 'checkmark-circle' : 'ellipse-outline'}
+                  name={
+                    selectedDownloadIds.size === displayedChapters.length &&
+                    displayedChapters.length > 0
+                      ? 'checkmark-circle'
+                      : 'ellipse-outline'
+                  }
                   size={18}
                   color={colors.accent}
                 />
                 <Text style={[styles.quickActionText, { color: colors.text }]}>
-                  {selectedDownloadIds.size === chapters.length ? 'Deselect All' : 'Select All'}
+                  {selectedDownloadIds.size === displayedChapters.length &&
+                  displayedChapters.length > 0
+                    ? 'Deselect All'
+                    : 'Select All'}
                 </Text>
               </Pressable>
 
               <Text style={[styles.selectedCountText, { color: colors.textMuted }]}>
-                {selectedDownloadIds.size} of {chapters.length} selected
+                {selectedDownloadIds.size} of {displayedChapters.length} selected
               </Text>
             </View>
 
             {/* Chapters Selection List */}
             <FlatList
-              data={chapters}
+              data={displayedChapters}
               keyExtractor={(item) => item.id}
               contentContainerStyle={styles.downloadListContent}
               renderItem={({ item }) => {
@@ -1551,7 +2071,7 @@ export default function MangaDetailScreen() {
             {WebView && Platform.OS !== 'web' ? (
               <WebView
                 source={{ uri: cfInAppUrl }}
-                userAgent="Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                userAgent={DEFAULT_USER_AGENT}
                 sharedCookiesEnabled={true}
                 thirdPartyCookiesEnabled={true}
                 style={{ flex: 1, backgroundColor: colors.background }}
@@ -1885,6 +2405,22 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     zIndex: 9998,
+  },
+  groupPickerContainer: {
+    position: 'relative',
+    zIndex: 101,
+  },
+  groupDropdownMenu: {
+    position: 'absolute',
+    top: 38,
+    right: 0,
+    width: 240,
+    borderRadius: Radius.lg,
+    borderWidth: 0,
+    padding: 8,
+    boxShadow: '0 8px 16px rgba(0, 0, 0, 0.45)',
+    elevation: 20,
+    zIndex: 9999,
   },
   languageDropdownMenu: {
     position: 'absolute',

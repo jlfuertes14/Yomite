@@ -241,6 +241,81 @@ class WebViewBridgeService {
   }
 
   /**
+   * Fetches an image inside the active WebView session and returns a base64 data URL.
+   * Native session cookies (including HttpOnly cf_clearance) are automatically sent.
+   */
+  public async fetchImageBase64(url: string, timeoutMs = 25000): Promise<string> {
+    if (!this.sendScriptToWebView) {
+      throw new Error('WebView bridge is not currently mounted or connected.');
+    }
+
+    const id = `bridge_img_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+    return new Promise<string>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingRequests.delete(id);
+        reject(new Error(`WebView bridge image request timed out after ${timeoutMs}ms for ${url}`));
+      }, timeoutMs);
+
+      this.pendingRequests.set(id, { id, url, resolve, reject, timeout });
+
+      const script = `
+        (function() {
+          try {
+            fetch(${JSON.stringify(url)}, {
+              credentials: 'include'
+            })
+            .then(function(res) {
+              if (!res.ok) {
+                throw new Error('HTTP ' + res.status + ': ' + res.statusText);
+              }
+              return res.blob();
+            })
+            .then(function(blob) {
+              var reader = new FileReader();
+              reader.onloadend = function() {
+                window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
+                  type: 'BRIDGE_RESPONSE',
+                  id: ${JSON.stringify(id)},
+                  success: true,
+                  data: reader.result
+                }));
+              };
+              reader.onerror = function() {
+                window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
+                  type: 'BRIDGE_RESPONSE',
+                  id: ${JSON.stringify(id)},
+                  success: false,
+                  error: 'FileReader failed to convert image blob to data URL'
+                }));
+              };
+              reader.readAsDataURL(blob);
+            })
+            .catch(function(err) {
+              window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'BRIDGE_RESPONSE',
+                id: ${JSON.stringify(id)},
+                success: false,
+                error: err.message
+              }));
+            });
+          } catch (e) {
+            window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'BRIDGE_RESPONSE',
+              id: ${JSON.stringify(id)},
+              success: false,
+              error: e.message
+            }));
+          }
+        })();
+        true;
+      `;
+
+      this.sendScriptToWebView(script);
+    });
+  }
+
+  /**
    * Processes incoming messages from the WebView to check if they belong to a bridge request.
    * Returns true if the message was handled by the bridge.
    */

@@ -15,6 +15,7 @@ import {
   useWindowDimensions,
   StatusBar,
   Platform,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -51,7 +52,12 @@ import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { ApiLogger } from '../../src/services/apiLogger';
 import { ZoomableImage } from '../../src/components/ZoomableImage';
+import { CloudFlareCookieManager } from '../../src/sources/network/cloudflare';
+import { DEFAULT_USER_AGENT } from '../../src/sources/network/httpClient';
+import { webViewBridge } from '../../src/sources/network/webViewBridge';
 import type { ReadingMode, Chapter } from '../../src/types';
+import * as WebBrowser from 'expo-web-browser';
+import { WebView } from 'react-native-webview';
 
 function getContrastTextColor(hex: string): string {
   const value = hex.replace('#', '');
@@ -87,7 +93,13 @@ interface ReaderImagePageProps {
   onTap?: (x: number) => void;
   onAspectMeasured?: (ratio: number) => void;
   headers?: Record<string, string>;
+  reloadTrigger?: number;
+  onImageError?: (index: number, url: string) => void;
+  onImageSuccess?: (index: number) => void;
+  onCloudflareVerify?: () => void;
 }
+
+const imageBridgeCache = new Map<string, string>();
 
 const ReaderImagePage = React.memo(function ReaderImagePage({
   url,
@@ -99,6 +111,10 @@ const ReaderImagePage = React.memo(function ReaderImagePage({
   onTap,
   onAspectMeasured,
   headers,
+  reloadTrigger,
+  onImageError,
+  onImageSuccess,
+  onCloudflareVerify,
 }: ReaderImagePageProps) {
   const colors = useThemeColors();
   const theme = useReaderStore((s) => s.theme);
@@ -106,29 +122,67 @@ const ReaderImagePage = React.memo(function ReaderImagePage({
   const [isError, setIsError] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [bridgedDataUri, setBridgedDataUri] = useState<string | null>(() => imageBridgeCache.get(url) || null);
+
+  useEffect(() => {
+    setIsError(false);
+    setIsRetrying(false);
+    setRetryCount(0);
+    const cached = imageBridgeCache.get(url) || null;
+    setBridgedDataUri(cached);
+  }, [headers, reloadTrigger, url]);
+
+  const isCfProtectedUrl = useMemo(() => {
+    const lower = url.toLowerCase();
+    return (
+      lower.includes('mangadot.net') ||
+      lower.includes('/chapters/manga_') ||
+      lower.includes('chapmanganato') ||
+      lower.includes('manganato') ||
+      lower.includes('comix.to')
+    );
+  }, [url]);
 
   const imageSource = useMemo(() => {
+    if (bridgedDataUri) return { uri: bridgedDataUri };
     if (!url) return null;
-    const baseSource = headers ? { uri: url, headers } : { uri: url };
-    if (retryCount === 0) return baseSource;
-    const separator = url.includes('?') ? '&' : '?';
-    return { ...baseSource, uri: `${url}${separator}retry=${retryCount}` };
-  }, [url, retryCount, headers]);
+    return headers ? { uri: url, headers } : { uri: url };
+  }, [url, headers, bridgedDataUri]);
 
-  const handleImageError = useCallback(() => {
+  const handleImageError = useCallback(async () => {
     ApiLogger.logRequest({
       timestamp: Date.now(),
       method: 'GET_IMG',
       url,
-      status: 429,
-      statusText: 'Image Load Failed',
+      status: isCfProtectedUrl ? 403 : null,
+      statusText: isCfProtectedUrl ? 'Cloudflare Challenge / 403' : 'Image Load Failed',
       durationMs: 0,
-      error: `Page ${index + 1} image failed to load (Rate limit or network error)`,
+      error: `Page ${index + 1} image failed to load${isCfProtectedUrl ? ' (Cloudflare verification required)' : ''}`,
     });
 
-    if (retryCount < 3) {
+    onImageError?.(index, url);
+
+    // If Cloudflare protected domain and not already bridged, attempt WebView bridge fetch
+    if (isCfProtectedUrl && !bridgedDataUri && Platform.OS !== 'web' && webViewBridge.hasSender()) {
+      try {
+        setIsRetrying(true);
+        const dataUri = await webViewBridge.fetchImageBase64(url, 20000);
+        if (dataUri) {
+          imageBridgeCache.set(url, dataUri);
+          setBridgedDataUri(dataUri);
+          setIsError(false);
+          setIsRetrying(false);
+          onImageSuccess?.(index);
+          return;
+        }
+      } catch (err) {
+        // Bridge fetch failed (e.g. Cloudflare Turnstile not yet solved)
+      }
+    }
+
+    if (retryCount < 2) {
       setIsRetrying(true);
-      const delay = Math.pow(2, retryCount + 1) * 800;
+      const delay = Math.pow(2, retryCount + 1) * 600;
       setTimeout(() => {
         setRetryCount((prev) => prev + 1);
         setIsRetrying(false);
@@ -137,49 +191,116 @@ const ReaderImagePage = React.memo(function ReaderImagePage({
       setIsError(true);
       setIsRetrying(false);
     }
-  }, [url, index, retryCount]);
+  }, [url, index, retryCount, isCfProtectedUrl, onImageError, onImageSuccess, bridgedDataUri]);
 
-  const handleManualRetry = useCallback(() => {
+  const handleManualRetry = useCallback(async () => {
     setIsError(false);
     setIsRetrying(true);
+    if (isCfProtectedUrl && Platform.OS !== 'web' && webViewBridge.hasSender()) {
+      try {
+        const dataUri = await webViewBridge.fetchImageBase64(url, 20000);
+        if (dataUri) {
+          imageBridgeCache.set(url, dataUri);
+          setBridgedDataUri(dataUri);
+          setIsRetrying(false);
+          onImageSuccess?.(index);
+          return;
+        }
+      } catch {}
+    }
     setRetryCount((prev) => prev + 1);
     setTimeout(() => setIsRetrying(false), 500);
-  }, []);
+  }, [isCfProtectedUrl, url, index, onImageSuccess]);
 
   return (
     <View style={{ width, height, justifyContent: 'center', alignItems: 'center' }}>
       {isError ? (
-        <View style={[styles.imageErrorCard, { width: Math.min(width - 32, 420), borderColor: colors.border }]}>
-          <Ionicons name="warning-outline" size={32} color={colors.accent} />
-          <Text style={[styles.imageErrorTitle, { color: colors.text }]}>Page {index + 1} Load Failed</Text>
+        <View
+          style={[
+            styles.imageErrorCard,
+            {
+              width: Math.min(width - 32, 400),
+              backgroundColor: colors.surface,
+            },
+          ]}
+        >
+          <Ionicons
+            name={isCfProtectedUrl ? 'shield-outline' : 'alert-circle-outline'}
+            size={36}
+            color={colors.accent}
+          />
+          <Text style={[styles.imageErrorTitle, { color: colors.text }]}>
+            {isCfProtectedUrl ? `Page ${index + 1} • Verification Required` : `Page ${index + 1} • Load Failed`}
+          </Text>
           <Text style={[styles.imageErrorSubtext, { color: colors.textSecondary }]}>
-            MangaDex rate limit (429) or network timeout.
+            {isCfProtectedUrl
+              ? 'This chapter image is protected by Cloudflare. Solve verification once to continue reading.'
+              : 'Unable to load page image. Please check your network connection.'}
           </Text>
 
-          <Pressable
-            onPress={handleManualRetry}
-            style={({ pressed }) => [
-              styles.imageRetryBtn,
-              { backgroundColor: colors.accent },
-              pressed && { opacity: 0.8 },
-            ]}
-          >
-            <Ionicons name="refresh" size={16} color={getContrastTextColor(colors.accent)} />
-            <Text style={[styles.imageRetryBtnText, { color: getContrastTextColor(colors.accent) }]}>Retry Page {index + 1}</Text>
-          </Pressable>
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
+            {isCfProtectedUrl && onCloudflareVerify && (
+              <Pressable
+                onPress={onCloudflareVerify}
+                style={({ pressed }) => [
+                  styles.imageRetryBtn,
+                  { backgroundColor: colors.accent, minHeight: 44, paddingHorizontal: 18 },
+                  pressed && { opacity: 0.8 },
+                ]}
+                accessibilityRole="button"
+                aria-label="Verify Cloudflare"
+              >
+                <Ionicons name="shield-checkmark" size={16} color={getContrastTextColor(colors.accent)} />
+                <Text style={[styles.imageRetryBtnText, { color: getContrastTextColor(colors.accent) }]}>
+                  Verify Cloudflare
+                </Text>
+              </Pressable>
+            )}
+
+            <Pressable
+              onPress={handleManualRetry}
+              style={({ pressed }) => [
+                styles.imageRetryBtn,
+                {
+                  backgroundColor: colors.surfaceElevated,
+                  minHeight: 44,
+                  paddingHorizontal: 16,
+                },
+                pressed && { opacity: 0.8 },
+              ]}
+              accessibilityRole="button"
+              aria-label={`Retry Page ${index + 1}`}
+            >
+              <Ionicons
+                name="refresh"
+                size={16}
+                color={colors.text}
+              />
+              <Text
+                style={[
+                  styles.imageRetryBtnText,
+                  { color: colors.text },
+                ]}
+              >
+                Retry Page {index + 1}
+              </Text>
+            </Pressable>
+          </View>
         </View>
       ) : (
         <View style={{ width, height, justifyContent: 'center', alignItems: 'center' }}>
           {imageSource && (
             <ZoomableImage
+              key={`${url}-${bridgedDataUri ? 'bridged' : 'direct'}-retry-${retryCount}-${reloadTrigger ?? 0}`}
               source={imageSource}
               style={{ width, height }}
               contentFit={contentFit}
               zoomEnabled={zoomEnabled}
-              recyclingKey={url}
+              recyclingKey={`${url}-${bridgedDataUri ? 'bridged' : 'direct'}-${reloadTrigger ?? 0}`}
               onTap={onTap}
               onLoad={(e) => {
                 setIsError(false);
+                onImageSuccess?.(index);
                 if (e.source?.width && e.source?.height && onAspectMeasured) {
                   onAspectMeasured(e.source.height / e.source.width);
                 }
@@ -192,7 +313,7 @@ const ReaderImagePage = React.memo(function ReaderImagePage({
             <View style={[styles.imageRetryOverlay, { backgroundColor: readerTheme.background }]}>
               <ActivityIndicator size="small" color={colors.accent} />
               <Text style={[styles.imageRetryingText, { color: readerTheme.text }]}>
-                Rate limited / Retrying page {index + 1} ({retryCount + 1}/3)...
+                Retrying page {index + 1} ({retryCount + 1}/3)...
               </Text>
             </View>
           )}
@@ -211,6 +332,10 @@ interface WebtoonPageItemProps {
   onTap: (x: number) => void;
   onLayout?: (event: LayoutChangeEvent) => void;
   headers?: Record<string, string>;
+  reloadTrigger?: number;
+  onImageError?: (index: number, url: string) => void;
+  onImageSuccess?: (index: number) => void;
+  onCloudflareVerify?: () => void;
 }
 
 const WebtoonPageItem = React.memo(function WebtoonPageItem({
@@ -222,6 +347,10 @@ const WebtoonPageItem = React.memo(function WebtoonPageItem({
   onTap,
   onLayout,
   headers,
+  reloadTrigger,
+  onImageError,
+  onImageSuccess,
+  onCloudflareVerify,
 }: WebtoonPageItemProps) {
   const [aspectRatio, setAspectRatio] = useState<number>(1.5);
 
@@ -232,14 +361,18 @@ const WebtoonPageItem = React.memo(function WebtoonPageItem({
   return (
     <View onLayout={onLayout}>
       <ReaderImagePage
-      url={url}
-      index={index}
-      width={webtoonWidth}
-      height={displayHeight}
-      contentFit={displayFit}
-      zoomEnabled={false}
-      onTap={onTap}
-      headers={headers}
+        url={url}
+        index={index}
+        width={webtoonWidth}
+        height={displayHeight}
+        contentFit={displayFit}
+        zoomEnabled={false}
+        onTap={onTap}
+        headers={headers}
+        reloadTrigger={reloadTrigger}
+        onImageError={onImageError}
+        onImageSuccess={onImageSuccess}
+        onCloudflareVerify={onCloudflareVerify}
         onAspectMeasured={(ratio) => {
           setAspectRatio((prev) => (prev === ratio ? prev : ratio));
         }}
@@ -323,6 +456,66 @@ export default function ReaderScreen() {
   const [uploaderName, setUploaderName] = useState<string>('Uploader');
   const [resolvedMangaId, setResolvedMangaId] = useState<string | undefined>(mangaId);
   const [pageHeaders, setPageHeaders] = useState<Record<string, string> | undefined>(undefined);
+  const [isCloudflare, setIsCloudflare] = useState(false);
+  const [isCfInAppModalOpen, setIsCfInAppModalOpen] = useState(false);
+  const [cfInAppUrl, setCfInAppUrl] = useState('https://mangadot.net/');
+  const [reloadTrigger, setReloadTrigger] = useState(0);
+  const [failedPages, setFailedPages] = useState<Set<number>>(new Set());
+
+  const persistentBridgeRef = useRef<any>(null);
+  const cfWebViewRef = useRef<any>(null);
+  const hasSolvedRef = useRef(false);
+  const [persistentBridgeUrl, setPersistentBridgeUrl] = useState('https://mangadot.net/');
+
+  // Register WebView script dispatcher for authenticated requests
+  useEffect(() => {
+    webViewBridge.registerSender((script: string) => {
+      if (cfWebViewRef.current) {
+        cfWebViewRef.current.injectJavaScript(script);
+        return;
+      }
+      if (persistentBridgeRef.current) {
+        persistentBridgeRef.current.injectJavaScript(script);
+      }
+    });
+    return () => {
+      webViewBridge.unregisterSender();
+    };
+  }, []);
+
+  useEffect(() => {
+    let targetUrl = 'https://mangadot.net/';
+    if (chapterId?.includes('mangadot')) {
+      targetUrl = 'https://mangadot.net/';
+    } else if (chapterId?.includes('manganato')) {
+      targetUrl = 'https://manganato.gg/';
+    } else if (chapterId?.includes('nhentai')) {
+      targetUrl = 'https://nhentai.net/';
+    } else if (chapterId?.includes('comix')) {
+      targetUrl = 'https://comix.net/';
+    } else if (pages.length > 0 && pages[0]) {
+      try {
+        const u = new URL(pages[0]);
+        targetUrl = `${u.protocol}//${u.host}/`;
+      } catch {}
+    }
+    setPersistentBridgeUrl(targetUrl);
+  }, [chapterId, pages]);
+
+  const isCloudflareSource = useMemo(() => {
+    if (!chapterId) return false;
+    return (
+      chapterId.includes('mangadot') ||
+      chapterId.includes('manganato') ||
+      chapterId.includes('comix') ||
+      pages.some(
+        (p) =>
+          p.includes('mangadot.net') ||
+          p.includes('/chapters/manga_') ||
+          p.includes('chapmanganato')
+      )
+    );
+  }, [chapterId, pages]);
 
   const flatListRef = useRef<FlatList>(null);
   const webtoonListRef = useRef<FlatList<string>>(null);
@@ -409,6 +602,7 @@ export default function ReaderScreen() {
     try {
       setIsLoading(true);
       setError(null);
+      setIsCloudflare(false);
       setOfflineUnavailable(false);
       restoredChapterIdRef.current = null;
       resumeTargetPageRef.current = 0;
@@ -446,13 +640,36 @@ export default function ReaderScreen() {
         if (isExt) {
           const result = await getUniversalChapterPages(chapterId!);
           loadedPages = result.pages;
-          const fallbackHeaders =
-            result.headers ||
-            (chapterId.includes('manganato')
-              ? { Referer: 'https://www.manganato.gg/' }
-              : chapterId.includes('mangadot')
-              ? { Referer: 'https://mangadot.net/' }
-              : undefined);
+          if (result.mangaId && !resolvedMangaId) {
+            setResolvedMangaId(result.mangaId);
+          }
+
+          await CloudFlareCookieManager.init();
+          const isMangaDot = chapterId.includes('mangadot');
+          const cfCookie = isMangaDot
+            ? CloudFlareCookieManager.getCookie('mangadot.net')
+            : chapterId.includes('manganato')
+            ? CloudFlareCookieManager.getCookie('manganato.gg')
+            : undefined;
+
+          const defaultHeaders: Record<string, string> = {
+            'User-Agent': DEFAULT_USER_AGENT,
+            Referer: isMangaDot
+              ? 'https://mangadot.net/'
+              : chapterId.includes('nhentai')
+              ? 'https://nhentai.net/'
+              : chapterId.includes('manganato')
+              ? 'https://www.manganato.gg/'
+              : 'https://mangadex.org/',
+          };
+          if (cfCookie) {
+            defaultHeaders['Cookie'] = cfCookie;
+          }
+
+          const fallbackHeaders = {
+            ...defaultHeaders,
+            ...(result.headers || {}),
+          };
           setPageHeaders(fallbackHeaders);
         } else {
           const result = await getChapterPages(chapterId!, dataSaver);
@@ -476,13 +693,36 @@ export default function ReaderScreen() {
       const clampedPage = Math.max(0, Math.min(isNaN(targetPage) ? 0 : targetPage, maxPage));
       resumeTargetPageRef.current = clampedPage;
       setCurrentPage(clampedPage);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load pages:', err);
+      const isCf =
+        err?.isCloudFlare ||
+        err?.name === 'CloudFlareError' ||
+        err?.status === 403 ||
+        (err?.message &&
+          (err.message.toLowerCase().includes('cloudflare') ||
+            err.message.toLowerCase().includes('just a moment') ||
+            err.message.toLowerCase().includes('turnstile')));
+      if (isCf) {
+        setIsCloudflare(true);
+        if (chapterId?.includes('mangadot')) {
+          setCfInAppUrl('https://mangadot.net/');
+        } else if (chapterId?.includes('manganato')) {
+          setCfInAppUrl('https://manganato.gg/');
+        } else if (chapterId?.includes('nhentai')) {
+          setCfInAppUrl('https://nhentai.net/');
+        } else if (chapterId?.includes('comix')) {
+          setCfInAppUrl('https://comix.net/');
+        } else {
+          setCfInAppUrl('https://mangadot.net/');
+        }
+      }
+
       const isOnline = await checkNetwork();
       if (!isOnline) {
         setPages([]);
         setOfflineUnavailable(true);
-      } else {
+      } else if (!isCf) {
         setError('Failed to load chapter pages. Please try again.');
       }
     } finally {
@@ -490,13 +730,391 @@ export default function ReaderScreen() {
     }
   };
 
+  const handleCloudflareSolved = useCallback(
+    async (newCookie?: string) => {
+      let domain = 'mangadot.net';
+      if (chapterId.includes('mangadot')) {
+        domain = 'mangadot.net';
+      } else if (chapterId.includes('manganato')) {
+        domain = 'manganato.gg';
+      } else if (chapterId.includes('nhentai')) {
+        domain = 'nhentai.net';
+      } else if (chapterId.includes('comix')) {
+        domain = 'comix.to';
+      } else if (pages.length > 0 && pages[0]) {
+        try {
+          const u = new URL(pages[0]);
+          domain = u.host;
+        } catch {
+          domain = 'mangadot.net';
+        }
+      }
+
+      if (domain) {
+        webViewBridge.setDomainVerified(domain, true);
+        if (newCookie) {
+          const match = newCookie.match(/cf_clearance=([^;]+)/);
+          if (match) {
+            await CloudFlareCookieManager.setCookie(domain, match[0]);
+          } else {
+            await CloudFlareCookieManager.setCookie(domain, newCookie);
+          }
+        }
+      }
+
+      const activeCookie = domain ? CloudFlareCookieManager.getCookie(domain) : null;
+      if (activeCookie) {
+        setPageHeaders((prev) => ({
+          ...(prev || {}),
+          Cookie: activeCookie,
+        }));
+      }
+
+      setIsCfInAppModalOpen(false);
+      setIsCloudflare(false);
+      setFailedPages(new Set());
+      imageBridgeCache.clear();
+      setReloadTrigger((v) => v + 1);
+
+      // Refresh persistent background bridge session with the newly acquired cookies
+      persistentBridgeRef.current?.reload();
+
+      if (pages.length === 0) {
+        loadPages();
+      }
+    },
+    [chapterId, pages]
+  );
+
+  const handleCfNavStateChange = useCallback(
+    (navState: any) => {
+      const url = navState.url || '';
+      const title = (navState.title || '').toLowerCase();
+
+      const isCfTitle =
+        title.includes('just a moment') ||
+        title.includes('attention required') ||
+        title.includes('security check') ||
+        title.includes('checking your browser') ||
+        title.includes('verify you are human') ||
+        title.includes('cloudflare');
+      const isCfHost =
+        url.includes('challenges.cloudflare.com') ||
+        url.includes('/cdn-cgi/challenge-platform/');
+      const isTargetDomain =
+        url.includes('mangadot.net') ||
+        url.includes('manganato') ||
+        url.includes('nhentai') ||
+        url.includes('comix');
+
+      if (!navState.loading && isTargetDomain && !isCfTitle && !isCfHost) {
+        if (!hasSolvedRef.current) {
+          hasSolvedRef.current = true;
+          cfWebViewRef.current?.injectJavaScript(`
+            (function() {
+              window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'CF_SOLVED',
+                cookie: document.cookie || '',
+                url: window.location.href
+              }));
+            })();
+            true;
+          `);
+        }
+      }
+    },
+    []
+  );
+
+  const handleOpenCloudflareVerification = useCallback(() => {
+    let targetUrl = 'https://mangadot.net/';
+    if (chapterId.includes('mangadot')) {
+      targetUrl = 'https://mangadot.net/';
+    } else if (chapterId.includes('manganato')) {
+      targetUrl = 'https://manganato.gg/';
+    } else if (chapterId.includes('nhentai')) {
+      targetUrl = 'https://nhentai.net/';
+    } else if (chapterId.includes('comix')) {
+      targetUrl = 'https://comix.net/';
+    } else if (pages.length > 0 && pages[0]) {
+      try {
+        const u = new URL(pages[0]);
+        targetUrl = `${u.protocol}//${u.host}/`;
+      } catch {
+        targetUrl = 'https://mangadot.net/';
+      }
+    }
+    setCfInAppUrl(targetUrl);
+    hasSolvedRef.current = false;
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const handleWindowFocus = () => {
+        window.removeEventListener('focus', handleWindowFocus);
+        handleCloudflareSolved();
+      };
+      window.addEventListener('focus', handleWindowFocus);
+      window.open(targetUrl, '_blank', 'noopener,noreferrer');
+      setIsCfInAppModalOpen(true);
+    } else {
+      setIsCfInAppModalOpen(true);
+    }
+  }, [chapterId, pages, handleCloudflareSolved]);
+
+  const handleImageError = useCallback((index: number) => {
+    setFailedPages((prev) => {
+      const next = new Set(prev);
+      next.add(index);
+      return next;
+    });
+  }, []);
+
+  const handleImageSuccess = useCallback((index: number) => {
+    setFailedPages((prev) => {
+      if (!prev.has(index)) return prev;
+      const next = new Set(prev);
+      next.delete(index);
+      return next;
+    });
+  }, []);
+
+  const renderCloudflareModal = () => (
+    <Modal
+      visible={isCfInAppModalOpen}
+      animationType="slide"
+      onRequestClose={() => setIsCfInAppModalOpen(false)}
+    >
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+        <View style={[styles.cfHeaderRow, { backgroundColor: colors.surfaceElevated }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Ionicons name="shield-checkmark" size={20} color={colors.accent} />
+            <Text style={[styles.cfHeaderTitle, { color: colors.text }]}>Cloudflare Verification</Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <Pressable
+              onPress={() => {
+                if (cfInAppUrl) {
+                  WebBrowser.openBrowserAsync(cfInAppUrl).catch(() => {});
+                }
+              }}
+              style={({ pressed }) => [
+                {
+                  width: 40,
+                  height: 40,
+                  borderRadius: Radius.full,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: colors.surface,
+                },
+                pressed && { opacity: 0.7 },
+              ]}
+              accessibilityRole="button"
+              aria-label="Open in external browser"
+            >
+              <Ionicons name="open-outline" size={18} color={colors.text} />
+            </Pressable>
+            <Pressable
+              onPress={() => setIsCfInAppModalOpen(false)}
+              style={({ pressed }) => [
+                {
+                  width: 40,
+                  height: 40,
+                  borderRadius: Radius.full,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: colors.surface,
+                },
+                pressed && { opacity: 0.7 },
+              ]}
+              accessibilityRole="button"
+              aria-label="Close Verification"
+            >
+              <Ionicons name="close" size={22} color={colors.text} />
+            </Pressable>
+          </View>
+        </View>
+
+        {Platform.OS !== 'web' ? (
+          <WebView
+            ref={cfWebViewRef}
+            source={{ uri: cfInAppUrl }}
+            userAgent={
+              Platform.OS === 'android'
+                ? 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
+                : DEFAULT_USER_AGENT
+            }
+            javaScriptEnabled={true}
+            domStorageEnabled={true}
+            sharedCookiesEnabled={true}
+            thirdPartyCookiesEnabled={true}
+            style={{ flex: 1, backgroundColor: colors.background }}
+            onNavigationStateChange={handleCfNavStateChange}
+            onLoadEnd={(syntheticEvent) => {
+              const { nativeEvent } = syntheticEvent;
+              const url = nativeEvent.url || '';
+              const title = (nativeEvent.title || '').toLowerCase();
+              const isCfTitle =
+                title.includes('just a moment') ||
+                title.includes('attention required') ||
+                title.includes('security check') ||
+                title.includes('checking your browser') ||
+                title.includes('verify you are human') ||
+                title.includes('cloudflare');
+              const isCfHost =
+                url.includes('challenges.cloudflare.com') ||
+                url.includes('/cdn-cgi/challenge-platform/');
+              const isTargetDomain =
+                url.includes('mangadot.net') ||
+                url.includes('manganato') ||
+                url.includes('nhentai') ||
+                url.includes('comix');
+
+              if (isTargetDomain && !isCfTitle && !isCfHost) {
+                if (!hasSolvedRef.current) {
+                  hasSolvedRef.current = true;
+                  cfWebViewRef.current?.injectJavaScript(`
+                    (function() {
+                      window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
+                        type: 'CF_SOLVED',
+                        cookie: document.cookie || '',
+                        url: window.location.href
+                      }));
+                    })();
+                    true;
+                  `);
+                }
+              }
+            }}
+            injectedJavaScript={`
+              (function() {
+                var attempts = 0;
+                var interval = setInterval(function() {
+                  attempts++;
+                  var href = window.location.href || '';
+                  var title = (document.title || '').toLowerCase();
+                  var isChallenge = title.includes('just a moment') ||
+                                    title.includes('turnstile') ||
+                                    title.includes('security check') ||
+                                    title.includes('attention required') ||
+                                    href.includes('challenges.cloudflare.com') ||
+                                    document.querySelector('#challenge-running') ||
+                                    document.querySelector('#challenge-stage');
+
+                  if (isChallenge) return;
+
+                  var cookie = document.cookie || '';
+                  var isFinished = document.readyState === 'complete';
+
+                  if (isFinished || cookie.includes('cf_clearance') || attempts > 8) {
+                    clearInterval(interval);
+                    window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
+                      type: 'CF_SOLVED',
+                      cookie: cookie,
+                      url: href
+                    }));
+                  }
+                }, 1000);
+              })();
+              true;
+            `}
+            onMessage={async (event: any) => {
+              try {
+                const parsed = JSON.parse(event.nativeEvent.data);
+                if (webViewBridge.handleMessage(parsed)) {
+                  return;
+                }
+                if (parsed.type === 'CF_SOLVED') {
+                  await handleCloudflareSolved(parsed.cookie);
+                }
+              } catch {}
+            }}
+          />
+        ) : (
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+            <Text style={{ color: colors.text, fontSize: 14, textAlign: 'center', marginBottom: 16 }}>
+              Verification opened in a new tab. When finished, tap Done.
+            </Text>
+            <Pressable
+              onPress={() => {
+                handleCloudflareSolved();
+              }}
+              style={[styles.retryButton, { backgroundColor: colors.accent }]}
+              accessibilityRole="button"
+              aria-label="Done Verification"
+            >
+              <Text style={[styles.retryText, { color: getContrastTextColor(colors.accent) }]}>Done</Text>
+            </Pressable>
+          </View>
+        )}
+
+        <View
+          style={{
+            paddingHorizontal: 16,
+            paddingVertical: 12,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            backgroundColor: colors.surfaceElevated,
+          }}
+        >
+          <Text style={{ color: colors.textSecondary, fontSize: 12, flex: 1, marginRight: 12 }}>
+            Tap Done once verification completes.
+          </Text>
+          <Pressable
+            onPress={() => {
+              cfWebViewRef.current?.injectJavaScript(`
+                (function() {
+                  window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'CF_SOLVED',
+                    cookie: document.cookie || '',
+                    url: window.location.href
+                  }));
+                })();
+                true;
+              `);
+              handleCloudflareSolved();
+            }}
+            style={({ pressed }) => [
+              {
+                backgroundColor: colors.accent,
+                paddingHorizontal: 20,
+                paddingVertical: 10,
+                borderRadius: Radius.md,
+                minHeight: 44,
+                justifyContent: 'center',
+                alignItems: 'center',
+              },
+              pressed && { opacity: 0.8 },
+            ]}
+            accessibilityRole="button"
+            aria-label="Done"
+          >
+            <Text style={{ color: getContrastTextColor(colors.accent), fontWeight: '700', fontSize: 13 }}>
+              Done
+            </Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    </Modal>
+  );
+
   const loadMangaMeta = async () => {
     try {
       let targetMangaId = mangaId || resolvedMangaId;
-      if (!targetMangaId && isExternalSource(chapterId) && chapterId.includes('__')) {
-        const parts = chapterId.split('__');
-        targetMangaId = parts[0];
-        setResolvedMangaId(parts[0]);
+      if (!targetMangaId && isExternalSource(chapterId)) {
+        if (chapterId.startsWith('nhentai:')) {
+          targetMangaId = chapterId;
+          setResolvedMangaId(chapterId);
+        } else if (chapterId.includes('__')) {
+          const parts = chapterId.split('__');
+          targetMangaId = parts[0];
+          setResolvedMangaId(parts[0]);
+        } else {
+          const historyEntry = useHistoryStore.getState().entries.find((e) => e.chapterId === chapterId);
+          if (historyEntry && historyEntry.mangaId && historyEntry.mangaId !== chapterId) {
+            targetMangaId = historyEntry.mangaId;
+            setResolvedMangaId(historyEntry.mangaId);
+          }
+        }
       }
       let chapterLang = 'en';
 
@@ -622,14 +1240,36 @@ export default function ReaderScreen() {
         ? await getUniversalChapterPages(nextChapterId)
         : await getChapterPages(nextChapterId, dataSaver);
       setNextChapterPages(result.pages);
-      const fallbackNextHeaders =
-        ('headers' in result && result.headers) ||
-        (nextChapterId.includes('manganato')
-          ? { Referer: 'https://www.manganato.gg/' }
-          : nextChapterId.includes('mangadot')
-          ? { Referer: 'https://mangadot.net/' }
-          : undefined);
-      setNextChapterPageHeaders(fallbackNextHeaders);
+      const isExtNext = isExternalSource(nextChapterId);
+      if (isExtNext) {
+        const cfCookie = nextChapterId.includes('mangadot')
+          ? CloudFlareCookieManager.getCookie('mangadot.net')
+          : nextChapterId.includes('manganato')
+          ? CloudFlareCookieManager.getCookie('manganato.gg')
+          : undefined;
+
+        const defaultHeaders: Record<string, string> = {
+          'User-Agent': DEFAULT_USER_AGENT,
+          Referer: nextChapterId.includes('mangadot')
+            ? 'https://mangadot.net/'
+            : nextChapterId.includes('nhentai')
+            ? 'https://nhentai.net/'
+            : nextChapterId.includes('manganato')
+            ? 'https://www.manganato.gg/'
+            : 'https://mangadex.org/',
+        };
+        if (cfCookie) {
+          defaultHeaders['Cookie'] = cfCookie;
+        }
+
+        const fallbackNextHeaders = {
+          ...defaultHeaders,
+          ...('headers' in result && result.headers ? result.headers : {}),
+        };
+        setNextChapterPageHeaders(fallbackNextHeaders);
+      } else {
+        setNextChapterPageHeaders(undefined);
+      }
     } catch (err) {
       nextChapterLoadRequestedRef.current = false;
       console.warn('Unable to load next chapter webtoon pages:', err);
@@ -957,6 +1597,10 @@ export default function ReaderScreen() {
         contentFit={fitMode}
         onTap={handlePageTap}
         headers={pageHeaders}
+        reloadTrigger={reloadTrigger}
+        onImageError={handleImageError}
+        onImageSuccess={handleImageSuccess}
+        onCloudflareVerify={handleOpenCloudflareVerification}
       />
     );
   };
@@ -978,6 +1622,10 @@ export default function ReaderScreen() {
           contentFit="contain"
           onTap={handlePageTap}
           headers={pageHeaders}
+          reloadTrigger={reloadTrigger}
+          onImageError={handleImageError}
+          onImageSuccess={handleImageSuccess}
+          onCloudflareVerify={handleOpenCloudflareVerification}
         />
         {rightUrl && (
           <ReaderImagePage
@@ -988,6 +1636,10 @@ export default function ReaderScreen() {
             contentFit="contain"
             onTap={handlePageTap}
             headers={pageHeaders}
+            reloadTrigger={reloadTrigger}
+            onImageError={handleImageError}
+            onImageSuccess={handleImageSuccess}
+            onCloudflareVerify={handleOpenCloudflareVerification}
           />
         )}
       </View>
@@ -1015,70 +1667,135 @@ export default function ReaderScreen() {
     );
   }
 
-  if (error || pages.length === 0) {
+  if (isCloudflare) {
     return (
-      <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
-        <Ionicons name="alert-circle-outline" size={52} color={colors.accent} />
-        <Text style={[styles.errorText, { color: colors.text }]}>
-          {error || 'No pages found for this chapter.'}
-        </Text>
-
-        {/* Navigation & Action Controls for Broken / Missing Chapter */}
-        <View style={styles.errorActionRow}>
-          {hasPrevChapter && (
-            <Pressable
-              style={({ pressed }) => [
-                styles.errorNavBtn,
-                { opacity: pressed ? 0.7 : 1, borderColor: colors.border, backgroundColor: colors.surface },
-              ]}
-              onPress={handlePrevChapter}
-            >
-              <Ionicons name="arrow-back" size={16} color={colors.text} />
-              <Text style={[styles.errorNavBtnText, { color: colors.text }]}>Prev Ch.</Text>
-            </Pressable>
-          )}
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <View style={[styles.centerContainer, { backgroundColor: colors.background, paddingHorizontal: 24 }]}>
+          <Ionicons name="shield-checkmark-outline" size={56} color={colors.accent} />
+          <Text style={[styles.errorText, { color: colors.text, marginTop: 16, fontSize: 18, fontWeight: '700' }]}>
+            Cloudflare Verification Required
+          </Text>
+          <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 8, marginBottom: 24, fontSize: 14, lineHeight: 20 }}>
+            This chapter is protected by Cloudflare anti-bot. Solve the verification once to continue reading.
+          </Text>
 
           <Pressable
             style={({ pressed }) => [
               styles.retryButton,
-              { opacity: pressed ? 0.8 : 1, backgroundColor: colors.accent },
+              { backgroundColor: colors.accent, paddingHorizontal: 28, paddingVertical: 14 },
+              pressed && { opacity: 0.8 },
             ]}
-            onPress={loadPages}
+            onPress={handleOpenCloudflareVerification}
+            accessibilityRole="button"
+            aria-label="Verify via In-App Browser"
           >
-            <Ionicons name="refresh" size={16} color={getContrastTextColor(colors.accent)} />
-            <Text style={[styles.retryText, { color: getContrastTextColor(colors.accent) }]}>Retry</Text>
+            <Ionicons name="shield-checkmark" size={18} color={getContrastTextColor(colors.accent)} />
+            <Text style={[styles.retryText, { color: getContrastTextColor(colors.accent), marginLeft: 8 }]}>
+              Verify via In-App Browser
+            </Text>
           </Pressable>
 
-          {hasNextChapter && (
-            <Pressable
-              style={({ pressed }) => [
-                styles.errorNextBtn,
-                { opacity: pressed ? 0.8 : 1, backgroundColor: colors.accent },
-              ]}
-              onPress={handleNextChapter}
-            >
-              <Text style={[styles.errorNextBtnText, { color: getContrastTextColor(colors.accent) }]}>Next Ch.</Text>
-              <Ionicons name="arrow-forward" size={16} color={getContrastTextColor(colors.accent)} />
-            </Pressable>
-          )}
+          <Pressable
+            style={[styles.backTextButton, { marginTop: 20 }]}
+            onPress={() => {
+              if (mangaId || resolvedMangaId) {
+                router.replace(`/manga/${mangaId || resolvedMangaId}` as any);
+              } else if (router.canGoBack()) {
+                router.back();
+              } else {
+                router.replace('/(tabs)' as any);
+              }
+            }}
+            accessibilityRole="button"
+            aria-label="Return to Manga Details"
+          >
+            <Text style={[styles.backTextLabel, { color: colors.textMuted }]}>
+              ← Return to Manga Details
+            </Text>
+          </Pressable>
         </View>
 
-        <Pressable
-          style={styles.backTextButton}
-          onPress={() => {
-            if (mangaId) {
-              router.replace(`/manga/${mangaId}` as any);
-            } else if (router.canGoBack()) {
-              router.back();
-            } else {
-              router.replace('/(tabs)' as any);
-            }
-          }}
-        >
-          <Text style={[styles.backTextLabel, { color: colors.textMuted }]}>
-            ← Return to Manga Details
+        {renderCloudflareModal()}
+      </View>
+    );
+  }
+
+  if (error || pages.length === 0) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
+          <Ionicons name="alert-circle-outline" size={52} color={colors.accent} />
+          <Text style={[styles.errorText, { color: colors.text }]}>
+            {error || 'No pages found for this chapter.'}
           </Text>
-        </Pressable>
+
+          {/* Navigation & Action Controls for Broken / Missing Chapter */}
+          <View style={styles.errorActionRow}>
+            {hasPrevChapter && (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.errorNavBtn,
+                  { opacity: pressed ? 0.7 : 1, borderColor: colors.border, backgroundColor: colors.surface },
+                ]}
+                onPress={handlePrevChapter}
+                accessibilityRole="button"
+                aria-label="Previous Chapter"
+              >
+                <Ionicons name="arrow-back" size={16} color={colors.text} />
+                <Text style={[styles.errorNavBtnText, { color: colors.text }]}>Prev Ch.</Text>
+              </Pressable>
+            )}
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.retryButton,
+                { opacity: pressed ? 0.8 : 1, backgroundColor: colors.accent },
+              ]}
+              onPress={loadPages}
+              accessibilityRole="button"
+              aria-label="Retry"
+            >
+              <Ionicons name="refresh" size={16} color={getContrastTextColor(colors.accent)} />
+              <Text style={[styles.retryText, { color: getContrastTextColor(colors.accent) }]}>Retry</Text>
+            </Pressable>
+
+            {hasNextChapter && (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.errorNextBtn,
+                  { opacity: pressed ? 0.8 : 1, backgroundColor: colors.accent },
+                ]}
+                onPress={handleNextChapter}
+                accessibilityRole="button"
+                aria-label="Next Chapter"
+              >
+                <Text style={[styles.errorNextBtnText, { color: getContrastTextColor(colors.accent) }]}>Next Ch.</Text>
+                <Ionicons name="arrow-forward" size={16} color={getContrastTextColor(colors.accent)} />
+              </Pressable>
+            )}
+          </View>
+
+          <Pressable
+            style={styles.backTextButton}
+            onPress={() => {
+              if (mangaId) {
+                router.replace(`/manga/${mangaId}` as any);
+              } else if (router.canGoBack()) {
+                router.back();
+              } else {
+                router.replace('/(tabs)' as any);
+              }
+            }}
+            accessibilityRole="button"
+            aria-label="Return to Manga Details"
+          >
+            <Text style={[styles.backTextLabel, { color: colors.textMuted }]}>
+              ← Return to Manga Details
+            </Text>
+          </Pressable>
+        </View>
+
+        {renderCloudflareModal()}
       </View>
     );
   }
@@ -1107,6 +1824,10 @@ export default function ReaderScreen() {
               imageFit={imageFit}
               onTap={handlePageTap}
               headers={index < pages.length ? pageHeaders : nextChapterPageHeaders}
+              reloadTrigger={reloadTrigger}
+              onImageError={handleImageError}
+              onImageSuccess={handleImageSuccess}
+              onCloudflareVerify={handleOpenCloudflareVerification}
               onLayout={(event) => handleWebtoonPageLayout(index, event)}
             />
           )}
@@ -1194,6 +1915,42 @@ export default function ReaderScreen() {
         />
       )}
 
+      {/* Cloudflare Challenge Warning Floating Banner */}
+      {failedPages.size > 0 && isCloudflareSource && !controlsVisible && (
+        <View
+          style={[
+            styles.cfFloatingBanner,
+            {
+              backgroundColor: colors.surfaceElevated,
+            },
+          ]}
+        >
+          <Ionicons name="shield-outline" size={18} color={colors.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.cfFloatingBannerTitle, { color: colors.text }]}>
+              Cloudflare Verification
+            </Text>
+            <Text style={[styles.cfFloatingBannerSubtitle, { color: colors.textSecondary }]}>
+              {failedPages.size} {failedPages.size === 1 ? 'page requires' : 'pages require'} verification
+            </Text>
+          </View>
+          <Pressable
+            onPress={handleOpenCloudflareVerification}
+            style={({ pressed }) => [
+              styles.cfFloatingBannerBtn,
+              { backgroundColor: colors.accent },
+              pressed && { opacity: 0.8 },
+            ]}
+            accessibilityRole="button"
+            aria-label="Verify Cloudflare"
+          >
+            <Text style={[styles.cfFloatingBannerBtnText, { color: getContrastTextColor(colors.accent) }]}>
+              Verify
+            </Text>
+          </Pressable>
+        </View>
+      )}
+
       {/* Page Number Indicator */}
       {showPageNumber && activePageCount > 0 && (
         <View style={[styles.pageIndicator, { backgroundColor: colors.surfaceElevated }]} pointerEvents="none">
@@ -1243,7 +2000,7 @@ export default function ReaderScreen() {
 
           {/* Mode Selector Quick Bar */}
           {showModeSelector && (
-            <View style={[styles.modeSelectorContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={[styles.modeSelectorContainer, { backgroundColor: colors.surface }]}>
               {(Object.keys(MODE_LABELS) as ReadingMode[]).map((m) => (
                 <Pressable
                   key={m}
@@ -1426,13 +2183,50 @@ export default function ReaderScreen() {
           onPress={() => setSideMenuVisible(true)}
           style={({ pressed }) => [
             styles.webFloatingMenuTrigger,
-            { backgroundColor: colors.surface, borderColor: colors.border },
+            { backgroundColor: colors.surface },
             pressed && { opacity: 0.85, transform: [{ scale: 0.96 }] },
           ]}
         >
           <Ionicons name="options-outline" size={18} color={colors.text} />
           <Text style={[styles.webFloatingMenuTriggerText, { color: colors.text }]}>Menu</Text>
         </Pressable>
+      )}
+      {/* In-App Cloudflare WebView Verification Modal */}
+      {renderCloudflareModal()}
+
+      {/* Persistent Background Bridge for Authenticated Image Streaming */}
+      {Platform.OS !== 'web' && persistentBridgeUrl && (
+        <View
+          style={{
+            position: 'absolute',
+            top: -9999,
+            left: -9999,
+            width: 1,
+            height: 1,
+            opacity: 0,
+            pointerEvents: 'none',
+          }}
+        >
+          <WebView
+            ref={persistentBridgeRef}
+            source={{ uri: persistentBridgeUrl }}
+            userAgent={
+              Platform.OS === 'android'
+                ? 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
+                : DEFAULT_USER_AGENT
+            }
+            javaScriptEnabled={true}
+            domStorageEnabled={true}
+            sharedCookiesEnabled={true}
+            thirdPartyCookiesEnabled={true}
+            onMessage={(event) => {
+              try {
+                const parsed = JSON.parse(event.nativeEvent.data);
+                webViewBridge.handleMessage(parsed);
+              } catch {}
+            }}
+          />
+        </View>
       )}
     </View>
   );
@@ -1473,7 +2267,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm + 2,
     borderRadius: Radius.md,
-    borderWidth: 1,
   },
   errorNavBtnText: {
     fontSize: Typography.sizes.footnote,
@@ -1565,7 +2358,6 @@ const styles = StyleSheet.create({
     top: 90,
     right: Spacing.lg,
     borderRadius: Radius.md,
-    borderWidth: 1,
     paddingVertical: Spacing.xs,
     width: 220,
     zIndex: 30,
@@ -1654,14 +2446,12 @@ const styles = StyleSheet.create({
     position: 'fixed' as any,
     bottom: 28,
     right: 28,
-    borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: Radius.full,
-    boxShadow: '0 6px 12px rgba(0, 0, 0, 0.5)',
     elevation: 10,
     zIndex: 999,
     cursor: 'pointer' as any,
@@ -1672,9 +2462,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   imageErrorCard: {
-    borderWidth: 1,
-    borderRadius: Radius.lg,
-    padding: Spacing.lg,
+    borderRadius: Radius.xl,
+    padding: Spacing.xl,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
@@ -1688,6 +2477,7 @@ const styles = StyleSheet.create({
   imageErrorSubtext: {
     fontSize: Typography.sizes.footnote,
     textAlign: 'center',
+    lineHeight: 18,
   },
   imageRetryBtn: {
     flexDirection: 'row',
@@ -1720,7 +2510,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 20,
     right: 20,
-    borderWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: Radius.full,
@@ -1731,6 +2520,50 @@ const styles = StyleSheet.create({
   },
   zoomResetText: {
     fontSize: 11,
+    fontWeight: Typography.weights.bold,
+  },
+  cfHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 4,
+  },
+  cfHeaderTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  cfFloatingBanner: {
+    position: 'absolute',
+    top: Platform.OS === 'web' ? 20 : 52,
+    left: 16,
+    right: 16,
+    zIndex: 99,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: Radius.lg,
+  },
+  cfFloatingBannerTitle: {
+    fontSize: Typography.sizes.footnote,
+    fontWeight: Typography.weights.bold,
+  },
+  cfFloatingBannerSubtitle: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  cfFloatingBannerBtn: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: Radius.md,
+    minHeight: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cfFloatingBannerBtnText: {
+    fontSize: Typography.sizes.caption,
     fontWeight: Typography.weights.bold,
   },
 });

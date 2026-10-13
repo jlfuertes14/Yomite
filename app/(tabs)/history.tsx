@@ -21,9 +21,12 @@ import { useRouter } from 'expo-router';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { useHistoryStore } from '../../src/store/historyStore';
 import { useDownloadStore } from '../../src/store/downloadStore';
-import { downloadChapter, removeDownloadedChapter } from '../../src/services/downloadService';
 import { getMangaDetails, extractCoverFileName, getCoverUrl } from '../../src/api/mangadex';
+import { getUniversalMangaDetails, isExternalSource } from '../../src/sources/adapter';
+import { CloudFlareCookieManager } from '../../src/sources/network/cloudflare';
+import { DEFAULT_USER_AGENT } from '../../src/sources/network/httpClient';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
+import { downloadChapter, removeDownloadedChapter } from '../../src/services/downloadService';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 import type { HistoryEntry } from '../../src/types';
@@ -79,15 +82,53 @@ function HistoryRowItem({
   const isDownloading = dlItem?.status === 'downloading';
   const isDownloaded = dlItem?.status === 'completed';
 
+  const coverHeaders = useMemo(() => {
+    if (!item.mangaId) return undefined;
+    const lowerId = item.mangaId.toLowerCase();
+    if (lowerId.includes('hitomila')) {
+      return { Referer: 'https://hitomi.la/', 'User-Agent': DEFAULT_USER_AGENT };
+    }
+    if (lowerId.includes('nhentai')) {
+      return { Referer: 'https://nhentai.net/', 'User-Agent': DEFAULT_USER_AGENT };
+    }
+    if (lowerId.includes('manganato')) {
+      const cf = CloudFlareCookieManager.getCookie('manganato.gg');
+      return {
+        Referer: 'https://www.manganato.gg/',
+        'User-Agent': DEFAULT_USER_AGENT,
+        ...(cf ? { Cookie: cf } : {}),
+      };
+    }
+    if (lowerId.includes('mangadot')) {
+      const cf = CloudFlareCookieManager.getCookie('mangadot.net');
+      return {
+        Referer: 'https://mangadot.net/',
+        'User-Agent': DEFAULT_USER_AGENT,
+        ...(cf ? { Cookie: cf } : {}),
+      };
+    }
+    return undefined;
+  }, [item.mangaId]);
+
   useEffect(() => {
-    if (!coverUrl && item.mangaId && item.mangaId.length === 36) {
-      getMangaDetails(item.mangaId)
-        .then((manga) => {
-          const fileName = extractCoverFileName(manga);
-          const url = getCoverUrl(manga.id, fileName, '256');
-          if (url) setCoverUrl(url);
-        })
-        .catch(() => {});
+    if (!coverUrl && item.mangaId) {
+      if (isExternalSource(item.mangaId)) {
+        getUniversalMangaDetails(item.mangaId)
+          .then((manga) => {
+            const fileName = extractCoverFileName(manga);
+            const url = getCoverUrl(manga.id, fileName, '256');
+            if (url) setCoverUrl(url);
+          })
+          .catch(() => {});
+      } else if (item.mangaId.length === 36) {
+        getMangaDetails(item.mangaId)
+          .then((manga) => {
+            const fileName = extractCoverFileName(manga);
+            const url = getCoverUrl(manga.id, fileName, '256');
+            if (url) setCoverUrl(url);
+          })
+          .catch(() => {});
+      }
     }
   }, [item.mangaId, coverUrl]);
 
@@ -158,7 +199,7 @@ function HistoryRowItem({
         <View style={styles.coverThumbnail}>
           {coverUrl ? (
             <Image
-              source={{ uri: coverUrl }}
+              source={{ uri: coverUrl, headers: coverHeaders }}
               style={styles.coverImg}
               contentFit="cover"
               transition={200}

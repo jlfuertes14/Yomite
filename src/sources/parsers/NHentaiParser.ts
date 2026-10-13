@@ -226,6 +226,10 @@ export class NHentaiParser extends BaseParser {
         url: `/g/${item.id}/`,
         publicUrl: `https://nhentai.net/g/${item.id}/`,
         coverUrl,
+        coverHeaders: {
+          Referer: 'https://nhentai.net/',
+          'User-Agent': DEFAULT_USER_AGENT,
+        },
         rating,
         locale,
         state: 'completed',
@@ -260,16 +264,20 @@ export class NHentaiParser extends BaseParser {
             : titleObj?.pretty || titleObj?.english || titleObj?.japanese || manga.title;
 
         let coverUrl = manga.coverUrl;
-        if (data.media_id) {
-          const ext = data.images?.cover?.t === 'p' ? 'png' : data.images?.cover?.t === 'w' ? 'webp' : 'jpg';
-          coverUrl = `https://t.nhentai.net/galleries/${data.media_id}/cover.${ext}`;
-        } else if (data.cover) {
-          const cover = typeof data.cover === 'string' ? data.cover : '';
-          if (cover) {
-            coverUrl = cover.startsWith('http')
-              ? cover
-              : `https://t.nhentai.net/${cover.replace(/^\/+/, '')}`;
-          }
+        if (data.cover && typeof data.cover === 'object' && (data.cover as any).path) {
+          coverUrl = `https://t.nhentai.net/${(data.cover as any).path.replace(/^\/+/, '')}`;
+        } else if (data.thumbnail && typeof data.thumbnail === 'object' && (data.thumbnail as any).path) {
+          coverUrl = `https://t.nhentai.net/${(data.thumbnail as any).path.replace(/^\/+/, '')}`;
+        } else if (typeof data.cover === 'string' && data.cover) {
+          coverUrl = data.cover.startsWith('http')
+            ? data.cover
+            : `https://t.nhentai.net/${data.cover.replace(/^\/+/, '')}`;
+        } else if (typeof data.thumbnail === 'string' && data.thumbnail) {
+          coverUrl = data.thumbnail.startsWith('http')
+            ? data.thumbnail
+            : `https://t.nhentai.net/${data.thumbnail.replace(/^\/+/, '')}`;
+        } else if (data.media_id) {
+          coverUrl = `https://t.nhentai.net/galleries/${data.media_id}/thumb.webp`;
         }
 
         const tags: string[] = [];
@@ -310,6 +318,10 @@ export class NHentaiParser extends BaseParser {
           ...manga,
           title: this.cleanText(title),
           coverUrl,
+          coverHeaders: {
+            Referer: 'https://nhentai.net/',
+            'User-Agent': DEFAULT_USER_AGENT,
+          },
           authors: authors.length ? authors : undefined,
           tags: tags.slice(0, 15),
           description: descParts.length ? descParts.join(' · ') : undefined,
@@ -381,6 +393,10 @@ export class NHentaiParser extends BaseParser {
         ...manga,
         title,
         coverUrl: cover ? this.toAbsoluteUrl(cover) : manga.coverUrl,
+        coverHeaders: {
+          Referer: 'https://nhentai.net/',
+          'User-Agent': DEFAULT_USER_AGENT,
+        },
         authors: authors.length ? authors : manga.authors,
         tags: tags.length ? tags.slice(0, 15) : manga.tags,
         description: descParts.length ? descParts.join(' · ') : undefined,
@@ -431,7 +447,10 @@ export class NHentaiParser extends BaseParser {
       return {
         index: idx,
         url: imageUrl,
-        headers: this.getRequestHeaders(),
+        headers: {
+          Referer: 'https://nhentai.net/',
+          'User-Agent': DEFAULT_USER_AGENT,
+        },
       };
     });
   }

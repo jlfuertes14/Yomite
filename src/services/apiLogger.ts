@@ -88,7 +88,20 @@ class ApiLoggerService {
     }
 
     let sourceLabel = 'MangaDex API';
-    if (entry.method.startsWith('SCRAPE:')) {
+    const lowerUrl = (entry.url || '').toLowerCase();
+    if (lowerUrl.includes('mangadot.net') || lowerUrl.includes('/chapters/manga_')) {
+      sourceLabel = 'MangaDot';
+    } else if (lowerUrl.includes('manganato.com') || lowerUrl.includes('chapmanganato.to') || lowerUrl.includes('manganato.gg')) {
+      sourceLabel = 'MangaNato';
+    } else if (lowerUrl.includes('nhentai.net')) {
+      sourceLabel = 'NHentai';
+    } else if (lowerUrl.includes('comix.to')) {
+      sourceLabel = 'Comix.to';
+    } else if (lowerUrl.includes('mangafire.to')) {
+      sourceLabel = 'MangaFire';
+    } else if (lowerUrl.includes('mangadex.org') || lowerUrl.includes('api.mangadex.org') || lowerUrl.includes('uploads.mangadex.org')) {
+      sourceLabel = 'MangaDex API';
+    } else if (entry.method.startsWith('SCRAPE:')) {
       const sourceName = entry.method.replace('SCRAPE:', '');
       sourceLabel = `Source Scraper: ${sourceName}`;
     } else if (entry.method.startsWith('GET_JSON:')) {
@@ -102,6 +115,8 @@ class ApiLoggerService {
       sourceLabel = `Source API: ${sourceName}`;
     } else if (entry.method === 'MANGA_DETAILS' || entry.method === 'MANGA_CHAPTERS') {
       sourceLabel = 'Source Adapter';
+    } else if (entry.method === 'GET_IMG') {
+      sourceLabel = 'Image CDN';
     }
 
     if (isRateLimit) {
