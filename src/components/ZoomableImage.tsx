@@ -7,7 +7,7 @@ import Animated, {
   withSpring,
   runOnJS,
 } from 'react-native-reanimated';
-import { Image } from 'expo-image';
+import { BridgedImage } from './BridgedImage';
 
 interface ZoomableImageProps {
   source: any;
@@ -47,7 +47,7 @@ export function ZoomableImage({
         }}
         style={[{ justifyContent: 'center', alignItems: 'center' }, Platform.OS === 'web' ? { cursor: 'pointer' } : null, style as any]}
       >
-        <Image
+        <BridgedImage
           source={source}
           style={style}
           contentFit={contentFit}
@@ -170,7 +170,7 @@ export function ZoomableImage({
   return (
     <GestureDetector gesture={composedGesture}>
       <Animated.View style={[{ justifyContent: 'center', alignItems: 'center' }, animatedStyle as any]}>
-        <Image
+        <BridgedImage
           source={source}
           style={style}
           contentFit={contentFit}

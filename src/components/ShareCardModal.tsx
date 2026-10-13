@@ -10,13 +10,13 @@ import {
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
 import { useThemeColors } from '../hooks/useThemeColor';
 import { MobileModalRoot, MobileSheetPanel } from './MobileBottomSheet';
+import { BridgedImage } from './BridgedImage';
 
 interface ShareCardModalProps {
   visible: boolean;
@@ -109,7 +109,7 @@ export function ShareCardModal({
                 {/* Footer Metadata */}
                 <View style={styles.cardFooter}>
                   {coverUrl ? (
-                    <Image source={{ uri: coverUrl }} style={styles.footerCover} contentFit="cover" />
+                    <BridgedImage source={{ uri: coverUrl }} style={styles.footerCover} contentFit="cover" />
                   ) : null}
                   <View style={styles.footerCol}>
                     <Text style={styles.footerMangaTitle} numberOfLines={1}>

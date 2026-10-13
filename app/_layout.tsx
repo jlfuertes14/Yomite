@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View, Text, Pressable, Platform, StyleSheet } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -8,11 +8,14 @@ import * as SplashScreen from 'expo-splash-screen';
 import * as SystemUI from 'expo-system-ui';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ThemeProvider, DarkTheme } from 'expo-router/react-navigation';
+import { WebView } from 'react-native-webview';
 import { Colors } from '../constants/Colors';
 import { requestStoragePermissionOnLaunch } from '../src/services/storagePermission';
 import { useUserStore } from '../src/store/userStore';
 import { CacheManager } from '../src/utils/cacheManager';
 import { useDocumentTitle } from '../src/utils/useDocumentTitle';
+import { webViewBridge } from '../src/sources/network/webViewBridge';
+import { DEFAULT_USER_AGENT } from '../src/sources/network/httpClient';
 
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -32,10 +35,27 @@ export default function RootLayout() {
   useDocumentTitle();
   const authSuccessMessage = useUserStore((s) => s.authSuccessMessage);
   const clearAuthSuccessMessage = useUserStore((s) => s.clearAuthSuccessMessage);
+  const globalBridgeRef = useRef<any>(null);
 
   const [fontsLoaded] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
   });
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') {
+      webViewBridge.registerGlobalSender((script: string) => {
+        globalBridgeRef.current?.injectJavaScript(script);
+      });
+
+      const unsubscribe = webViewBridge.onCloudflareSolved(() => {
+        globalBridgeRef.current?.reload();
+      });
+
+      return () => {
+        unsubscribe();
+      };
+    }
+  }, []);
 
   useEffect(() => {
     // Set native Android window background to dark, request storage permissions & initialize auth sync on launch
@@ -130,6 +150,41 @@ export default function RootLayout() {
               options={{ title: 'Not Found', headerShown: true }}
             />
           </Stack>
+
+          {/* Persistent Global Background WebView for Cloudflare & MangaDot Authenticated Requests */}
+          {Platform.OS !== 'web' && (
+            <View
+              style={{
+                position: 'absolute',
+                top: -9999,
+                left: -9999,
+                width: 1,
+                height: 1,
+                opacity: 0,
+                pointerEvents: 'none',
+              }}
+            >
+              <WebView
+                ref={globalBridgeRef}
+                source={{ uri: 'https://mangadot.net/' }}
+                userAgent={
+                  Platform.OS === 'android'
+                    ? 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
+                    : DEFAULT_USER_AGENT
+                }
+                javaScriptEnabled={true}
+                domStorageEnabled={true}
+                sharedCookiesEnabled={true}
+                thirdPartyCookiesEnabled={true}
+                onMessage={(event) => {
+                  try {
+                    const parsed = JSON.parse(event.nativeEvent.data);
+                    webViewBridge.handleMessage(parsed);
+                  } catch {}
+                }}
+              />
+            </View>
+          )}
         </View>
       </ThemeProvider>
     </GestureHandlerRootView>

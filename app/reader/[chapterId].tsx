@@ -54,7 +54,11 @@ import { ApiLogger } from '../../src/services/apiLogger';
 import { ZoomableImage } from '../../src/components/ZoomableImage';
 import { CloudFlareCookieManager } from '../../src/sources/network/cloudflare';
 import { DEFAULT_USER_AGENT } from '../../src/sources/network/httpClient';
-import { webViewBridge } from '../../src/sources/network/webViewBridge';
+import {
+  webViewBridge,
+  imageBridgeCache,
+  isCloudflareProtectedUrl,
+} from '../../src/sources/network/webViewBridge';
 import type { ReadingMode, Chapter } from '../../src/types';
 import * as WebBrowser from 'expo-web-browser';
 import { WebView } from 'react-native-webview';
@@ -99,8 +103,6 @@ interface ReaderImagePageProps {
   onCloudflareVerify?: () => void;
 }
 
-const imageBridgeCache = new Map<string, string>();
-
 const ReaderImagePage = React.memo(function ReaderImagePage({
   url,
   index,
@@ -124,24 +126,43 @@ const ReaderImagePage = React.memo(function ReaderImagePage({
   const [isRetrying, setIsRetrying] = useState(false);
   const [bridgedDataUri, setBridgedDataUri] = useState<string | null>(() => imageBridgeCache.get(url) || null);
 
+  const isCfProtectedUrl = useMemo(() => isCloudflareProtectedUrl(url), [url]);
+
   useEffect(() => {
     setIsError(false);
     setIsRetrying(false);
     setRetryCount(0);
     const cached = imageBridgeCache.get(url) || null;
-    setBridgedDataUri(cached);
-  }, [headers, reloadTrigger, url]);
+    if (cached) {
+      setBridgedDataUri(cached);
+      return;
+    }
 
-  const isCfProtectedUrl = useMemo(() => {
-    const lower = url.toLowerCase();
-    return (
-      lower.includes('mangadot.net') ||
-      lower.includes('/chapters/manga_') ||
-      lower.includes('chapmanganato') ||
-      lower.includes('manganato') ||
-      lower.includes('comix.to')
-    );
-  }, [url]);
+    setBridgedDataUri(null);
+
+    // Proactively fetch via bridge if CF protected on native
+    if (isCfProtectedUrl && Platform.OS !== 'web' && webViewBridge.hasSender()) {
+      let isMounted = true;
+      webViewBridge
+        .fetchImageBase64(url, 20000)
+        .then((dataUri) => {
+          if (isMounted && dataUri) {
+            imageBridgeCache.set(url, dataUri);
+            setBridgedDataUri(dataUri);
+            setIsError(false);
+            setIsRetrying(false);
+            onImageSuccess?.(index);
+          }
+        })
+        .catch(() => {
+          // If proactive bridge fails, handleImageError will catch it
+        });
+
+      return () => {
+        isMounted = false;
+      };
+    }
+  }, [headers, reloadTrigger, url, isCfProtectedUrl, index, onImageSuccess]);
 
   const imageSource = useMemo(() => {
     if (bridgedDataUri) return { uri: bridgedDataUri };
@@ -150,19 +171,7 @@ const ReaderImagePage = React.memo(function ReaderImagePage({
   }, [url, headers, bridgedDataUri]);
 
   const handleImageError = useCallback(async () => {
-    ApiLogger.logRequest({
-      timestamp: Date.now(),
-      method: 'GET_IMG',
-      url,
-      status: isCfProtectedUrl ? 403 : null,
-      statusText: isCfProtectedUrl ? 'Cloudflare Challenge / 403' : 'Image Load Failed',
-      durationMs: 0,
-      error: `Page ${index + 1} image failed to load${isCfProtectedUrl ? ' (Cloudflare verification required)' : ''}`,
-    });
-
-    onImageError?.(index, url);
-
-    // If Cloudflare protected domain and not already bridged, attempt WebView bridge fetch
+    // 1. If Cloudflare protected domain and not already bridged, attempt WebView bridge fetch FIRST
     if (isCfProtectedUrl && !bridgedDataUri && Platform.OS !== 'web' && webViewBridge.hasSender()) {
       try {
         setIsRetrying(true);
@@ -179,6 +188,19 @@ const ReaderImagePage = React.memo(function ReaderImagePage({
         // Bridge fetch failed (e.g. Cloudflare Turnstile not yet solved)
       }
     }
+
+    // 2. Only if the bridge ALSO failed or is unavailable do we log and trigger verification modal/banner
+    ApiLogger.logRequest({
+      timestamp: Date.now(),
+      method: 'GET_IMG',
+      url,
+      status: isCfProtectedUrl ? 403 : null,
+      statusText: isCfProtectedUrl ? 'Cloudflare Challenge / 403' : 'Image Load Failed',
+      durationMs: 0,
+      error: `Page ${index + 1} image failed to load${isCfProtectedUrl ? ' (Cloudflare verification required)' : ''}`,
+    });
+
+    onImageError?.(index, url);
 
     if (retryCount < 2) {
       setIsRetrying(true);

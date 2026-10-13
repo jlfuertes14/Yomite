@@ -53,6 +53,7 @@ import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
 import { LibraryCategoryModal } from '../../src/components/LibraryCategoryModal';
 import { ChapterSkeleton } from '../../src/components/Skeleton';
 import { ZoomableImage } from '../../src/components/ZoomableImage';
+import { BridgedImage } from '../../src/components/BridgedImage';
 import { triggerHaptic } from '../../src/utils/haptics';
 import { formatChapterDate } from '../../src/utils/date';
 import { getLanguageInfo, detectMangaLanguage } from '../../src/utils/language';
@@ -679,7 +680,7 @@ export default function MangaDetailScreen() {
         {/* Hero Header with Backdrop */}
         <View style={styles.heroContainer}>
           {coverUrl && (
-            <Image
+            <BridgedImage
               source={{ uri: coverUrl, headers: coverHeaders }}
               style={styles.backdropImage}
               contentFit="cover"
@@ -731,7 +732,7 @@ export default function MangaDetailScreen() {
                 ]}
               >
                 {coverUrl ? (
-                  <Image
+                  <BridgedImage
                     source={{ uri: coverUrl, headers: coverHeaders }}
                     style={styles.coverImage}
                     contentFit="cover"

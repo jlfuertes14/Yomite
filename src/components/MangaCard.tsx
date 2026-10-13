@@ -9,11 +9,11 @@ import {
   useWindowDimensions,
   Platform,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Radius, Spacing, Typography } from '../../constants/Colors';
 import { useThemeColors } from '../hooks/useThemeColor';
 import { AnimatedCard } from './AnimatedCard';
+import { BridgedImage } from './BridgedImage';
 
 export const CARD_GAP = 10;
 
@@ -90,7 +90,7 @@ function MangaCardComponent({
         ]}
       >
         {coverUrl ? (
-          <Image
+          <BridgedImage
             source={{ uri: coverUrl }}
             style={styles.coverImage}
             contentFit="cover"

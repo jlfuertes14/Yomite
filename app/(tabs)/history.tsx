@@ -22,6 +22,7 @@ import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { useHistoryStore } from '../../src/store/historyStore';
 import { useDownloadStore } from '../../src/store/downloadStore';
 import { getMangaDetails, extractCoverFileName, getCoverUrl } from '../../src/api/mangadex';
+import { BridgedImage } from '../../src/components/BridgedImage';
 import { getUniversalMangaDetails, isExternalSource } from '../../src/sources/adapter';
 import { CloudFlareCookieManager } from '../../src/sources/network/cloudflare';
 import { DEFAULT_USER_AGENT } from '../../src/sources/network/httpClient';
@@ -198,7 +199,7 @@ function HistoryRowItem({
         {/* Manga Cover Thumbnail */}
         <View style={styles.coverThumbnail}>
           {coverUrl ? (
-            <Image
+            <BridgedImage
               source={{ uri: coverUrl, headers: coverHeaders }}
               style={styles.coverImg}
               contentFit="cover"

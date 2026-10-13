@@ -21,10 +21,38 @@ type BridgeRequest = {
 
 const STORAGE_KEY_VERIFIED_DOMAINS = '@mangaapp_verified_domains_v1';
 
+/**
+ * Global in-memory image cache for Base64 data URIs resolved via the WebView bridge.
+ * Shared across the entire app lifecycle (Manga cards, details title page, history, reader).
+ */
+export const imageBridgeCache = new Map<string, string>();
+
+/**
+ * Checks whether an image URL originates from a Cloudflare-protected source (e.g. MangaDot).
+ */
+export function isCloudflareProtectedUrl(url?: string | null): boolean {
+  if (!url || typeof url !== 'string') return false;
+  const lower = url.toLowerCase();
+  return (
+    lower.includes('mangadot.net') ||
+    lower.includes('/chapters/manga_') ||
+    lower.includes('/media/manga_covers/') ||
+    lower.includes('chapmanganato') ||
+    lower.includes('manganato.gg') ||
+    lower.includes('comix.to')
+  );
+}
+
 class WebViewBridgeService {
   private verifiedDomains: Set<string> = new Set();
   private pendingRequests: Map<string, BridgeRequest> = new Map();
-  private sendScriptToWebView: ((script: string) => void) | null = null;
+  private activeSender: ((script: string) => void) | null = null;
+  private globalSender: ((script: string) => void) | null = null;
+  private cfSolvedListeners: Set<(domain: string) => void> = new Set();
+  private inFlightImages: Map<string, Promise<string>> = new Map();
+  private imageQueue: Array<() => void> = [];
+  private activeImageCount = 0;
+  private readonly MAX_CONCURRENT_IMAGES = 4;
   private initialized = false;
 
   constructor() {
@@ -93,16 +121,72 @@ class WebViewBridgeService {
     this.persist().catch(() => {});
   }
 
-  public registerSender(sender: (script: string) => void): void {
-    this.sendScriptToWebView = sender;
+  /**
+   * Registers a persistent global background WebView sender (e.g. from app/_layout.tsx).
+   * Used as the default fallback for all screens (MangaCard, Details, History).
+   */
+  public registerGlobalSender(sender: (script: string) => void): void {
+    this.globalSender = sender;
   }
 
+  /**
+   * Registers a screen-specific active sender (e.g. active Reader or visible Cloudflare modal).
+   */
+  public registerSender(sender: (script: string) => void): void {
+    this.activeSender = sender;
+  }
+
+  /**
+   * Unregisters the screen-specific active sender, cleanly restoring the global sender.
+   */
   public unregisterSender(): void {
-    this.sendScriptToWebView = null;
+    this.activeSender = null;
   }
 
   public hasSender(): boolean {
-    return this.sendScriptToWebView !== null;
+    return this.activeSender !== null || this.globalSender !== null;
+  }
+
+  private get sender(): ((script: string) => void) | null {
+    return this.activeSender || this.globalSender;
+  }
+
+  /**
+   * Waits up to timeoutMs for either an active or global sender to be registered.
+   */
+  public waitForSender(timeoutMs = 5000): Promise<boolean> {
+    if (this.hasSender()) return Promise.resolve(true);
+    return new Promise<boolean>((resolve) => {
+      const start = Date.now();
+      const interval = setInterval(() => {
+        if (this.hasSender()) {
+          clearInterval(interval);
+          resolve(true);
+        } else if (Date.now() - start >= timeoutMs) {
+          clearInterval(interval);
+          resolve(false);
+        }
+      }, 100);
+    });
+  }
+
+  /**
+   * Registers a listener triggered whenever a Cloudflare challenge is solved.
+   */
+  public onCloudflareSolved(listener: (domain: string) => void): () => void {
+    this.cfSolvedListeners.add(listener);
+    return () => {
+      this.cfSolvedListeners.delete(listener);
+    };
+  }
+
+  public notifyCloudflareSolved(domain: string): void {
+    this.setDomainVerified(domain, true);
+    for (const listener of this.cfSolvedListeners) {
+      try {
+        listener(domain);
+      } catch {}
+    }
   }
 
   /**
@@ -110,7 +194,15 @@ class WebViewBridgeService {
    * Native browser cookies (including HttpOnly cf_clearance) are automatically attached.
    */
   public async fetchJson<T = any>(url: string, timeoutMs = 15000): Promise<T> {
-    if (!this.sendScriptToWebView) {
+    if (!this.hasSender()) {
+      const ready = await this.waitForSender(4000);
+      if (!ready) {
+        throw new Error('WebView bridge is not currently mounted or connected.');
+      }
+    }
+
+    const currentSender = this.sender;
+    if (!currentSender) {
       throw new Error('WebView bridge is not currently mounted or connected.');
     }
 
@@ -169,7 +261,7 @@ class WebViewBridgeService {
         true;
       `;
 
-      this.sendScriptToWebView(script);
+      currentSender(script);
     });
   }
 
@@ -177,7 +269,15 @@ class WebViewBridgeService {
    * Dispatches a text/html fetch inside the active WebView session.
    */
   public async fetchText(url: string, timeoutMs = 15000): Promise<string> {
-    if (!this.sendScriptToWebView) {
+    if (!this.hasSender()) {
+      const ready = await this.waitForSender(4000);
+      if (!ready) {
+        throw new Error('WebView bridge is not currently mounted or connected.');
+      }
+    }
+
+    const currentSender = this.sender;
+    if (!currentSender) {
       throw new Error('WebView bridge is not currently mounted or connected.');
     }
 
@@ -208,12 +308,12 @@ class WebViewBridgeService {
               }
               return res.text();
             })
-            .then(function(text) {
+            .then(function(html) {
               window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
                 type: 'BRIDGE_RESPONSE',
                 id: ${JSON.stringify(id)},
                 success: true,
-                data: text
+                data: html
               }));
             })
             .catch(function(err) {
@@ -236,16 +336,86 @@ class WebViewBridgeService {
         true;
       `;
 
-      this.sendScriptToWebView(script);
+      currentSender(script);
     });
   }
 
   /**
    * Fetches an image inside the active WebView session and returns a base64 data URL.
-   * Native session cookies (including HttpOnly cf_clearance) are automatically sent.
+   * Manages deduplication and limits concurrent requests to prevent UI/network saturation.
    */
-  public async fetchImageBase64(url: string, timeoutMs = 25000): Promise<string> {
-    if (!this.sendScriptToWebView) {
+  public async fetchImageBase64(rawUrl: string, timeoutMs = 25000): Promise<string> {
+    if (!rawUrl || typeof rawUrl !== 'string') {
+      throw new Error('Invalid image URL provided to fetchImageBase64');
+    }
+
+    let url = rawUrl.trim();
+    if (url.startsWith('//')) {
+      url = `https:${url}`;
+    } else if (url.startsWith('/')) {
+      url = `https://mangadot.net${url}`;
+    }
+
+    // 1. Check in-memory cache
+    const cached = imageBridgeCache.get(url);
+    if (cached) {
+      return cached;
+    }
+
+    // 2. Check in-flight requests (deduplication)
+    const inFlight = this.inFlightImages.get(url);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    // 3. Queue request through concurrency throttler
+    const promise = new Promise<string>((resolve, reject) => {
+      const execute = async () => {
+        try {
+          const result = await this.executeFetchImageBase64(url, timeoutMs);
+          imageBridgeCache.set(url, result);
+          resolve(result);
+        } catch (err) {
+          reject(err);
+        } finally {
+          this.activeImageCount = Math.max(0, this.activeImageCount - 1);
+          this.inFlightImages.delete(url);
+          this.processImageQueue();
+        }
+      };
+
+      if (this.activeImageCount < this.MAX_CONCURRENT_IMAGES) {
+        this.activeImageCount++;
+        execute();
+      } else {
+        this.imageQueue.push(execute);
+      }
+    });
+
+    this.inFlightImages.set(url, promise);
+    return promise;
+  }
+
+  private processImageQueue(): void {
+    while (this.imageQueue.length > 0 && this.activeImageCount < this.MAX_CONCURRENT_IMAGES) {
+      const next = this.imageQueue.shift();
+      if (next) {
+        this.activeImageCount++;
+        next();
+      }
+    }
+  }
+
+  private async executeFetchImageBase64(url: string, timeoutMs: number): Promise<string> {
+    if (!this.hasSender()) {
+      const ready = await this.waitForSender(5000);
+      if (!ready) {
+        throw new Error('WebView bridge is not currently mounted or connected.');
+      }
+    }
+
+    const currentSender = this.sender;
+    if (!currentSender) {
       throw new Error('WebView bridge is not currently mounted or connected.');
     }
 
@@ -311,7 +481,7 @@ class WebViewBridgeService {
         true;
       `;
 
-      this.sendScriptToWebView(script);
+      currentSender(script);
     });
   }
 

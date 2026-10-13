@@ -27,6 +27,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as WebBrowser from 'expo-web-browser';
 import * as Haptics from 'expo-haptics';
 import { WebView } from 'react-native-webview';
+import { BridgedImage } from '../../src/components/BridgedImage';
 import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
@@ -2466,7 +2467,7 @@ export default function ExtensionsScreen() {
                       {/* Cover Image Container with 2:3 Aspect Ratio */}
                       <View style={[styles.mangaCoverWrapper, { backgroundColor: colors.surfaceElevated }]}>
                         {item.coverUrl ? (
-                          <Image
+                          <BridgedImage
                             source={{
                               uri: item.coverUrl,
                               headers:
