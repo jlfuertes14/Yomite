@@ -37,6 +37,7 @@ import { CloudFlareCookieManager } from '../../src/sources/network/cloudflare';
 import { webViewBridge } from '../../src/sources/network/webViewBridge';
 import { DEFAULT_USER_AGENT } from '../../src/sources/network/httpClient';
 import { triggerHaptic } from '../../src/utils/haptics';
+import { computeTitleMatchScore } from '../../src/sources/parsers/MangaDotParser';
 import {
   getPopularManga,
   searchManga,
@@ -2941,7 +2942,16 @@ export default function ExtensionsScreen() {
                                   locale: 'en',
                                 };
                               });
-                              setModalMangas(mappedCards);
+                              let finalCards = mappedCards;
+                              if (activeMangaSource.id === 'mangadot' && debouncedMangaQuery.trim()) {
+                                const q = debouncedMangaQuery.trim();
+                                finalCards = mappedCards
+                                  .map((c) => ({ card: c, score: computeTitleMatchScore(c.title, q) }))
+                                  .filter((item) => item.score > 0)
+                                  .sort((a, b) => b.score - a.score)
+                                  .map((item) => item.card);
+                              }
+                              setModalMangas(finalCards);
                               setIsCfInAppModalOpen(false);
                               setModalError(null);
                               setModalIsCloudflare(false);

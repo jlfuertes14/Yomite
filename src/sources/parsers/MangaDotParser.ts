@@ -14,6 +14,142 @@ import {
   SourceTag,
 } from '../types';
 import { sourceHttpClient, DEFAULT_USER_AGENT } from '../network/httpClient';
+import { CloudFlareCookieManager } from '../network/cloudflare';
+
+const STOP_WORDS = new Set([
+  'a',
+  'an',
+  'the',
+  'and',
+  'or',
+  'of',
+  'in',
+  'on',
+  'at',
+  'to',
+  'for',
+  'with',
+  'is',
+  'it',
+  'by',
+  'as',
+]);
+
+/**
+ * Normalizes title / query strings by stripping accents, punctuation, apostrophes,
+ * and normalizing spacing and cross-multiplication symbols.
+ */
+export function normalizeSearchString(text: string | null | undefined): string {
+  if (!text || typeof text !== 'string') return '';
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove diacritics / accents
+    .replace(/['’`]/g, '')           // remove apostrophes (e.g. Solo's -> solos)
+    .replace(/[×✕✖]/g, ' x ')        // normalize cross symbols with spacing (e.g. SPY×FAMILY -> spy x family)
+    .replace(/[^a-z0-9\s]/g, ' ')    // replace punctuation with whitespace
+    .replace(/\s+/g, ' ')            // collapse multiple spaces
+    .trim();
+}
+
+/**
+ * Computes a title match strength score for a manga item against a search query.
+ * Returns:
+ * - 1000: Exact match
+ * - 600..800: Prefix or word-bounded phrase match
+ * - 300..400: Substring or all query tokens present in title
+ * - 150: Majority of query tokens present (for queries >= 3 words)
+ * - 0: No strong title match (item should be filtered out)
+ */
+export function computeTitleMatchScore(
+  itemOrTitle:
+    | string
+    | {
+        title?: string;
+        name?: string;
+        slug?: string;
+        alt_titles?: string | string[];
+        alternative_titles?: string | string[];
+        title_alt?: string | string[];
+        other_names?: string | string[];
+      },
+  query: string
+): number {
+  const qNorm = normalizeSearchString(query);
+  if (!qNorm) return 100;
+
+  const rawTokens = qNorm.split(' ').filter(Boolean);
+  const meaningfulTokens = rawTokens.filter((t) => !STOP_WORDS.has(t));
+  const qTokens = meaningfulTokens.length > 0 ? meaningfulTokens : rawTokens;
+
+  const candidates: string[] = [];
+  if (typeof itemOrTitle === 'string') {
+    candidates.push(itemOrTitle);
+  } else if (itemOrTitle && typeof itemOrTitle === 'object') {
+    if (itemOrTitle.title) candidates.push(itemOrTitle.title);
+    if (itemOrTitle.name && itemOrTitle.name !== itemOrTitle.title) candidates.push(itemOrTitle.name);
+    if (itemOrTitle.slug) candidates.push(itemOrTitle.slug.replace(/[-_]/g, ' '));
+
+    const checkAlt = (val: any) => {
+      if (Array.isArray(val)) {
+        for (const item of val) {
+          if (typeof item === 'string') candidates.push(item);
+        }
+      } else if (typeof val === 'string') {
+        candidates.push(...val.split(/[,;|\n]/));
+      }
+    };
+
+    checkAlt(itemOrTitle.alt_titles);
+    checkAlt(itemOrTitle.alternative_titles);
+    checkAlt(itemOrTitle.title_alt);
+    checkAlt(itemOrTitle.other_names);
+  }
+
+  let maxScore = 0;
+
+  for (const rawCand of candidates) {
+    const tNorm = normalizeSearchString(rawCand);
+    if (!tNorm) continue;
+
+    let score = 0;
+    if (tNorm === qNorm) {
+      score = 1000;
+    } else if (tNorm.startsWith(qNorm + ' ') || tNorm.startsWith(qNorm)) {
+      score = 800 - Math.min(200, Math.max(0, tNorm.length - qNorm.length));
+    } else if (
+      new RegExp(
+        '(^|\\s)' + qNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(\\s|$)'
+      ).test(tNorm)
+    ) {
+      score = 600 - Math.min(200, Math.max(0, tNorm.length - qNorm.length));
+    } else if (tNorm.includes(qNorm)) {
+      score = 400 - Math.min(100, Math.max(0, tNorm.length - qNorm.length));
+    } else {
+      const tTokens = new Set(tNorm.split(' ').filter(Boolean));
+      const matched = qTokens.filter(
+        (qt) => tTokens.has(qt) || [...tTokens].some((tt) => tt.startsWith(qt) || qt.startsWith(tt))
+      );
+
+      if (qTokens.length <= 2) {
+        if (matched.length === qTokens.length) {
+          score = 300 - Math.min(100, Math.max(0, tNorm.length - qNorm.length));
+        }
+      } else {
+        const ratio = matched.length / qTokens.length;
+        if (ratio === 1) {
+          score = 300 - Math.min(100, Math.max(0, tNorm.length - qNorm.length));
+        } else if (ratio >= 0.7) {
+          score = 150;
+        }
+      }
+    }
+
+    if (score > maxScore) maxScore = score;
+  }
+
+  return maxScore;
+}
 
 export class MangaDotParser extends BaseParser {
   public readonly metadata: MangaSourceMetadata;
@@ -77,14 +213,31 @@ export class MangaDotParser extends BaseParser {
     ];
   }
 
+  private normalizeCoverUrl(photo: string | null | undefined): string | null {
+    if (!photo || typeof photo !== 'string') return null;
+    let clean = photo.trim();
+    if (!clean) return null;
+    if (clean.startsWith('//')) {
+      clean = `https:${clean}`;
+    } else if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
+      clean = `${this.metadata.baseUrl}/${clean.replace(/^\/+/, '')}`;
+    }
+    if (clean.startsWith('http://')) {
+      clean = clean.replace('http://', 'https://');
+    }
+    return clean;
+  }
+
   public async getList(filter: SourceFilter): Promise<SourceManga[]> {
     const page = filter.page || 1;
     const params = new URLSearchParams();
     params.set('page', String(page));
 
     // 1. Text Search Query
-    if (filter.query && filter.query.trim().length > 0) {
-      params.set('search', filter.query.trim());
+    const hasQuery = typeof filter.query === 'string' && filter.query.trim().length > 0;
+    const cleanQuery = hasQuery ? filter.query!.trim() : '';
+    if (hasQuery) {
+      params.set('search', cleanQuery);
     }
 
     // 2. Genre / Tag Filtering
@@ -108,7 +261,12 @@ export class MangaDotParser extends BaseParser {
         break;
       case 'popular':
       default:
-        params.set('sortBy', 'views');
+        // When searching by title query, default to relevance unless explicit sort is specified
+        if (hasQuery && (!filter.order || filter.order === 'popular')) {
+          params.set('sortBy', 'relevance');
+        } else {
+          params.set('sortBy', 'views');
+        }
         params.set('sortOrder', 'desc');
         break;
     }
@@ -119,39 +277,57 @@ export class MangaDotParser extends BaseParser {
       sourceId: this.metadata.name,
     });
 
-    const mangaList: SourceManga[] = [];
     const items = Array.isArray(data?.manga_list) ? data.manga_list : [];
 
+    const cfCookie = CloudFlareCookieManager.getCookie(this.metadata.domain);
+    const coverHeaders: Record<string, string> = {
+      Referer: `${this.metadata.baseUrl}/`,
+      'User-Agent': DEFAULT_USER_AGENT,
+    };
+    if (cfCookie) {
+      coverHeaders['Cookie'] = cfCookie;
+    }
+
+    // Collect and score items against search query
+    const scoredList: { manga: SourceManga; score: number }[] = [];
+
     for (const item of items) {
+      const score = hasQuery ? computeTitleMatchScore(item, cleanQuery) : 100;
+      // Filter out cards that do not strongly match the search query in their title
+      if (score <= 0) {
+        continue;
+      }
+
       const id = String(item.id);
       const url = `${this.metadata.baseUrl}/manga/${id}`;
-      const cover = item.photo
-        ? item.photo.startsWith('http')
-          ? item.photo
-          : `${this.metadata.baseUrl}${item.photo}`
-        : null;
+      const cover = this.normalizeCoverUrl(item.photo);
 
       const state: SourceManga['state'] =
         item.status?.toLowerCase() === 'completed' ? 'completed' : 'ongoing';
 
-      mangaList.push({
-        id: `${this.metadata.id}:${id}`,
-        sourceId: this.metadata.id,
-        title: item.title || 'Untitled',
-        url,
-        publicUrl: url,
-        coverUrl: cover,
-        coverHeaders: {
-          Referer: `${this.metadata.baseUrl}/`,
-          'User-Agent': DEFAULT_USER_AGENT,
+      scoredList.push({
+        score,
+        manga: {
+          id: `${this.metadata.id}:${id}`,
+          sourceId: this.metadata.id,
+          title: item.title || 'Untitled',
+          url,
+          publicUrl: url,
+          coverUrl: cover,
+          coverHeaders,
+          rating: typeof item.avg_rating === 'number' ? item.avg_rating : undefined,
+          tags: Array.isArray(item.genres) ? item.genres : undefined,
+          state,
         },
-        rating: typeof item.avg_rating === 'number' ? item.avg_rating : undefined,
-        tags: Array.isArray(item.genres) ? item.genres : undefined,
-        state,
       });
     }
 
-    return mangaList;
+    // Sort items by match score descending so strongest title matches appear first
+    if (hasQuery) {
+      scoredList.sort((a, b) => b.score - a.score);
+    }
+
+    return scoredList.map((entry) => entry.manga);
   }
 
   public async getDetails(manga: SourceManga): Promise<SourceManga> {
@@ -166,11 +342,7 @@ export class MangaDotParser extends BaseParser {
     });
 
     const m = data?.manga || data || {};
-    const cover = m.photo
-      ? m.photo.startsWith('http')
-        ? m.photo
-        : `${this.metadata.baseUrl}${m.photo}`
-      : manga.coverUrl;
+    const cover = this.normalizeCoverUrl(m.photo) || manga.coverUrl;
 
     const authors: string[] = [];
     if (Array.isArray(m.authors)) {
@@ -189,20 +361,99 @@ export class MangaDotParser extends BaseParser {
     const state: SourceManga['state'] =
       m.status?.toLowerCase() === 'completed' ? 'completed' : 'ongoing';
 
+    const cfCookie = CloudFlareCookieManager.getCookie(this.metadata.domain);
+    const coverHeaders: Record<string, string> = {
+      Referer: `${this.metadata.baseUrl}/`,
+      'User-Agent': DEFAULT_USER_AGENT,
+    };
+    if (cfCookie) {
+      coverHeaders['Cookie'] = cfCookie;
+    }
+
     return {
       ...manga,
       title: m.title || manga.title,
       coverUrl: cover,
-      coverHeaders: {
-        Referer: `${this.metadata.baseUrl}/`,
-        'User-Agent': DEFAULT_USER_AGENT,
-      },
+      coverHeaders,
       description: m.description ? this.cleanText(m.description) : manga.description,
       authors: authors.length > 0 ? authors : manga.authors,
       tags: Array.isArray(m.genres) ? m.genres : manga.tags,
       state,
       rating: typeof m.avg_rating === 'number' ? m.avg_rating : manga.rating,
     };
+  }
+
+  private extractScanlator(ch: any): string {
+    if (!ch || typeof ch !== 'object') return 'MangaDot';
+
+    if (typeof ch.group_name === 'string' && ch.group_name.trim()) {
+      return ch.group_name.trim();
+    }
+    if (typeof ch.scanlation_group === 'string' && ch.scanlation_group.trim()) {
+      return ch.scanlation_group.trim();
+    }
+    if (typeof ch.scanlator === 'string' && ch.scanlator.trim()) {
+      return ch.scanlator.trim();
+    }
+    if (typeof ch.group === 'string' && ch.group.trim()) {
+      return ch.group.trim();
+    }
+    if (
+      ch.group &&
+      typeof ch.group === 'object' &&
+      typeof ch.group.name === 'string' &&
+      ch.group.name.trim()
+    ) {
+      return ch.group.name.trim();
+    }
+    if (typeof ch.team === 'string' && ch.team.trim()) {
+      return ch.team.trim();
+    }
+    if (typeof ch.source_name === 'string' && ch.source_name.trim()) {
+      return ch.source_name.trim();
+    }
+    if (typeof ch.source_title === 'string' && ch.source_title.trim()) {
+      return ch.source_title.trim();
+    }
+
+    if (typeof ch.source === 'string' && ch.source.trim()) {
+      const s = ch.source.trim();
+      const lower = s.toLowerCase();
+      const KNOWN_SOURCES: Record<string, string> = {
+        asura: 'Asura Scans',
+        asurascans: 'Asura Scans',
+        flame: 'Flame Comics',
+        flamecomics: 'Flame Comics',
+        reaper: 'Reaper Scans',
+        reaperscans: 'Reaper Scans',
+        void: 'Void Scans',
+        voidscans: 'Void Scans',
+        luminous: 'Luminous Scans',
+        luminousscans: 'Luminous Scans',
+        nightcomic: 'Night Comic',
+        anigliscans: 'Anigli Scans',
+        surpass: 'Surpass Scans',
+        vortex: 'Vortex Scans',
+        vortexscans: 'Vortex Scans',
+        drake: 'Drake Scans',
+        drakescans: 'Drake Scans',
+        cosmic: 'Cosmic Scans',
+        cosmicscans: 'Cosmic Scans',
+        zeroscans: 'Zero Scans',
+        astrascans: 'Astra Scans',
+        user: 'User Uploads',
+      };
+      if (KNOWN_SOURCES[lower]) {
+        return KNOWN_SOURCES[lower];
+      }
+      return s.charAt(0).toUpperCase() + s.slice(1);
+    }
+
+    if (typeof ch.uploader === 'string' && ch.uploader.trim()) {
+      return `User: ${ch.uploader.trim()}`;
+    }
+
+    return 'MangaDot';
   }
 
   public async getChapters(manga: SourceManga): Promise<SourceChapter[]> {
@@ -221,7 +472,8 @@ export class MangaDotParser extends BaseParser {
 
     for (const ch of rawList) {
       const chId = String(ch.id);
-      const chUrl = `${this.metadata.baseUrl}/chapter/${chId}`;
+      const chSource = ch.source || 'user';
+      const chUrl = `${this.metadata.baseUrl}/chapter/${chId}?source=${chSource}`;
       const chNum =
         typeof ch.chapter_number === 'number'
           ? ch.chapter_number
@@ -232,6 +484,7 @@ export class MangaDotParser extends BaseParser {
           : `Chapter ${chNum}`;
 
       const dateUpload = ch.date_added ? Date.parse(ch.date_added) || null : null;
+      const scanlator = this.extractScanlator(ch);
 
       chapters.push({
         id: `${this.metadata.id}:${chId}`,
@@ -241,6 +494,7 @@ export class MangaDotParser extends BaseParser {
         name: chName,
         number: chNum,
         dateUpload,
+        scanlator,
       });
     }
 
@@ -250,38 +504,146 @@ export class MangaDotParser extends BaseParser {
   public async getPages(chapter: SourceChapter): Promise<SourcePage[]> {
     const chId = chapter.id.includes(':')
       ? chapter.id.split(':')[1]
-      : chapter.url.split('/').pop() || chapter.id;
-    const apiUrl = `${this.metadata.baseUrl}/chapter/${chId}.data?source=user`;
+      : chapter.url.split('/').pop()?.split('?')[0] || chapter.id;
 
-    const data = await sourceHttpClient.fetchJson<any>(apiUrl, {
-      referer: `${this.metadata.baseUrl}/chapter/${chId}`,
-      sourceId: this.metadata.name,
+    // Check if source param exists in url (e.g. ?source=user or ?source=scraper)
+    let sourceParam = 'user';
+    if (chapter.url && chapter.url.includes('source=')) {
+      const match = chapter.url.match(/source=([a-zA-Z0-9_-]+)/);
+      if (match) sourceParam = match[1];
+    }
+
+    const extractImageUrls = (payload: any): string[] => {
+      if (!payload) return [];
+      const list = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload.images)
+        ? payload.images
+        : Array.isArray(payload.data)
+        ? payload.data
+        : [];
+      const found: string[] = [];
+      for (const item of list) {
+        if (typeof item === 'string') {
+          found.push(item);
+        } else if (item && typeof item === 'object') {
+          const u = item.url || item.path || item.src || item.image || item.photo;
+          if (typeof u === 'string') {
+            found.push(u);
+          }
+        }
+      }
+      return found;
+    };
+
+    let rawPaths: string[] = [];
+
+    // Prioritize endpoints based on sourceParam (/api/uploads/... or /api/chapters/...)
+    const endpointsToTry =
+      sourceParam === 'user'
+        ? [
+            `${this.metadata.baseUrl}/api/uploads/${chId}/images`,
+            `${this.metadata.baseUrl}/api/chapters/${chId}/images`,
+          ]
+        : [
+            `${this.metadata.baseUrl}/api/chapters/${chId}/images`,
+            `${this.metadata.baseUrl}/api/uploads/${chId}/images`,
+          ];
+
+    for (const ep of endpointsToTry) {
+      if (rawPaths.length > 0) break;
+      try {
+        const data = await sourceHttpClient.fetchJson<any>(ep, {
+          referer: `${this.metadata.baseUrl}/chapter/${chId}`,
+          sourceId: this.metadata.name,
+        });
+        rawPaths = extractImageUrls(data);
+        if (data?.manga?.id) {
+          chapter.mangaId = `${this.metadata.id}:${data.manga.id}`;
+        }
+      } catch {}
+    }
+
+    // Fallback: Next.js RSC data route
+    if (rawPaths.length === 0) {
+      try {
+        const rscData = await sourceHttpClient.fetchJson<any>(
+          `${this.metadata.baseUrl}/chapter/${chId}.data?source=${sourceParam}`,
+          {
+            referer: `${this.metadata.baseUrl}/chapter/${chId}`,
+            sourceId: this.metadata.name,
+          }
+        );
+        if (typeof rscData === 'string') {
+          const matches =
+            rscData.match(/\/chapters\/[^"'\s\\]+/g) ||
+            rscData.match(/\/uploads\/[^"'\s\\]+/g);
+          if (matches) {
+            rawPaths = matches;
+          }
+        } else {
+          rawPaths = extractImageUrls(rscData);
+        }
+      } catch {}
+    }
+
+    // Fallback: Scrape HTML
+    if (rawPaths.length === 0) {
+      try {
+        const $ = await this.fetchHtml(`${this.metadata.baseUrl}/chapter/${chId}`);
+        $('img').each((_, el) => {
+          const src = $(el).attr('src') || $(el).attr('data-src') || '';
+          if (
+            src.includes('/chapters/') ||
+            src.includes('/uploads/') ||
+            (src.includes('mangadot') &&
+              !src.includes('logo') &&
+              !src.includes('avatar') &&
+              !src.includes('icon'))
+          ) {
+            rawPaths.push(src);
+          }
+        });
+      } catch {}
+    }
+
+    const uniquePaths = [...new Set(rawPaths)];
+
+    // Sort ascending by page number if URLs end with numbering (e.g. 1.webp, 02.jpg)
+    uniquePaths.sort((a, b) => {
+      const numA = parseInt(a.split('/').pop()?.replace(/\D+/g, '') || '0', 10);
+      const numB = parseInt(b.split('/').pop()?.replace(/\D+/g, '') || '0', 10);
+      return numA - numB;
     });
 
-    const pages: SourcePage[] = [];
-    if (Array.isArray(data)) {
-      const rawPaths = data.filter((s) => typeof s === 'string' && s.startsWith('/chapters/'));
-      const uniquePaths = [...new Set(rawPaths)];
-
-      // Sort ascending by page number
-      uniquePaths.sort((a, b) => {
-        const numA = parseInt(a.split('/').pop()?.replace(/\D+/g, '') || '0', 10);
-        const numB = parseInt(b.split('/').pop()?.replace(/\D+/g, '') || '0', 10);
-        return numA - numB;
-      });
-
-      uniquePaths.forEach((path, i) => {
-        const fullUrl = path.startsWith('http') ? path : `${this.metadata.baseUrl}${path}`;
-        pages.push({
-          index: i,
-          url: fullUrl,
-          headers: {
-            Referer: `${this.metadata.baseUrl}/`,
-            'User-Agent': DEFAULT_USER_AGENT,
-          },
-        });
-      });
+    const cfCookie = CloudFlareCookieManager.getCookie(this.metadata.domain);
+    const pageHeaders: Record<string, string> = {
+      Referer: `${this.metadata.baseUrl}/`,
+      'User-Agent': DEFAULT_USER_AGENT,
+    };
+    if (cfCookie) {
+      pageHeaders['Cookie'] = cfCookie;
     }
+
+    const pages: SourcePage[] = [];
+    uniquePaths.forEach((path, i) => {
+      let fullUrl = path.trim().replace(/\\\//g, '/');
+      if (fullUrl.startsWith('//')) {
+        fullUrl = `https:${fullUrl}`;
+      } else if (fullUrl.startsWith('/')) {
+        fullUrl = `${this.metadata.baseUrl}${fullUrl}`;
+      } else if (!fullUrl.startsWith('http')) {
+        fullUrl = `${this.metadata.baseUrl}/${fullUrl}`;
+      }
+      if (fullUrl.startsWith('http://')) {
+        fullUrl = fullUrl.replace('http://', 'https://');
+      }
+      pages.push({
+        index: i,
+        url: fullUrl,
+        headers: pageHeaders,
+      });
+    });
 
     return pages;
   }

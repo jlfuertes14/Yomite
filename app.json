@@ -17,6 +17,7 @@
     },
     "android": {
       "package": "com.yomite.mangaapp",
+      "usesCleartextTraffic": true,
       "backgroundColor": "#09090B",
       "adaptiveIcon": {
         "backgroundColor": "#09090B",

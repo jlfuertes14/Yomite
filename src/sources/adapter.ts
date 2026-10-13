@@ -201,7 +201,7 @@ export async function getUniversalMangaChapters(mangaId: string): Promise<Chapte
  */
 export async function getUniversalChapterPages(
   chapterId: string
-): Promise<{ pages: string[]; headers?: Record<string, string> }> {
+): Promise<{ pages: string[]; headers?: Record<string, string>; mangaId?: string }> {
   if (!isExternalSource(chapterId)) {
     const cleanId = chapterId.replace(/^mangadex:/, '');
     const { getChapterPages } = await import('../api/mangadex');
@@ -230,5 +230,6 @@ export async function getUniversalChapterPages(
   return {
     pages,
     headers,
+    mangaId: dummyChapter.mangaId || undefined,
   };
 }
