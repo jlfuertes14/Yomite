@@ -44,46 +44,67 @@ export const useCommunityStore = create<CommunityState>()(
       threadReplies: {},
 
       createThread: async ({ title, category, body, author, imageUrls, authorAvatarUrl }) => {
+        const { data: authData } = await supabase.auth.getUser();
+        const activeUser = authData?.user;
+        const userId = activeUser?.id;
+
+        if (!userId) {
+          throw new Error('You must be signed in to create a discussion topic.');
+        }
+
+        const nowIso = new Date().toISOString();
         const newThread: ForumThread = {
           id: `custom_${Date.now()}`,
+          userId,
+          user_id: userId,
           title: title.trim(),
           category: category.trim(),
           author: author.trim() || 'Anonymous Reader',
+          body: body.trim(),
+          author_avatar_url: authorAvatarUrl || null,
           authorAvatarUrl: authorAvatarUrl || undefined,
           repliesCount: 1,
-          createdAt: new Date().toISOString(),
-          lastReplyAt: new Date().toISOString(),
+          created_at: nowIso,
+          createdAt: nowIso,
+          lastReplyAt: nowIso,
+          image_urls: imageUrls && imageUrls.length > 0 ? imageUrls : null,
           imageUrls: imageUrls && imageUrls.length > 0 ? imageUrls : undefined,
         };
 
         const initialReply: ForumComment = {
           id: `reply_${Date.now()}`,
+          userId,
+          user_id: userId,
           username: author.trim() || 'Anonymous Reader',
           avatarUrl: authorAvatarUrl || undefined,
-          postedAt: new Date().toISOString(),
+          postedAt: nowIso,
           body: body.trim(),
           likes: 1,
           imageUrls: imageUrls && imageUrls.length > 0 ? [...imageUrls] : undefined,
         };
 
-        // Try syncing to Supabase community_threads if available
+        // Sync to Supabase community_threads with verified session user_id
         await insertWithFallback(
           'community_threads',
           {
             id: newThread.id,
+            user_id: userId,
             title: newThread.title,
             category: newThread.category,
             author: newThread.author,
             body: body.trim(),
             author_avatar_url: newThread.authorAvatarUrl ?? null,
             image_urls: newThread.imageUrls ?? null,
+            created_at: nowIso,
           },
           {
             id: newThread.id,
+            user_id: userId,
             title: newThread.title,
             category: newThread.category,
             author: newThread.author,
             body: body.trim(),
+            created_at: nowIso,
           }
         );
 
@@ -115,8 +136,18 @@ export const useCommunityStore = create<CommunityState>()(
       },
 
       addReply: async ({ threadId, body, author, imageUrls, replyTo, avatarUrl }) => {
+        const { data: authData } = await supabase.auth.getUser();
+        const activeUser = authData?.user;
+        const userId = activeUser?.id;
+
+        if (!userId) {
+          throw new Error('You must be signed in to post a reply.');
+        }
+
         const replyObj: ForumComment = {
           id: `reply_${Date.now()}`,
+          userId,
+          user_id: userId,
           username: author.trim() || 'Yomite Reader',
           avatarUrl: avatarUrl || undefined,
           postedAt: new Date().toISOString(),
@@ -126,11 +157,12 @@ export const useCommunityStore = create<CommunityState>()(
           replyTo: replyTo?.trim() ? replyTo.trim() : undefined,
         };
 
-        // Try syncing to Supabase thread_replies if available
+        // Sync to Supabase thread_replies with verified session user_id
         await insertWithFallback(
           'thread_replies',
           {
             thread_id: threadId,
+            user_id: userId,
             username: replyObj.username,
             body: replyObj.body,
             avatar_url: replyObj.avatarUrl ?? null,
@@ -139,6 +171,7 @@ export const useCommunityStore = create<CommunityState>()(
           },
           {
             thread_id: threadId,
+            user_id: userId,
             username: replyObj.username,
             body: replyObj.body,
           }

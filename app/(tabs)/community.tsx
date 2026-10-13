@@ -25,6 +25,7 @@ import { WebView } from 'react-native-webview';
 import {
   getAnimeNews,
   getAnimeNewsArticle,
+  getCommunityThreads,
   getThreadReplies,
   fetchAuthorAvatarMap,
   mergeNewsCoversIntoFeedCache,
@@ -245,22 +246,32 @@ export default function CommunityScreen() {
     onConfirm: () => {},
   });
 
+  const [remoteThreads, setRemoteThreads] = useState<ForumThread[]>([]);
+
   useEffect(() => {
     loadThreads();
   }, []);
 
   const loadThreads = async () => {
     setIsLoading(true);
-    const news = await getAnimeNews();
+    const [news, threads] = await Promise.all([
+      getAnimeNews(),
+      getCommunityThreads(),
+    ]);
     setAnimeNews(news);
+    setRemoteThreads(threads);
     hydrateNewsImages(news);
     setIsLoading(false);
   };
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    const news = await getAnimeNews(true);
+    const [news, threads] = await Promise.all([
+      getAnimeNews(true),
+      getCommunityThreads(),
+    ]);
     setAnimeNews(news);
+    setRemoteThreads(threads);
     hydrateNewsImages(news);
     setRefreshing(false);
   };
@@ -343,8 +354,19 @@ export default function CommunityScreen() {
   };
 
   const combinedThreads = useMemo(() => {
-    return userThreads;
-  }, [userThreads]);
+    const threadMap = new Map<string, ForumThread>();
+    // User local threads first (instant UI update)
+    for (const t of userThreads) {
+      threadMap.set(t.id, t);
+    }
+    // Remote Supabase threads
+    for (const t of remoteThreads) {
+      if (!threadMap.has(t.id)) {
+        threadMap.set(t.id, t);
+      }
+    }
+    return Array.from(threadMap.values());
+  }, [userThreads, remoteThreads]);
 
   const filteredThreads = useMemo(() => {
     const matchingThreads = combinedThreads.filter((t) => {
@@ -421,24 +443,40 @@ export default function CommunityScreen() {
     }
 
     if ((!newReplyText.trim() && replyImages.length === 0) || !selectedThread) return;
-    const authorName = getUserDisplayName(user);
-    const newReply = await addReply({
-      threadId: selectedThread.id,
-      body: newReplyText.trim(),
-      author: authorName,
-      imageUrls: replyImages,
-      replyTo: replyTo ?? undefined,
-      avatarUrl: isAnonymousIdentity(authorName) ? undefined : myAvatarUrl ?? undefined,
-    });
+    try {
+      const authorName = getUserDisplayName(user);
+      const newReply = await addReply({
+        threadId: selectedThread.id,
+        body: newReplyText.trim(),
+        author: authorName,
+        imageUrls: replyImages,
+        replyTo: replyTo ?? undefined,
+        avatarUrl: isAnonymousIdentity(authorName) ? undefined : myAvatarUrl ?? undefined,
+      });
 
-    setReplies((prev) => [...prev, newReply]);
-    setNewReplyText('');
-    setReplyImages([]);
-    setReplyTo(null);
-    setSelectedThread({
-      ...selectedThread,
-      repliesCount: selectedThread.repliesCount + 1,
-    });
+      setReplies((prev) => [...prev, newReply]);
+      setNewReplyText('');
+      setReplyImages([]);
+      setReplyTo(null);
+      setSelectedThread({
+        ...selectedThread,
+        repliesCount: selectedThread.repliesCount + 1,
+      });
+    } catch (err: any) {
+      setConfirmModalConfig({
+        visible: true,
+        title: 'Sign In Required',
+        message: err?.message || 'Please sign in to post replies.',
+        iconName: 'lock-closed-outline',
+        confirmText: 'Sign In',
+        cancelText: 'Cancel',
+        confirmVariant: 'primary',
+        onConfirm: () => {
+          setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
+          setAuthModalVisible(true);
+        },
+      });
+    }
   };
 
   const handleMentionUser = (username: string) => {
@@ -490,6 +528,23 @@ export default function CommunityScreen() {
   };
 
   const handleCreateTopic = async () => {
+    if (!user) {
+      setConfirmModalConfig({
+        visible: true,
+        title: 'Sign In Required',
+        message: 'Please sign in or create an account to start discussion topics.',
+        iconName: 'lock-closed-outline',
+        confirmText: 'Sign In',
+        cancelText: 'Cancel',
+        confirmVariant: 'primary',
+        onConfirm: () => {
+          setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
+          setAuthModalVisible(true);
+        },
+      });
+      return;
+    }
+
     if (!topicTitle.trim() || (!topicBody.trim() && topicImages.length === 0)) {
       setConfirmModalConfig({
         visible: true,
@@ -503,21 +558,38 @@ export default function CommunityScreen() {
       });
       return;
     }
-    const authorName = getUserDisplayName(user);
-    const created = await createThread({
-      title: topicTitle.trim(),
-      category: 'Discussion',
-      body: topicBody.trim(),
-      author: authorName,
-      imageUrls: topicImages,
-      authorAvatarUrl: isAnonymousIdentity(authorName) ? undefined : myAvatarUrl ?? undefined,
-    });
 
-    setShowCreateModal(false);
-    setTopicTitle('');
-    setTopicBody('');
-    setTopicImages([]);
-    handleOpenThread(created);
+    try {
+      const authorName = getUserDisplayName(user);
+      const created = await createThread({
+        title: topicTitle.trim(),
+        category: 'Discussion',
+        body: topicBody.trim(),
+        author: authorName,
+        imageUrls: topicImages,
+        authorAvatarUrl: isAnonymousIdentity(authorName) ? undefined : myAvatarUrl ?? undefined,
+      });
+
+      setShowCreateModal(false);
+      setTopicTitle('');
+      setTopicBody('');
+      setTopicImages([]);
+      handleOpenThread(created);
+    } catch (err: any) {
+      setConfirmModalConfig({
+        visible: true,
+        title: 'Sign In Required',
+        message: err?.message || 'Please sign in to start discussion topics.',
+        iconName: 'lock-closed-outline',
+        confirmText: 'Sign In',
+        cancelText: 'Cancel',
+        confirmVariant: 'primary',
+        onConfirm: () => {
+          setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
+          setAuthModalVisible(true);
+        },
+      });
+    }
   };
 
   const isWeb = Platform.OS === 'web';
@@ -748,7 +820,7 @@ export default function CommunityScreen() {
                   </Text>
 
                   <Text style={[styles.threadPreview, { color: colors.textSecondary }]} numberOfLines={2}>
-                    Share your theories, reactions, and recommendations with the community.
+                    {item.body || 'Share your theories, reactions, and recommendations with the community.'}
                   </Text>
 
                   <View style={styles.cardFooter}>

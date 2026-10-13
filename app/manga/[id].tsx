@@ -256,6 +256,13 @@ export default function MangaDetailScreen() {
   const [isCoverHovered, setIsCoverHovered] = useState(false);
   const [isCoverLightboxOpen, setIsCoverLightboxOpen] = useState(false);
 
+  // Windowed chapter pagination for fast rendering on long series (e.g. 500+ chapters)
+  const [visibleChapterCount, setVisibleChapterCount] = useState(40);
+
+  useEffect(() => {
+    setVisibleChapterCount(40);
+  }, [id, sortOrder, selectedScanlator]);
+
   // Custom Confirmation Dialog State
   const [confirmModalConfig, setConfirmModalConfig] = useState<{
     visible: boolean;
@@ -1404,141 +1411,195 @@ export default function MangaDetailScreen() {
             </Pressable>
           </View>
         ) : (
-          displayedChapters.map((chapter, idx) => {
-            const chapterNum = chapter.attributes.chapter;
-            const chapterTitle = chapter.attributes.title;
-            const dlItem = downloadMap[chapter.id];
-            const isDownloading = dlItem?.status === 'downloading';
-            const isPaused = dlItem?.status === 'paused';
-            const isDownloaded = dlItem?.status === 'completed';
-            const isRead = isChapterRead(chapter.id);
-            const isCurrentReading = lastProgress?.chapterId === chapter.id;
+          <>
+            {displayedChapters.slice(0, visibleChapterCount).map((chapter, idx) => {
+              const chapterNum = chapter.attributes.chapter;
+              const chapterTitle = chapter.attributes.title;
+              const dlItem = downloadMap[chapter.id];
+              const isDownloading = dlItem?.status === 'downloading';
+              const isPaused = dlItem?.status === 'paused';
+              const isDownloaded = dlItem?.status === 'completed';
+              const isRead = isChapterRead(chapter.id);
+              const isCurrentReading = lastProgress?.chapterId === chapter.id;
 
-            const handleDownload = (e: any) => {
-              e.stopPropagation();
-              if (isDownloaded) {
-                setConfirmModalConfig({
-                  visible: true,
-                  title: 'Delete Downloaded Chapter',
-                  message: `Ch. ${chapterNum || ''} is saved locally for offline reading. Do you want to delete this chapter from your device?`,
-                  iconName: 'trash-outline',
-                  confirmText: 'Delete Download',
-                  cancelText: 'Cancel',
-                  confirmVariant: 'destructive',
-                  onConfirm: () => {
-                    removeDownloadedChapter(chapter.id, manga.id);
-                    setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
-                  },
+              const handleDownload = (e: any) => {
+                e.stopPropagation();
+                if (isDownloaded) {
+                  setConfirmModalConfig({
+                    visible: true,
+                    title: 'Delete Downloaded Chapter',
+                    message: `Ch. ${chapterNum || ''} is saved locally for offline reading. Do you want to delete this chapter from your device?`,
+                    iconName: 'trash-outline',
+                    confirmText: 'Delete Download',
+                    cancelText: 'Cancel',
+                    confirmVariant: 'destructive',
+                    onConfirm: () => {
+                      removeDownloadedChapter(chapter.id, manga.id);
+                      setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
+                    },
+                  });
+                  return;
+                }
+
+                if (isDownloading) {
+                  pauseDownloadChapter(chapter.id);
+                  return;
+                }
+
+                downloadChapter({
+                  chapterId: chapter.id,
+                  mangaId: manga.id,
+                  mangaTitle: title,
+                  chapterNum: chapterNum || '1',
+                  chapterTitle: chapterTitle || '',
+                  coverUrl,
                 });
-                return;
-              }
+              };
 
-              if (isDownloading) {
-                pauseDownloadChapter(chapter.id);
-                return;
-              }
+              return (
+                <AnimatedCard
+                  key={chapter.id}
+                  index={idx}
+                  onPress={() => handleReadChapter(chapter.id)}
+                  style={[
+                    styles.chapterRow,
+                    {
+                      borderBottomWidth: 0,
+                      opacity: isRead ? 0.52 : 1,
+                      backgroundColor: isCurrentReading
+                        ? colors.accent + '14'
+                        : isRead
+                        ? (Platform.OS === 'web' ? 'rgba(255,255,255,0.015)' : 'transparent')
+                        : 'transparent',
+                    },
+                  ]}
+                >
+                  <View style={styles.chapterInfo}>
+                    <View style={styles.chapterTitleRow}>
+                      {isCurrentReading && <View style={[styles.chapterActiveDot, { backgroundColor: colors.accent }]} />}
+                      <Text
+                        style={[
+                          styles.chapterNumber,
+                          {
+                            color: isRead ? colors.textMuted : colors.text,
+                            fontWeight: isRead ? Typography.weights.medium : Typography.weights.bold,
+                          },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {chapterNum ? `Ch. ${chapterNum}` : 'Oneshot'}
+                        {chapterTitle ? ` - ${chapterTitle}` : ''}
+                      </Text>
 
-              downloadChapter({
-                chapterId: chapter.id,
-                mangaId: manga.id,
-                mangaTitle: title,
-                chapterNum: chapterNum || '1',
-                chapterTitle: chapterTitle || '',
-                coverUrl,
-              });
-            };
+                      {/* Status Badges: In-Progress Reading vs Completed Read */}
+                      {isCurrentReading ? (
+                        <View style={[styles.readingBadge, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}>
+                          <Ionicons name="book" size={11} color={colors.text} />
+                          <Text style={[styles.readingBadgeText, { color: colors.text }]}>
+                            Reading · p. {(lastProgress?.pageIndex || 0) + 1}/{lastProgress?.totalPages || chapter.attributes.pages || 1}
+                          </Text>
+                        </View>
+                      ) : isRead ? (
+                        <View style={[styles.readBadge, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}>
+                          <Ionicons name="checkmark-done" size={11} color={colors.emerald} />
+                          <Text style={[styles.readBadgeText, { color: colors.emerald }]}>Read</Text>
+                        </View>
+                      ) : null}
+                    </View>
 
-            return (
-              <AnimatedCard
-                key={chapter.id}
-                index={idx}
-                onPress={() => handleReadChapter(chapter.id)}
-                style={[
-                  styles.chapterRow,
-                  {
-                    borderBottomWidth: 0,
-                    opacity: isRead ? 0.52 : 1,
-                    backgroundColor: isCurrentReading
-                      ? colors.accent + '14'
-                      : isRead
-                      ? (Platform.OS === 'web' ? 'rgba(255,255,255,0.015)' : 'transparent')
-                      : 'transparent',
-                  },
-                ]}
-              >
-                <View style={styles.chapterInfo}>
-                  <View style={styles.chapterTitleRow}>
-                    {isCurrentReading && <View style={[styles.chapterActiveDot, { backgroundColor: colors.accent }]} />}
-                    <Text
-                      style={[
-                        styles.chapterNumber,
-                        {
-                          color: isRead ? colors.textMuted : colors.text,
-                          fontWeight: isRead ? Typography.weights.medium : Typography.weights.bold,
-                        },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {chapterNum ? `Ch. ${chapterNum}` : 'Oneshot'}
-                      {chapterTitle ? ` - ${chapterTitle}` : ''}
+                    <Text style={[styles.chapterMeta, { color: isRead ? colors.textMuted : colors.textSecondary }]}>
+                      {getChapterCredit(chapter)}
+                      {chapter.attributes.pages > 0 ? ` · ${chapter.attributes.pages} pages` : ''} ·{' '}
+                      {formatChapterDate(chapter.attributes.publishAt || chapter.attributes.readableAt)}
                     </Text>
-
-                    {/* Status Badges: In-Progress Reading vs Completed Read */}
-                    {isCurrentReading ? (
-                      <View style={[styles.readingBadge, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}>
-                        <Ionicons name="book" size={11} color={colors.text} />
-                        <Text style={[styles.readingBadgeText, { color: colors.text }]}>
-                          Reading · p. {(lastProgress?.pageIndex || 0) + 1}/{lastProgress?.totalPages || chapter.attributes.pages || 1}
-                        </Text>
-                      </View>
-                    ) : isRead ? (
-                      <View style={[styles.readBadge, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}>
-                        <Ionicons name="checkmark-done" size={11} color={colors.emerald} />
-                        <Text style={[styles.readBadgeText, { color: colors.emerald }]}>Read</Text>
-                      </View>
-                    ) : null}
                   </View>
 
-                  <Text style={[styles.chapterMeta, { color: isRead ? colors.textMuted : colors.textSecondary }]}>
-                    {getChapterCredit(chapter)}
-                    {chapter.attributes.pages > 0 ? ` · ${chapter.attributes.pages} pages` : ''} ·{' '}
-                    {formatChapterDate(chapter.attributes.publishAt || chapter.attributes.readableAt)}
-                  </Text>
-                </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <Pressable
+                      onPress={handleDownload}
+                      hitSlop={8}
+                      style={({ pressed }) => [{ opacity: pressed ? 0.6 : 1, padding: 4 }]}
+                      accessibilityLabel={
+                        isDownloading
+                          ? 'Pause downloading chapter'
+                          : isPaused
+                          ? 'Resume downloading chapter'
+                          : isDownloaded
+                          ? 'Chapter downloaded'
+                          : 'Download chapter'
+                      }
+                    >
+                      {isDownloading ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <ActivityIndicator size="small" color={colors.accent} />
+                          <Ionicons name="pause-circle" size={16} color={colors.accent} />
+                        </View>
+                      ) : isPaused ? (
+                        <Ionicons name="play-circle" size={20} color="#F59E0B" />
+                      ) : isDownloaded ? (
+                        <Ionicons name="checkmark-circle" size={20} color={colors.emerald} />
+                      ) : (
+                        <Ionicons name="download-outline" size={20} color={isRead ? colors.textMuted : colors.textSecondary} />
+                      )}
+                    </Pressable>
+                    <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                  </View>
+                </AnimatedCard>
+              );
+            })}
 
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            {displayedChapters.length > visibleChapterCount && (
+              <View style={{ alignItems: 'center', marginTop: 16, marginBottom: 8, paddingHorizontal: 16, gap: 10 }}>
+                <Pressable
+                  onPress={() => {
+                    triggerHaptic();
+                    setVisibleChapterCount((prev) => prev + 40);
+                  }}
+                  style={({ pressed }) => [
+                    styles.sortButton,
+                    {
+                      backgroundColor: colors.surfaceElevated,
+                      paddingHorizontal: 20,
+                      paddingVertical: 12,
+                      borderRadius: Radius.md,
+                      width: '100%',
+                      maxWidth: 380,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderWidth: 0,
+                      opacity: pressed ? 0.75 : 1,
+                    },
+                    Platform.OS === 'web' && { cursor: 'pointer' as any },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Load next 40 chapters"
+                >
+                  <Text style={[styles.sortText, { color: colors.accent, fontSize: 13, fontWeight: '700' }]}>
+                    Load Next 40 Chapters ({displayedChapters.length - visibleChapterCount} remaining)
+                  </Text>
+                </Pressable>
+
+                {displayedChapters.length - visibleChapterCount > 40 && (
                   <Pressable
-                    onPress={handleDownload}
-                    hitSlop={8}
-                    style={({ pressed }) => [{ opacity: pressed ? 0.6 : 1, padding: 4 }]}
-                    accessibilityLabel={
-                      isDownloading
-                        ? 'Pause downloading chapter'
-                        : isPaused
-                        ? 'Resume downloading chapter'
-                        : isDownloaded
-                        ? 'Chapter downloaded'
-                        : 'Download chapter'
-                    }
+                    onPress={() => {
+                      triggerHaptic();
+                      setVisibleChapterCount(displayedChapters.length);
+                    }}
+                    style={({ pressed }) => [
+                      { paddingVertical: 6, opacity: pressed ? 0.6 : 1 },
+                      Platform.OS === 'web' && { cursor: 'pointer' as any },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Show all chapters"
                   >
-                    {isDownloading ? (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <ActivityIndicator size="small" color={colors.accent} />
-                        <Ionicons name="pause-circle" size={16} color={colors.accent} />
-                      </View>
-                    ) : isPaused ? (
-                      <Ionicons name="play-circle" size={20} color="#F59E0B" />
-                    ) : isDownloaded ? (
-                      <Ionicons name="checkmark-circle" size={20} color={colors.emerald} />
-                    ) : (
-                      <Ionicons name="download-outline" size={20} color={isRead ? colors.textMuted : colors.textSecondary} />
-                    )}
+                    <Text style={{ color: colors.textMuted, fontSize: 12 }}>
+                      Show All ({displayedChapters.length} chapters)
+                    </Text>
                   </Pressable>
-                  <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-                </View>
-              </AnimatedCard>
-            );
-          })
+                )}
+              </View>
+            )}
+          </>
         )}
 
         </View>

@@ -10,6 +10,7 @@ import {
   getMangaChapters as getMangaDexChapters,
   getChapterPages as getMangaDexPages,
 } from '../api/mangadex';
+import { CacheManager } from '../utils/cacheManager';
 import type { Manga, Chapter } from '../types';
 
 /**
@@ -140,96 +141,138 @@ export function sourceChapterToAppChapter(c: SourceChapter): Chapter {
  * Automatically dispatches to either MangaDex or the corresponding Kotatsu extension
  */
 export async function getUniversalMangaDetails(mangaId: string): Promise<Manga> {
+  const cacheKey = `manga_details_${mangaId}`;
+  const cached = await CacheManager.get<Manga>(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  let result: Manga;
   if (!isExternalSource(mangaId)) {
     const cleanId = mangaId.replace(/^mangadex:/, '');
-    return getMangaDexDetails(cleanId);
+    result = await getMangaDexDetails(cleanId);
+  } else {
+    const resolved = SourceManager.resolveSource(mangaId);
+    if (!resolved) {
+      throw new Error(`Unable to resolve manga source for: ${mangaId}`);
+    }
+
+    const dummyManga: SourceManga = {
+      id: mangaId,
+      sourceId: resolved.parser.metadata.id,
+      title: '',
+      url: resolved.rawId,
+      publicUrl: resolved.rawId.startsWith('http')
+        ? resolved.rawId
+        : `${resolved.parser.metadata.baseUrl}/${resolved.rawId.replace(/^\/+/, '')}`,
+      coverUrl: null,
+    };
+
+    const detailed = await resolved.parser.getDetails(dummyManga);
+    result = sourceMangaToAppManga(detailed);
   }
 
-  const resolved = SourceManager.resolveSource(mangaId);
-  if (!resolved) {
-    throw new Error(`Unable to resolve manga source for: ${mangaId}`);
+  if (result) {
+    await CacheManager.set(cacheKey, result, 30 * 60 * 1000); // 30 min TTL
   }
-
-  const dummyManga: SourceManga = {
-    id: mangaId,
-    sourceId: resolved.parser.metadata.id,
-    title: '',
-    url: resolved.rawId,
-    publicUrl: resolved.rawId.startsWith('http')
-      ? resolved.rawId
-      : `${resolved.parser.metadata.baseUrl}/${resolved.rawId.replace(/^\/+/, '')}`,
-    coverUrl: null,
-  };
-
-  const detailed = await resolved.parser.getDetails(dummyManga);
-  return sourceMangaToAppManga(detailed);
+  return result;
 }
 
 /**
- * Universal Manga Chapters Fetcher
+ * Universal Manga Chapters Fetcher with CacheManager integration (30m TTL)
  */
 export async function getUniversalMangaChapters(mangaId: string): Promise<Chapter[]> {
+  const cacheKey = `ch_list_${mangaId}`;
+  const cached = await CacheManager.get<Chapter[]>(cacheKey);
+  if (cached && cached.length > 0) {
+    return cached;
+  }
+
+  let result: Chapter[] = [];
   if (!isExternalSource(mangaId)) {
     const cleanId = mangaId.replace(/^mangadex:/, '');
     const { getMangaChapters } = await import('../api/mangadex');
     const res = await getMangaChapters(cleanId, 'en', 100, 0, 'desc');
-    return res.data || [];
+    result = res.data || [];
+  } else {
+    const resolved = SourceManager.resolveSource(mangaId);
+    if (!resolved) {
+      throw new Error(`Unable to resolve manga source for: ${mangaId}`);
+    }
+
+    const dummyManga: SourceManga = {
+      id: mangaId,
+      sourceId: resolved.parser.metadata.id,
+      title: '',
+      url: resolved.rawId,
+      publicUrl: resolved.rawId.startsWith('http')
+        ? resolved.rawId
+        : `${resolved.parser.metadata.baseUrl}/${resolved.rawId.replace(/^\/+/, '')}`,
+      coverUrl: null,
+    };
+
+    const sourceChapters = await resolved.parser.getChapters(dummyManga);
+    result = sourceChapters.map((sc) => sourceChapterToAppChapter(sc));
   }
 
-  const resolved = SourceManager.resolveSource(mangaId);
-  if (!resolved) {
-    throw new Error(`Unable to resolve manga source for: ${mangaId}`);
+  if (result && result.length > 0) {
+    await CacheManager.set(cacheKey, result, 30 * 60 * 1000); // 30 min TTL
   }
-
-  const dummyManga: SourceManga = {
-    id: mangaId,
-    sourceId: resolved.parser.metadata.id,
-    title: '',
-    url: resolved.rawId,
-    publicUrl: resolved.rawId.startsWith('http')
-      ? resolved.rawId
-      : `${resolved.parser.metadata.baseUrl}/${resolved.rawId.replace(/^\/+/, '')}`,
-    coverUrl: null,
-  };
-
-  const sourceChapters = await resolved.parser.getChapters(dummyManga);
-  return sourceChapters.map((sc) => sourceChapterToAppChapter(sc));
+  return result;
 }
 
 /**
- * Universal Chapter Pages Fetcher
+ * Universal Chapter Pages Fetcher with CacheManager integration (24h TTL)
  */
 export async function getUniversalChapterPages(
   chapterId: string
 ): Promise<{ pages: string[]; headers?: Record<string, string>; mangaId?: string }> {
+  const cacheKey = `ch_pages_${chapterId}`;
+  const cached = await CacheManager.get<{ pages: string[]; headers?: Record<string, string>; mangaId?: string }>(
+    cacheKey
+  );
+  if (cached && cached.pages && cached.pages.length > 0) {
+    return cached;
+  }
+
+  let result: { pages: string[]; headers?: Record<string, string>; mangaId?: string };
+
   if (!isExternalSource(chapterId)) {
     const cleanId = chapterId.replace(/^mangadex:/, '');
     const { getChapterPages } = await import('../api/mangadex');
-    const res = await getChapterPages(cleanId, false);
-    return { pages: res.pages };
+    const { useReaderStore } = await import('../store/readerStore');
+    const isDataSaver = useReaderStore.getState().dataSaver;
+    const res = await getChapterPages(cleanId, isDataSaver);
+    result = { pages: res.pages };
+  } else {
+    const resolved = SourceManager.resolveSource(chapterId);
+    if (!resolved) {
+      throw new Error(`Unable to resolve chapter source for: ${chapterId}`);
+    }
+
+    const dummyChapter: SourceChapter = {
+      id: chapterId,
+      sourceId: resolved.parser.metadata.id,
+      mangaId: '',
+      url: resolved.rawId,
+      name: '',
+      number: 0,
+    };
+
+    const sourcePages = await resolved.parser.getPages(dummyChapter);
+    const pages = sourcePages.map((p) => p.url);
+    const headers = sourcePages[0]?.headers || (resolved.parser as any).getRequestHeaders?.();
+
+    result = {
+      pages,
+      headers,
+      mangaId: dummyChapter.mangaId || undefined,
+    };
   }
 
-  const resolved = SourceManager.resolveSource(chapterId);
-  if (!resolved) {
-    throw new Error(`Unable to resolve chapter source for: ${chapterId}`);
+  if (result && result.pages && result.pages.length > 0) {
+    await CacheManager.set(cacheKey, result, 24 * 60 * 60 * 1000); // 24 hours TTL
   }
 
-  const dummyChapter: SourceChapter = {
-    id: chapterId,
-    sourceId: resolved.parser.metadata.id,
-    mangaId: '',
-    url: resolved.rawId,
-    name: '',
-    number: 0,
-  };
-
-  const sourcePages = await resolved.parser.getPages(dummyChapter);
-  const pages = sourcePages.map((p) => p.url);
-  const headers = sourcePages[0]?.headers || (resolved.parser as any).getRequestHeaders?.();
-
-  return {
-    pages,
-    headers,
-    mangaId: dummyChapter.mangaId || undefined,
-  };
+  return result;
 }

@@ -13,6 +13,8 @@ export interface ForumComment {
   isSpoiler?: boolean;
   imageUrls?: string[];
   replyTo?: string;
+  user_id?: string;
+  userId?: string;
 }
 
 export interface ForumThread {
@@ -20,11 +22,17 @@ export interface ForumThread {
   title: string;
   category: string;
   author: string;
+  body: string;
+  author_avatar_url?: string | null;
   authorAvatarUrl?: string;
-  repliesCount: number;
-  createdAt: string;
-  lastReplyAt: string;
+  image_urls?: string[] | null;
   imageUrls?: string[];
+  created_at?: string;
+  createdAt: string;
+  repliesCount: number;
+  lastReplyAt: string;
+  user_id?: string;
+  userId?: string;
 }
 
 export interface AnimeNewsItem {
@@ -228,8 +236,66 @@ export async function getChapterComments(chapterId: string): Promise<ForumCommen
 }
 
 /**
- * Fetch replies for a specific forum discussion thread
+ * Fetch all public community discussion threads from Supabase
+ */
+export async function getCommunityThreads(): Promise<ForumThread[]> {
+  try {
+    const { data, error } = await supabase
+      .from('community_threads')
+      .select('id, user_id, title, category, author, body, author_avatar_url, image_urls, created_at')
+      .order('created_at', { ascending: false });
+
+    if (error || !data) return [];
+
+    return data.map((row: any) => ({
+      id: row.id,
+      user_id: row.user_id || undefined,
+      userId: row.user_id || undefined,
+      title: row.title,
+      category: row.category || 'General',
+      author: row.author || 'Anonymous Reader',
+      body: row.body || '',
+      author_avatar_url: row.author_avatar_url || null,
+      authorAvatarUrl: row.author_avatar_url || undefined,
+      image_urls: row.image_urls || null,
+      imageUrls: row.image_urls || undefined,
+      created_at: row.created_at,
+      createdAt: row.created_at || new Date().toISOString(),
+      repliesCount: 0,
+      lastReplyAt: row.created_at || new Date().toISOString(),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Fetch replies for a specific forum discussion thread from Supabase
  */
 export async function getThreadReplies(threadId: string): Promise<ForumComment[]> {
-  return [];
+  try {
+    const { data, error } = await supabase
+      .from('thread_replies')
+      .select('id, user_id, thread_id, username, body, avatar_url, image_urls, reply_to, created_at')
+      .eq('thread_id', threadId)
+      .order('created_at', { ascending: true });
+
+    if (error || !data) return [];
+
+    return data.map((row: any) => ({
+      id: String(row.id),
+      user_id: row.user_id || undefined,
+      userId: row.user_id || undefined,
+      username: row.username || 'Yomite Reader',
+      avatarUrl: row.avatar_url || undefined,
+      postedAt: row.created_at || new Date().toISOString(),
+      body: row.body || '',
+      likes: 1,
+      imageUrls: row.image_urls || undefined,
+      replyTo: row.reply_to || undefined,
+    }));
+  } catch {
+    return [];
+  }
 }
+

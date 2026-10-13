@@ -1508,7 +1508,19 @@ export default function DiscoverScreen() {
                     </View>
                   </View>
                   {isSearching ? (
-                    <ActivityIndicator color={colors.accent} style={{ marginTop: 40 }} />
+                    <View style={styles.mangaGrid}>
+                      {Array.from({ length: 9 }).map((_, i) => (
+                        <View
+                          key={i}
+                          style={{
+                            width: Platform.OS === 'web' ? ('calc((100% - 80px) / 9)' as any) : 110,
+                            marginBottom: 12,
+                          }}
+                        >
+                          <Skeleton width="100%" height={160} borderRadius={Radius.md} />
+                        </View>
+                      ))}
+                    </View>
                   ) : searchResults.length === 0 ? (
                     <View style={styles.emptyState}>
                       <Ionicons name="search-outline" size={40} color={colors.textMuted} />

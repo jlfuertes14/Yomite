@@ -36,18 +36,25 @@ CREATE TABLE IF NOT EXISTS public.user_library (
 -- 3. COMMUNITY FORUM THREADS (Optional)
 CREATE TABLE IF NOT EXISTS public.community_threads (
     id TEXT PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     category TEXT NOT NULL,
     author TEXT NOT NULL,
     body TEXT NOT NULL,
+    author_avatar_url TEXT,
+    image_urls TEXT[],
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS public.thread_replies (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
     thread_id TEXT NOT NULL,
     username TEXT NOT NULL,
     body TEXT NOT NULL,
+    avatar_url TEXT,
+    image_urls TEXT[],
+    reply_to TEXT,
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -62,8 +69,10 @@ ALTER TABLE public.thread_replies ENABLE ROW LEVEL SECURITY;
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_history TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_library TO authenticated;
-GRANT SELECT, INSERT ON public.community_threads TO anon, authenticated;
-GRANT SELECT, INSERT ON public.thread_replies TO anon, authenticated;
+GRANT SELECT ON public.community_threads TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.community_threads TO authenticated;
+GRANT SELECT ON public.thread_replies TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.thread_replies TO authenticated;
 
 -- Notify PostgREST to reload its schema cache
 NOTIFY pgrst, 'reload schema';
@@ -82,27 +91,48 @@ CREATE POLICY "Users can manage their own library" ON public.user_library
     USING (auth.uid() = user_id)
     WITH CHECK (auth.uid() = user_id);
 
--- 7. RLS POLICIES FOR COMMUNITY (Read all, authenticated write)
+-- 7. RLS POLICIES FOR COMMUNITY (Read all, authenticated write bound to user_id)
 DROP POLICY IF EXISTS "Anyone can read community threads" ON public.community_threads;
 CREATE POLICY "Anyone can read community threads" ON public.community_threads
     FOR SELECT USING (true);
 
 DROP POLICY IF EXISTS "Anyone can insert community threads" ON public.community_threads;
-CREATE POLICY "Anyone can insert community threads" ON public.community_threads
-    FOR INSERT WITH CHECK (true);
+DROP POLICY IF EXISTS "Authenticated users can create threads" ON public.community_threads;
+CREATE POLICY "Authenticated users can create threads" ON public.community_threads
+    FOR INSERT TO authenticated
+    WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Authors can update their own threads" ON public.community_threads;
+CREATE POLICY "Authors can update their own threads" ON public.community_threads
+    FOR UPDATE TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Authors can delete their own threads" ON public.community_threads;
+CREATE POLICY "Authors can delete their own threads" ON public.community_threads
+    FOR DELETE TO authenticated
+    USING (auth.uid() = user_id);
 
 DROP POLICY IF EXISTS "Anyone can read thread replies" ON public.thread_replies;
 CREATE POLICY "Anyone can read thread replies" ON public.thread_replies
     FOR SELECT USING (true);
 
 DROP POLICY IF EXISTS "Anyone can insert thread replies" ON public.thread_replies;
-CREATE POLICY "Anyone can insert thread replies" ON public.thread_replies
-    FOR INSERT WITH CHECK (true);
+DROP POLICY IF EXISTS "Authenticated users can post replies" ON public.thread_replies;
+CREATE POLICY "Authenticated users can post replies" ON public.thread_replies
+    FOR INSERT TO authenticated
+    WITH CHECK (auth.uid() = user_id);
 
--- 9. COMMUNITY AVATARS & ATTACHMENTS (safe to re-run; run once in SQL Editor,
--- then public profile photos resolve for signed-in and signed-out viewers alike)
+DROP POLICY IF EXISTS "Users can delete their own replies" ON public.thread_replies;
+CREATE POLICY "Users can delete their own replies" ON public.thread_replies
+    FOR DELETE TO authenticated
+    USING (auth.uid() = user_id);
+
+-- 9. COMMUNITY MIGRATIONS (Safe to re-run in Supabase SQL editor)
+ALTER TABLE public.community_threads ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
 ALTER TABLE public.community_threads ADD COLUMN IF NOT EXISTS author_avatar_url TEXT;
 ALTER TABLE public.community_threads ADD COLUMN IF NOT EXISTS image_urls TEXT[];
+ALTER TABLE public.thread_replies ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
 ALTER TABLE public.thread_replies ADD COLUMN IF NOT EXISTS avatar_url TEXT;
 ALTER TABLE public.thread_replies ADD COLUMN IF NOT EXISTS image_urls TEXT[];
 ALTER TABLE public.thread_replies ADD COLUMN IF NOT EXISTS reply_to TEXT;
@@ -110,7 +140,7 @@ ALTER TABLE public.thread_replies ADD COLUMN IF NOT EXISTS reply_to TEXT;
 -- Notify PostgREST to reload its schema cache
 NOTIFY pgrst, 'reload schema';
 
--- 8. STORAGE BUCKET FOR AVATARS (Run to create public avatars bucket)
+-- 8. STORAGE BUCKET FOR AVATARS (Scoped to user_id folder prefix)
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('avatars', 'avatars', true)
 ON CONFLICT (id) DO UPDATE SET public = true;
@@ -121,9 +151,49 @@ CREATE POLICY "Public Avatar Access" ON storage.objects
     FOR SELECT USING (bucket_id = 'avatars');
 
 DROP POLICY IF EXISTS "Authenticated User Avatar Upload" ON storage.objects;
-CREATE POLICY "Authenticated User Avatar Upload" ON storage.objects
-    FOR INSERT WITH CHECK (bucket_id = 'avatars');
+DROP POLICY IF EXISTS "Users can upload own avatar" ON storage.objects;
+CREATE POLICY "Users can upload own avatar" ON storage.objects
+    FOR INSERT TO authenticated
+    WITH CHECK (
+        bucket_id = 'avatars' 
+        AND (storage.foldername(name))[1] = auth.uid()::text
+    );
 
 DROP POLICY IF EXISTS "Authenticated User Avatar Update" ON storage.objects;
-CREATE POLICY "Authenticated User Avatar Update" ON storage.objects
-    FOR UPDATE USING (bucket_id = 'avatars');
+DROP POLICY IF EXISTS "Users can update own avatar" ON storage.objects;
+CREATE POLICY "Users can update own avatar" ON storage.objects
+    FOR UPDATE TO authenticated
+    USING (
+        bucket_id = 'avatars' 
+        AND (storage.foldername(name))[1] = auth.uid()::text
+    )
+    WITH CHECK (
+        bucket_id = 'avatars' 
+        AND (storage.foldername(name))[1] = auth.uid()::text
+    );
+
+DROP POLICY IF EXISTS "Users can delete own avatar" ON storage.objects;
+CREATE POLICY "Users can delete own avatar" ON storage.objects
+    FOR DELETE TO authenticated
+    USING (
+        bucket_id = 'avatars' 
+        AND (storage.foldername(name))[1] = auth.uid()::text
+    );
+
+-- 10. HIGH-PERFORMANCE QUERY INDEXES
+-- Core user history and library indexes
+CREATE INDEX IF NOT EXISTS idx_user_history_user_updated ON public.user_history (user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_library_user_cat ON public.user_library (user_id, category);
+
+-- Community indexes for fast thread and reply lookups
+DO $$
+BEGIN
+  IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'community_threads') THEN
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_community_threads_user_id ON public.community_threads (user_id)';
+  END IF;
+  IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'thread_replies') THEN
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_thread_replies_thread_id ON public.thread_replies (thread_id)';
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_thread_replies_user_id ON public.thread_replies (user_id)';
+  END IF;
+END $$;
+

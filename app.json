@@ -17,7 +17,6 @@
     },
     "android": {
       "package": "com.yomite.mangaapp",
-      "usesCleartextTraffic": true,
       "backgroundColor": "#09090B",
       "adaptiveIcon": {
         "backgroundColor": "#09090B",
@@ -75,7 +74,8 @@
           "photosPermission": "Allow Yomite to attach photos to community topics and replies."
         }
       ],
-      "@react-native-google-signin/google-signin"
+      "@react-native-google-signin/google-signin",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true
