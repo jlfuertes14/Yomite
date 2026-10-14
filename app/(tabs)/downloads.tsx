@@ -305,7 +305,9 @@ export default function DownloadsScreen() {
     setConfirmModalConfig({
       visible: true,
       title: 'Delete Chapter',
-      message: `Remove ${item.mangaTitle} Ch. ${item.chapterNum} from local storage?`,
+      message: item.chapterNum
+        ? `Remove Ch. ${item.chapterNum} from local storage?`
+        : 'Remove this chapter from local storage?',
       iconName: 'trash-outline',
       confirmText: 'Delete',
       confirmVariant: 'destructive',
@@ -320,8 +322,11 @@ export default function DownloadsScreen() {
     triggerHaptic();
     setConfirmModalConfig({
       visible: true,
-      title: `Delete ${group.mangaTitle}`,
-      message: `Remove all ${group.chapters.length} downloaded chapters of "${group.mangaTitle}"?`,
+      title: 'Delete Downloads',
+      message:
+        group.chapters.length === 1
+          ? 'Remove 1 downloaded chapter from local storage?'
+          : `Remove all ${group.chapters.length} downloaded chapters from local storage?`,
       iconName: 'trash-outline',
       confirmText: 'Delete All',
       confirmVariant: 'destructive',
@@ -342,7 +347,7 @@ export default function DownloadsScreen() {
     setConfirmModalConfig({
       visible: true,
       title: `Delete ${selected.length} ${selected.length === 1 ? 'Chapter' : 'Chapters'}`,
-      message: `Remove the selected chapters from local storage?`,
+      message: `Remove ${selected.length === 1 ? 'the selected chapter' : 'all selected chapters'} from local storage?`,
       iconName: 'trash-outline',
       confirmText: 'Delete',
       confirmVariant: 'destructive',
@@ -690,7 +695,7 @@ export default function DownloadsScreen() {
                   style={[
                     styles.tabPillText,
                     isSelected
-                      ? [styles.tabPillTextActive, { color: '#000000' }]
+                      ? [styles.tabPillTextActive, { color: colors.accentForeground }]
                       : [styles.tabPillTextInactive, { color: colors.textSecondary }],
                   ]}
                 >
@@ -700,7 +705,7 @@ export default function DownloadsScreen() {
                   <View
                     style={[
                       styles.tabPillDot,
-                      { backgroundColor: isSelected ? '#000000' : colors.accent },
+                      { backgroundColor: isSelected ? colors.accentForeground : colors.accent },
                     ]}
                   />
                 )}
@@ -718,22 +723,12 @@ export default function DownloadsScreen() {
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              {/* Concentric Radar Rings matching HTML Prototype */}
-              <View style={styles.radarWrapper}>
-                {/* Ambient Subtle Glow */}
-                <View style={[styles.radarGlow, { backgroundColor: `${colors.accent}14` }]} />
-                {/* Outer Dashed Radar Ring */}
-                <View style={[styles.radarRingOuter, { borderColor: colors.border }]}>
-                  {/* Inner Solid Circle */}
-                  <View style={[styles.radarRingInner, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-                    <Ionicons name="cloud-download-outline" size={38} color={colors.textSecondary} />
-                  </View>
-                  {/* Subtle Perimeter Indicator Badge */}
-                  <View style={[styles.radarPerimeterBadge, { backgroundColor: `${colors.accent}25`, borderColor: colors.background }]}>
-                    <View style={[styles.radarPerimeterDot, { backgroundColor: colors.accent }]} />
-                  </View>
-                </View>
-              </View>
+              <Ionicons
+                name="cloud-download-outline"
+                size={52}
+                color={colors.textMuted}
+                style={styles.emptyIcon}
+              />
 
               {/* Title & Description */}
               <Text style={[styles.emptyTitle, { color: colors.text }]}>No Downloads Found</Text>
@@ -755,8 +750,8 @@ export default function DownloadsScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Explore Manga"
               >
-                <Ionicons name="compass-outline" size={17} color="#000000" />
-                <Text style={styles.emptyExploreBtnText}>Explore Manga</Text>
+                <Ionicons name="compass-outline" size={17} color={colors.accentForeground} />
+                <Text style={[styles.emptyExploreBtnText, { color: colors.accentForeground }]}>Explore Manga</Text>
               </AnimatedPressable>
             </View>
           }
@@ -902,7 +897,9 @@ export default function DownloadsScreen() {
                       placeholder={Platform.OS === 'web' ? 'downloads/yomite' : '/storage/emulated/0/Download/Yomite'}
                       placeholderTextColor={colors.textMuted}
                       value={customPathInput}
-                      onChangeText={setCustomPathInput}
+                      multiline={false}
+                      numberOfLines={1}
+                      onChangeText={(text) => setCustomPathInput(text.replace(/[\r\n]+/g, ' '))}
                       autoCapitalize="none"
                       autoCorrect={false}
                     />
@@ -921,7 +918,7 @@ export default function DownloadsScreen() {
                     accessibilityRole="button"
                     accessibilityLabel="Save storage location"
                   >
-                    <Text style={styles.saveLocationBtnText}>Save Location</Text>
+                    <Text style={[styles.saveLocationBtnText, { color: colors.accentForeground }]}>Save Location</Text>
                   </Pressable>
                 </View>
               </FolderSheet>
@@ -1179,58 +1176,8 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
     paddingHorizontal: 24,
   },
-  radarWrapper: {
-    width: 120,
-    height: 120,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 24,
-    position: 'relative',
-  },
-  radarGlow: {
-    position: 'absolute',
-    width: 140,
-    height: 140,
-    borderRadius: 70,
-  },
-  radarRingOuter: {
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  radarRingInner: {
-    width: 78,
-    height: 78,
-    borderRadius: 39,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  radarPerimeterBadge: {
-    position: 'absolute',
-    top: 6,
-    right: 8,
-    width: 15,
-    height: 15,
-    borderRadius: 7.5,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  radarPerimeterDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+  emptyIcon: {
+    marginBottom: 16,
   },
   emptyTitle: {
     fontSize: 20,
@@ -1260,7 +1207,6 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   emptyExploreBtnText: {
-    color: '#000000',
     fontSize: 13,
     fontWeight: '700',
     letterSpacing: 0.2,
@@ -1390,10 +1336,12 @@ const styles = StyleSheet.create({
   },
   customPathInput: {
     height: 44,
+    maxHeight: 44,
     borderRadius: 12,
     borderWidth: 0,
     paddingHorizontal: 14,
     fontSize: 13,
+    overflow: 'hidden',
   },
   saveLocationBtn: {
     height: 46,
@@ -1403,7 +1351,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   saveLocationBtnText: {
-    color: '#000000',
     fontSize: 14,
     fontWeight: '700',
     letterSpacing: 0.2,

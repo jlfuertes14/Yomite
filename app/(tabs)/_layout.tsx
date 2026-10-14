@@ -159,7 +159,7 @@ function FloatingTabBar({ state, descriptors, navigation }: NavigationBarProps) 
     >
       <View
         onLayout={onBarLayout}
-        style={[styles.tabBarPill, { backgroundColor: colors.surface, borderColor: colors.border }]}
+        style={[styles.tabBarPill, { backgroundColor: colors.surfaceElevated || colors.surface, borderWidth: 0, borderColor: 'transparent' }]}
       >
         <Animated.View
           pointerEvents="none"
@@ -258,17 +258,18 @@ const styles = StyleSheet.create({
   tabBarPill: {
     alignItems: 'center',
     borderRadius: 32,
-    borderWidth: StyleSheet.hairlineWidth,
-    elevation: 8,
+    borderWidth: 0,
+    borderColor: 'transparent',
+    elevation: 0,
     flexDirection: 'row',
     height: 60,
     overflow: 'hidden',
     paddingHorizontal: 4,
     position: 'relative',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.24,
-    shadowRadius: 14,
+    shadowColor: 'transparent',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
     width: '94%',
   },
   tabItem: {

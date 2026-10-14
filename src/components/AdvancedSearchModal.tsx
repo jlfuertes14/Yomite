@@ -282,7 +282,9 @@ export function AdvancedSearchModal({
           placeholder="Search title or keywords..."
           placeholderTextColor={colors.textMuted}
           value={title}
-          onChangeText={setTitle}
+          multiline={false}
+          numberOfLines={1}
+          onChangeText={(text) => setTitle(text.replace(/[\r\n]+/g, ' '))}
         />
 
         {/* MangaDex Official 13 Sort Options */}
@@ -489,8 +491,8 @@ export function AdvancedSearchModal({
           </Pressable>
         )}
         <Pressable onPress={handleApply} style={[styles.applyBtn, { backgroundColor: colors.accent }]}>
-          <Ionicons name="search" size={18} color="#FFFFFF" />
-          <Text style={styles.applyBtnText}>Search</Text>
+          <Ionicons name="search" size={18} color={colors.accentForeground} />
+          <Text style={[styles.applyBtnText, { color: colors.accentForeground }]}>Search</Text>
         </Pressable>
       </View>
     </View>
@@ -625,10 +627,12 @@ const styles = StyleSheet.create({
   },
   input: {
     height: 44,
+    maxHeight: 44,
     borderWidth: 0,
     borderRadius: Radius.md,
     paddingHorizontal: Spacing.md,
     fontSize: Typography.sizes.body,
+    overflow: 'hidden',
   },
   chipRow: {
     flexDirection: 'row',

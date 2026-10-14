@@ -276,3 +276,26 @@ export async function getUniversalChapterPages(
 
   return result;
 }
+
+/**
+ * Resolves a human-friendly display name for a manga/chapter ID or URL
+ * e.g. "asurascans:solo-leveling" -> "AsuraScans"
+ * "mangadex:..." or UUID -> "MangaDex"
+ */
+export function getSourceDisplayName(idOrUrl?: string | null): string {
+  if (!idOrUrl) return 'Manga';
+  if (!isExternalSource(idOrUrl)) return 'MangaDex';
+
+  const resolved = SourceManager.resolveSource(idOrUrl);
+  if (resolved?.parser?.metadata?.name) {
+    return resolved.parser.metadata.name;
+  }
+
+  const colonIdx = idOrUrl.indexOf(':');
+  if (colonIdx > 0) {
+    const prefix = idOrUrl.substring(0, colonIdx);
+    return prefix.charAt(0).toUpperCase() + prefix.slice(1);
+  }
+
+  return 'External';
+}

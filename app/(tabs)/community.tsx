@@ -626,7 +626,9 @@ export default function CommunityScreen() {
               placeholder="Search discussions, topics or users..."
               placeholderTextColor={colors.textMuted}
               value={searchQuery}
-              onChangeText={setSearchQuery}
+              multiline={false}
+              numberOfLines={1}
+              onChangeText={(text) => setSearchQuery(text.replace(/[\r\n]+/g, ' '))}
             />
             {searchQuery.length > 0 && (
               <Pressable onPress={() => setSearchQuery('')} hitSlop={6}>
@@ -958,15 +960,15 @@ export default function CommunityScreen() {
           </View>
         </Modal>
 
-        {feedMode === 'home' && (
+        {feedMode === 'home' && isWeb && (
           <AnimatedPressable
             onPress={handleOpenCreateTopic}
             style={[styles.fab, { backgroundColor: colors.accent }]}
             accessibilityRole="button"
             accessibilityLabel="Create new discussion topic"
           >
-            <Ionicons name="add" size={20} color="#0A0B0E" />
-            <Text style={styles.fabText}>Create post</Text>
+            <Ionicons name="add" size={20} color={colors.accentForeground} />
+            <Text style={[styles.fabText, { color: colors.accentForeground }]}>Create post</Text>
           </AnimatedPressable>
         )}
 
@@ -1402,10 +1404,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     height: 40,
+    maxHeight: 40,
     borderRadius: Radius.md,
     borderWidth: 0,
     paddingHorizontal: Spacing.md,
     gap: Spacing.xs,
+    overflow: 'hidden',
   },
   searchInput: {
     flex: 1,
@@ -1622,11 +1626,11 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     borderRadius: Radius.md,
     padding: 4,
-    shadowColor: '#000000',
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 8,
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
   },
   newsViewMenuItem: {
     flexDirection: 'row',
@@ -1736,14 +1740,14 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: Spacing.md,
     borderRadius: Radius.full,
-    elevation: 8,
-    shadowColor: '#000000',
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
+    borderWidth: 0,
+    elevation: 0,
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
   },
   fabText: {
-    color: '#0A0B0E',
     fontSize: Typography.sizes.footnote,
     fontWeight: Typography.weights.bold,
   },

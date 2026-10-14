@@ -60,6 +60,10 @@ export function SidebarDrawer({
   const router = useRouter();
   const pathname = usePathname();
 
+  if (Platform.OS !== 'web') {
+    return null;
+  }
+
   const mainPages: NavigationItem[] = [
     { id: 'discover', label: 'Discover', icon: 'compass-outline', path: '/' },
     ...(Platform.OS === 'web'

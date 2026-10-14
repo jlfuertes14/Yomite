@@ -10,6 +10,7 @@ import { useHistoryStore } from '../store/historyStore';
 import { useLibraryStore } from '../store/libraryStore';
 import { ApiLogger } from './apiLogger';
 import type { HistoryEntry } from '../types';
+import { deduplicateHistoryEntries } from '../utils/mangaTitleNormalizer';
 
 function formatSupabaseError(err: any): string {
   if (!err) return 'Unknown error';
@@ -202,8 +203,8 @@ export async function syncUserDataWithCloud(userId: string): Promise<{ success: 
           }
         });
 
-        // Sort all merged entries by timestamp descending
-        const finalMergedList = Array.from(mergedMap.values()).sort((a, b) => b.timestamp - a.timestamp);
+        // Sort all merged entries by timestamp descending and deduplicate cross-source titles
+        const finalMergedList = deduplicateHistoryEntries(Array.from(mergedMap.values()));
         useHistoryStore.setState({ entries: finalMergedList });
 
         ApiLogger.logSupabase(

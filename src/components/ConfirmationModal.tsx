@@ -106,8 +106,18 @@ export function ConfirmationModal({
           </View>
 
           {/* Title & Message */}
-          <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
-          <Text style={[styles.message, { color: colors.textSecondary }]}>
+          <Text
+            style={[styles.title, { color: colors.text }]}
+            numberOfLines={2}
+            ellipsizeMode="tail"
+          >
+            {title}
+          </Text>
+          <Text
+            style={[styles.message, { color: colors.textSecondary }]}
+            numberOfLines={4}
+            ellipsizeMode="tail"
+          >
             {message}
           </Text>
 

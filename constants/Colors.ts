@@ -3,8 +3,26 @@
  * Clean neutral zinc palette, subtle borders, precision typography, zero emojis, zero loud gradients.
  */
 
+export function getContrastTextColor(hexColor: string): string {
+  if (!hexColor) return '#FFFFFF';
+  const clean = hexColor.replace('#', '');
+  const fullHex =
+    clean.length === 3
+      ? clean
+          .split('')
+          .map((c) => c + c)
+          .join('')
+      : clean.slice(0, 6);
+  const r = parseInt(fullHex.slice(0, 2), 16) || 0;
+  const g = parseInt(fullHex.slice(2, 4), 16) || 0;
+  const b = parseInt(fullHex.slice(4, 6), 16) || 0;
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  return yiq >= 140 ? '#09090B' : '#FFFFFF';
+}
+
 const brand = {
   accent: '#F59E0B',
+  accentForeground: '#09090B',
   accentSubtle: 'rgba(245, 158, 11, 0.12)',
   neutralHigh: '#FAFAFA',
   neutralMid: '#71717A',
@@ -52,6 +70,7 @@ export const Colors = {
     skeleton: '#292A2D',
     ...brand,
     accent: '#F59E0B',
+    accentForeground: '#09090B',
     accentSubtle: 'rgba(245, 158, 11, 0.16)',
   },
 };
@@ -75,6 +94,7 @@ type ThemePalette = Pick<
   | 'cardBorder'
   | 'skeleton'
   | 'accent'
+  | 'accentForeground'
   | 'accentSubtle'
 >;
 
@@ -91,6 +111,7 @@ function characterPalette(
 ): ThemePalette {
   return {
     accent,
+    accentForeground: getContrastTextColor(accent),
     accentSubtle: `${accent}29`,
     background,
     surface,
@@ -180,15 +201,15 @@ export const Radius = {
 
 export const Typography = {
   sizes: {
-    caption: 11,
-    footnote: 12,
-    body: 14,
-    callout: 15,
-    headline: 16,
-    title3: 18,
-    title2: 22,
-    title1: 26,
-    largeTitle: 32,
+    caption: 12,
+    footnote: 13,
+    body: 16,
+    callout: 16,
+    headline: 17,
+    title3: 20,
+    title2: 24,
+    title1: 28,
+    largeTitle: 34,
   },
   weights: {
     regular: '400' as const,

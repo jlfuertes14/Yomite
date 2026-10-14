@@ -114,6 +114,7 @@ export interface LibraryEntry {
   unreadCount: number;
   addedAt: number; // timestamp
   updatedAt: number;
+  description?: string;
 }
 
 export interface HistoryEntry {

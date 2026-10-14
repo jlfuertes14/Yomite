@@ -21,6 +21,7 @@ interface LibraryState {
   updateReadProgress: (mangaId: string, chapterId: string, page: number, unreadCount?: number) => void;
   updateUnreadCount: (mangaId: string, count: number) => void;
   updateChapterCounts: (mangaId: string, totalChapters: number, unreadCount: number) => void;
+  updateEntryDescription: (mangaId: string, description: string) => void;
   isInLibrary: (mangaId: string) => boolean;
   getEntriesByCategory: (category: LibraryCategory) => LibraryEntry[];
 }
@@ -106,6 +107,21 @@ export const useLibraryStore = create<LibraryState>()(
                 totalChapters,
                 unreadCount,
                 updatedAt: Date.now(),
+              },
+            },
+          };
+        }),
+
+      updateEntryDescription: (mangaId, description) =>
+        set((state) => {
+          const existing = state.entries[mangaId];
+          if (!existing) return state;
+          return {
+            entries: {
+              ...state.entries,
+              [mangaId]: {
+                ...existing,
+                description,
               },
             },
           };

@@ -1,9 +1,17 @@
 /**
  * useThemeColor hook — returns color from design token based on scheme & dynamic accent color preference
  */
-import { CharacterThemePalettes, CharacterThemeId, Colors, DynamicThemePalettes } from '../../constants/Colors';
+import {
+  CharacterThemePalettes,
+  CharacterThemeId,
+  Colors,
+  DynamicThemePalettes,
+  getContrastTextColor,
+} from '../../constants/Colors';
 import { useColorScheme } from './useColorScheme';
 import { useThemeStore } from '../store/themeStore';
+
+export { getContrastTextColor };
 
 type ThemeColorKey = keyof typeof Colors.light & keyof typeof Colors.dark;
 
@@ -22,6 +30,9 @@ export function useThemeColor(
   const colorFromProps = props?.[scheme];
   if (colorFromProps) return colorFromProps;
   if (colorKey === 'accent' || colorKey === 'tintSecondary') return resolvedAccent;
+  if (colorKey === 'accentForeground') {
+    return palette?.accentForeground || getContrastTextColor(resolvedAccent);
+  }
   if (colorKey === 'accentSubtle') return palette?.accentSubtle || `${resolvedAccent}1F`;
   return palette?.[colorKey] || Colors[scheme][colorKey];
 }
@@ -36,11 +47,14 @@ export function useThemeColors() {
       ? CharacterThemePalettes[themeScheme as CharacterThemeId][scheme]
       : undefined;
   const resolvedAccent = palette?.accent || baseColors.accent;
+  const resolvedAccentForeground =
+    palette?.accentForeground || getContrastTextColor(resolvedAccent);
 
   return {
     ...baseColors,
     ...palette,
     accent: resolvedAccent,
+    accentForeground: resolvedAccentForeground,
     tintSecondary: resolvedAccent,
     accentSubtle: palette?.accentSubtle || `${resolvedAccent}1F`,
   };

@@ -4,7 +4,7 @@
  * Includes category pill filters, live search, 3-dots sheet with View Modes (Grid, Details, Compact),
  * Sort & Filter options, unread badges, bottom-right read percentage text, and long-press category switcher.
  */
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -25,7 +25,8 @@ import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { useLibraryStore, LibraryDisplayMode } from '../../src/store/libraryStore';
 import { useHistoryStore } from '../../src/store/historyStore';
 import { useDownloadStore } from '../../src/store/downloadStore';
-import { getMangaChapters } from '../../src/api/mangadex';
+import { getMangaChapters, getMangaDetails, getMangaDescription } from '../../src/api/mangadex';
+import { getUniversalMangaDetails, isExternalSource } from '../../src/sources/adapter';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
 import { LibraryCategoryModal } from '../../src/components/LibraryCategoryModal';
 import { ListOptionsModal, SortOption } from '../../src/components/ListOptionsModal';
@@ -35,13 +36,7 @@ import type { LibraryEntry, LibraryCategory, HistoryEntry } from '../../src/type
 
 type VectorIcon = keyof typeof Ionicons.glyphMap;
 
-function getContrastTextColor(hex: string): string {
-  const value = hex.replace('#', '');
-  const r = parseInt(value.slice(0, 2), 16) || 0;
-  const g = parseInt(value.slice(2, 4), 16) || 0;
-  const b = parseInt(value.slice(4, 6), 16) || 0;
-  return (r * 299 + g * 587 + b * 114) / 1000 >= 128 ? '#1B1B1F' : '#FFFFFF';
-}
+const descriptionCache = new Map<string, string>();
 
 interface CategoryTab {
   key: LibraryCategory;
@@ -205,7 +200,7 @@ function LibraryGridCard({
         {/* Unread Amber Pill Badge */}
         {hasUnread && (
           <View style={[styles.unreadBadge, { backgroundColor: colors.accent }]}>
-            <Text style={[styles.unreadBadgeText, { color: getContrastTextColor(colors.accent) }]}>
+            <Text style={[styles.unreadBadgeText, { color: colors.accentForeground }]}>
               {entry.unreadCount! > 99 ? '99+' : entry.unreadCount}
             </Text>
           </View>
@@ -253,7 +248,7 @@ function LibraryGridCard({
   );
 }
 
-/** 2. Details Mode Card (Right side cover + Titles, details, etc. on the left) */
+/** 2. Details Mode Card (Left side cover + Titles, details, descriptions, badges on the right) */
 function LibraryDetailsCard({
   entry,
   historyEntry,
@@ -266,6 +261,44 @@ function LibraryDetailsCard({
     () => getCardMetadata(entry, historyEntry),
     [entry, historyEntry]
   );
+
+  const [description, setDescription] = useState<string>(
+    () => entry.description || descriptionCache.get(entry.mangaId) || ''
+  );
+
+  useEffect(() => {
+    if (entry.description) {
+      setDescription(entry.description);
+      return;
+    }
+    if (descriptionCache.has(entry.mangaId)) {
+      setDescription(descriptionCache.get(entry.mangaId)!);
+      return;
+    }
+
+    let isMounted = true;
+    const fetchDesc = async () => {
+      try {
+        const details = isExternalSource(entry.mangaId)
+          ? await getUniversalMangaDetails(entry.mangaId)
+          : await getMangaDetails(entry.mangaId);
+        const desc = getMangaDescription(details) || '';
+        if (desc) {
+          const cleaned = desc.replace(/\[\/?(b|i|u|url|spoiler).*?\]/gi, '').replace(/\r?\n+/g, ' ').trim();
+          descriptionCache.set(entry.mangaId, cleaned);
+          if (isMounted) setDescription(cleaned);
+          useLibraryStore.getState().updateEntryDescription(entry.mangaId, cleaned);
+        }
+      } catch {
+        // Silently ignore if offline
+      }
+    };
+
+    fetchDesc();
+    return () => {
+      isMounted = false;
+    };
+  }, [entry.mangaId, entry.description]);
 
   return (
     <Pressable
@@ -291,14 +324,54 @@ function LibraryDetailsCard({
       accessibilityRole="button"
       accessibilityLabel={`${entry.title}, ${chapterMeta}, ${timeLabel}${hasUnread ? `, ${entry.unreadCount} unread chapters` : ''}`}
     >
-      {/* Right side: Manga title, details, chapter info, badges */}
-      <View style={styles.detailsLeft}>
+      {/* Left side: Manga Cover */}
+      <View style={[styles.detailsCoverWrapper, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}>
+        {entry.coverUrl ? (
+          <Image
+            source={{ uri: entry.coverUrl }}
+            style={styles.coverImage}
+            contentFit="cover"
+            transition={250}
+            recyclingKey={entry.mangaId}
+          />
+        ) : (
+          <View style={[styles.coverPlaceholder, { backgroundColor: colors.surfaceElevated }]}>
+            <Ionicons name="book-outline" size={24} color={colors.textMuted} />
+          </View>
+        )}
+
+        {/* Top-Right Unread Badge */}
+        {hasUnread && (
+          <View style={[styles.unreadBadgeMini, { backgroundColor: colors.accent }]}>
+            <Text style={[styles.unreadBadgeTextMini, { color: colors.accentForeground }]}>
+              {entry.unreadCount! > 99 ? '99+' : entry.unreadCount}
+            </Text>
+          </View>
+        )}
+
+        {/* Bottom-Right Percentage Badge */}
+        {progressPercent > 0 && (
+          <View style={styles.percentBadgeMini}>
+            <Text
+              style={[
+                styles.percentTextMini,
+                progressPercent === 100 && { color: '#10B981' },
+              ]}
+            >
+              {progressPercent}%
+            </Text>
+          </View>
+        )}
+      </View>
+
+      {/* Right side: Manga title, details, description, chapter info, badges */}
+      <View style={styles.detailsContent}>
         <Text
           style={[
             styles.detailsTitle,
             { color: hovered ? colors.accent : colors.text },
           ]}
-          numberOfLines={2}
+          numberOfLines={1}
         >
           {entry.title}
         </Text>
@@ -314,6 +387,15 @@ function LibraryDetailsCard({
             {chapterMeta} • {timeLabel}
           </Text>
         </View>
+
+        {description ? (
+          <Text
+            style={[styles.detailsDescriptionText, { color: colors.textMuted }]}
+            numberOfLines={2}
+          >
+            {description}
+          </Text>
+        ) : null}
 
         <View style={styles.detailsBadgesRow}>
           {hasUnread && (
@@ -347,46 +429,6 @@ function LibraryDetailsCard({
           )}
         </View>
       </View>
-
-      {/* Left side: Manga Cover */}
-      <View style={[styles.detailsCoverWrapper, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}>
-        {entry.coverUrl ? (
-          <Image
-            source={{ uri: entry.coverUrl }}
-            style={styles.coverImage}
-            contentFit="cover"
-            transition={250}
-            recyclingKey={entry.mangaId}
-          />
-        ) : (
-          <View style={[styles.coverPlaceholder, { backgroundColor: colors.surfaceElevated }]}>
-            <Ionicons name="book-outline" size={24} color={colors.textMuted} />
-          </View>
-        )}
-
-        {/* Top-Right Unread Badge */}
-        {hasUnread && (
-          <View style={[styles.unreadBadgeMini, { backgroundColor: colors.accent }]}>
-            <Text style={styles.unreadBadgeTextMini}>
-              {entry.unreadCount! > 99 ? '99+' : entry.unreadCount}
-            </Text>
-          </View>
-        )}
-
-        {/* Bottom-Right Percentage Badge */}
-        {progressPercent > 0 && (
-          <View style={styles.percentBadgeMini}>
-            <Text
-              style={[
-                styles.percentTextMini,
-                progressPercent === 100 && { color: '#10B981' },
-              ]}
-            >
-              {progressPercent}%
-            </Text>
-          </View>
-        )}
-      </View>
     </Pressable>
   );
 }
@@ -404,6 +446,42 @@ function LibraryCompactCard({
     () => getCardMetadata(entry, historyEntry),
     [entry, historyEntry]
   );
+
+  const [description, setDescription] = useState<string>(
+    () => entry.description || descriptionCache.get(entry.mangaId) || ''
+  );
+
+  useEffect(() => {
+    if (entry.description) {
+      setDescription(entry.description);
+      return;
+    }
+    if (descriptionCache.has(entry.mangaId)) {
+      setDescription(descriptionCache.get(entry.mangaId)!);
+      return;
+    }
+
+    let isMounted = true;
+    const fetchDesc = async () => {
+      try {
+        const details = isExternalSource(entry.mangaId)
+          ? await getUniversalMangaDetails(entry.mangaId)
+          : await getMangaDetails(entry.mangaId);
+        const desc = getMangaDescription(details) || '';
+        if (desc) {
+          const cleaned = desc.replace(/\[\/?(b|i|u|url|spoiler).*?\]/gi, '').replace(/\r?\n+/g, ' ').trim();
+          descriptionCache.set(entry.mangaId, cleaned);
+          if (isMounted) setDescription(cleaned);
+          useLibraryStore.getState().updateEntryDescription(entry.mangaId, cleaned);
+        }
+      } catch {}
+    };
+
+    fetchDesc();
+    return () => {
+      isMounted = false;
+    };
+  }, [entry.mangaId, entry.description]);
 
   return (
     <Pressable
@@ -446,7 +524,7 @@ function LibraryCompactCard({
         )}
       </View>
 
-      {/* Middle: Title & Subtitle */}
+      {/* Middle: Title & Subtitle & Description */}
       <View style={styles.compactCenter}>
         <Text
           style={[styles.compactTitle, { color: hovered ? colors.accent : colors.text }]}
@@ -465,6 +543,14 @@ function LibraryCompactCard({
             {chapterMeta} • {timeLabel}
           </Text>
         </View>
+        {description ? (
+          <Text
+            style={[styles.compactDescriptionText, { color: colors.textMuted }]}
+            numberOfLines={1}
+          >
+            {description}
+          </Text>
+        ) : null}
       </View>
 
       {/* Right: Percentage & Unread Pill */}
@@ -481,7 +567,7 @@ function LibraryCompactCard({
         )}
         {hasUnread && (
           <View style={[styles.compactUnreadBadge, { backgroundColor: colors.accent }]}>
-            <Text style={[styles.compactUnreadText, { color: getContrastTextColor(colors.accent) }]}>
+            <Text style={[styles.compactUnreadText, { color: colors.accentForeground }]}>
               {entry.unreadCount! > 99 ? '99+' : entry.unreadCount}
             </Text>
           </View>
@@ -776,7 +862,9 @@ export default function LibraryScreen() {
               <Ionicons name="search" size={18} color={colors.textMuted} style={styles.searchIcon} />
               <TextInput
                 value={searchQuery}
-                onChangeText={setSearchQuery}
+                multiline={false}
+                numberOfLines={1}
+                onChangeText={(text) => setSearchQuery(text.replace(/[\r\n]+/g, ' '))}
                 placeholder={`Search in ${activeCategoryObj.label}…`}
                 placeholderTextColor={colors.textMuted}
                 style={[styles.searchInput, { color: colors.text }]}
@@ -818,7 +906,7 @@ export default function LibraryScreen() {
                   style={({ pressed }) => [
                     styles.tabPill,
                     isActive
-                      ? [styles.tabPillActive, { backgroundColor: colors.text }]
+                      ? [styles.tabPillActive, { backgroundColor: colors.accent }]
                       : [styles.tabPillInactive, { backgroundColor: colors.surfaceElevated }],
                     { transform: [{ scale: pressed ? 0.96 : 1 }] },
                   ]}
@@ -828,12 +916,12 @@ export default function LibraryScreen() {
                   <Ionicons
                     name={cat.icon}
                     size={15}
-                    color={isActive ? colors.background : colors.textMuted}
+                    color={isActive ? colors.accentForeground : colors.textMuted}
                   />
                   <Text
                     style={[
                       styles.tabLabel,
-                      isActive ? [styles.tabLabelActive, { color: colors.background }] : [styles.tabLabelInactive, { color: colors.textSecondary }],
+                      isActive ? [styles.tabLabelActive, { color: colors.accentForeground }] : [styles.tabLabelInactive, { color: colors.textSecondary }],
                     ]}
                   >
                     {cat.label}
@@ -843,7 +931,7 @@ export default function LibraryScreen() {
                       style={[
                         styles.tabCountBadge,
                         isActive
-                          ? [styles.tabCountBadgeActive, { backgroundColor: `${colors.background}30` }]
+                          ? [styles.tabCountBadgeActive, { backgroundColor: 'rgba(255, 255, 255, 0.22)' }]
                           : [styles.tabCountBadgeInactive, { backgroundColor: colors.surface }],
                       ]}
                     >
@@ -851,7 +939,7 @@ export default function LibraryScreen() {
                         style={[
                           styles.tabCountText,
                           isActive
-                            ? [styles.tabCountTextActive, { color: colors.background }]
+                            ? [styles.tabCountTextActive, { color: colors.accentForeground }]
                             : [styles.tabCountTextInactive, { color: colors.textMuted }],
                         ]}
                       >
@@ -906,8 +994,8 @@ export default function LibraryScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Explore Discover"
               >
-                <Ionicons name="compass-outline" size={18} color={getContrastTextColor(colors.accent)} />
-                <Text style={[styles.emptyCtaText, { color: getContrastTextColor(colors.accent) }]}>Browse Discover</Text>
+                <Ionicons name="compass-outline" size={18} color={colors.accentForeground} />
+                <Text style={[styles.emptyCtaText, { color: colors.accentForeground }]}>Browse Discover</Text>
               </Pressable>
             </View>
           </ScrollView>
@@ -1106,12 +1194,15 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     paddingHorizontal: 12,
     height: 42,
+    maxHeight: 42,
+    overflow: 'hidden',
   },
   searchIcon: {
     marginRight: 8,
   },
   searchInput: {
     flex: 1,
+    height: '100%',
     color: '#FAFAFA',
     fontSize: 16,
     paddingVertical: 0,
@@ -1350,24 +1441,25 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   detailsCard: {
-    flexDirection: 'row-reverse',
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingVertical: 12,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     borderRadius: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#161820',
+    gap: 14,
   },
-  detailsLeft: {
+  detailsContent: {
     flex: 1,
-    paddingRight: 14,
-    gap: 5,
+    gap: 4,
+    minWidth: 0,
+    justifyContent: 'center',
   },
   detailsTitle: {
     fontSize: 15,
     fontWeight: '600',
-    lineHeight: 21,
+    lineHeight: 20,
     letterSpacing: -0.2,
   },
   detailsMetaRow: {
@@ -1379,11 +1471,16 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#94A3B8',
   },
+  detailsDescriptionText: {
+    fontSize: 12,
+    lineHeight: 16.5,
+    letterSpacing: -0.1,
+  },
   detailsBadgesRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginTop: 4,
+    marginTop: 2,
   },
   detailsUnreadPill: {
     paddingHorizontal: 8,
@@ -1437,7 +1534,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   unreadBadgeTextMini: {
-    color: '#090A0F',
     fontSize: 10,
     fontWeight: '900',
   },
@@ -1470,9 +1566,10 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#14161F',
+    gap: 12,
   },
   compactCoverWrapper: {
-    width: 42,
+    width: 44,
     aspectRatio: 1 / 1.42,
     borderRadius: 8,
     overflow: 'hidden',
@@ -1481,9 +1578,8 @@ const styles = StyleSheet.create({
   },
   compactCenter: {
     flex: 1,
-    marginLeft: 12,
-    marginRight: 8,
-    gap: 3,
+    minWidth: 0,
+    gap: 2,
   },
   compactTitle: {
     fontSize: 14,
@@ -1498,6 +1594,10 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     fontWeight: '500',
     color: '#94A3B8',
+  },
+  compactDescriptionText: {
+    fontSize: 11,
+    lineHeight: 15,
   },
   compactRight: {
     flexDirection: 'row',
@@ -1518,7 +1618,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   compactUnreadText: {
-    color: '#090A0F',
     fontSize: 10.5,
     fontWeight: '900',
   },

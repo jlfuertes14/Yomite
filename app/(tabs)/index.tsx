@@ -314,10 +314,13 @@ const WebHeader: React.FC<WebHeaderProps> = ({
                   placeholder={isMobile ? 'Search…' : 'Search'}
                   placeholderTextColor="rgba(255,255,255,0.45)"
                   value={searchQuery}
+                  multiline={false}
+                  numberOfLines={1}
                   onChangeText={(text) => {
-                    setSearchQuery(text);
+                    const sanitized = text.replace(/[\r\n]+/g, ' ');
+                    setSearchQuery(sanitized);
                     setIsWebDropdownVisible(true);
-                    if (text.trim().length > 0) {
+                    if (sanitized.trim().length > 0) {
                       onFocusHandler();
                     }
                   }}
@@ -1374,18 +1377,11 @@ export default function DiscoverScreen() {
               <View style={styles.header}>
                 <View style={styles.headerLeft}>
                   <Pressable
-                    onPress={handleToggleMenu}
-                    style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1 }]}
-                    hitSlop={8}
-                  >
-                    <Ionicons name="menu" size={26} color={colors.text} />
-                  </Pressable>
-                  <Pressable
                     onPress={handleResetToDiscover}
                     style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}
                     hitSlop={8}
                   >
-                  <Text style={[styles.appTitle, { color: colors.text }]}>Discover</Text>
+                    <Text style={[styles.appTitle, { color: colors.text }]}>Discover</Text>
                   </Pressable>
                 </View>
 
@@ -1413,7 +1409,9 @@ export default function DiscoverScreen() {
                   placeholder="Search titles, authors…"
                   placeholderTextColor={colors.textMuted}
                   value={searchQuery}
-                  onChangeText={setSearchQuery}
+                  multiline={false}
+                  numberOfLines={1}
+                  onChangeText={(text) => setSearchQuery(text.replace(/[\r\n]+/g, ' '))}
                   returnKeyType="search"
                   autoCorrect={false}
                 />
@@ -1616,12 +1614,14 @@ export default function DiscoverScreen() {
                         <Ionicons
                           name="time-outline"
                           size={14}
-                          color={String(activeNavId) === 'latest' ? '#0A0B0E' : colors.textSecondary}
+                          color={String(activeNavId) === 'latest' ? colors.accentForeground : colors.textSecondary}
                         />
                         <Text
                           style={[
                             styles.feedSegmentText,
-                            String(activeNavId) === 'latest' ? styles.feedSegmentTextActive : styles.feedSegmentTextInactive,
+                            String(activeNavId) === 'latest'
+                              ? [styles.feedSegmentTextActive, { color: colors.accentForeground }]
+                              : styles.feedSegmentTextInactive,
                             String(activeNavId) !== 'latest' && { color: colors.textSecondary },
                           ]}
                         >
@@ -1645,12 +1645,14 @@ export default function DiscoverScreen() {
                         <Ionicons
                           name="add-circle-outline"
                           size={14}
-                          color={String(activeNavId) === 'recently_added' ? '#0A0B0E' : colors.textSecondary}
+                          color={String(activeNavId) === 'recently_added' ? colors.accentForeground : colors.textSecondary}
                         />
                         <Text
                           style={[
                             styles.feedSegmentText,
-                            String(activeNavId) === 'recently_added' ? styles.feedSegmentTextActive : styles.feedSegmentTextInactive,
+                            String(activeNavId) === 'recently_added'
+                              ? [styles.feedSegmentTextActive, { color: colors.accentForeground }]
+                              : styles.feedSegmentTextInactive,
                             String(activeNavId) !== 'recently_added' && { color: colors.textSecondary },
                           ]}
                         >
@@ -1979,12 +1981,14 @@ export default function DiscoverScreen() {
                         <Ionicons
                           name="time-outline"
                           size={14}
-                          color={activeNavId === 'latest' ? '#0A0B0E' : colors.textSecondary}
+                          color={activeNavId === 'latest' ? colors.accentForeground : colors.textSecondary}
                         />
                         <Text
                           style={[
                             styles.feedSegmentText,
-                            activeNavId === 'latest' ? styles.feedSegmentTextActive : styles.feedSegmentTextInactive,
+                            activeNavId === 'latest'
+                              ? [styles.feedSegmentTextActive, { color: colors.accentForeground }]
+                              : styles.feedSegmentTextInactive,
                             activeNavId !== 'latest' && { color: colors.textSecondary },
                           ]}
                         >
@@ -2008,12 +2012,14 @@ export default function DiscoverScreen() {
                         <Ionicons
                           name="add-circle-outline"
                           size={14}
-                          color={activeNavId === 'recently_added' ? '#0A0B0E' : colors.textSecondary}
+                          color={activeNavId === 'recently_added' ? colors.accentForeground : colors.textSecondary}
                         />
                         <Text
                           style={[
                             styles.feedSegmentText,
-                            activeNavId === 'recently_added' ? styles.feedSegmentTextActive : styles.feedSegmentTextInactive,
+                            activeNavId === 'recently_added'
+                              ? [styles.feedSegmentTextActive, { color: colors.accentForeground }]
+                              : styles.feedSegmentTextInactive,
                             activeNavId !== 'recently_added' && { color: colors.textSecondary },
                           ]}
                         >
@@ -2129,16 +2135,18 @@ export default function DiscoverScreen() {
         </View>
       </View>
 
-      {/* Mobile Left Overlay Slide Drawer Modal */}
-      <SidebarDrawer
-        visible={mobileDrawerVisible}
-        onClose={() => setMobileDrawerVisible(false)}
-        onSelectAdvancedSearch={() => setAdvancedSearchVisible(true)}
-        onSelectLatest={handleSelectLatest}
-        onSelectRecentlyAdded={handleSelectRecentlyAdded}
-        onSelectRandom={handleSelectRandom}
-        onSelectPopular={handleSelectPopular}
-      />
+      {/* Web Left Overlay Slide Drawer Modal */}
+      {Platform.OS === 'web' && (
+        <SidebarDrawer
+          visible={mobileDrawerVisible}
+          onClose={() => setMobileDrawerVisible(false)}
+          onSelectAdvancedSearch={() => setAdvancedSearchVisible(true)}
+          onSelectLatest={handleSelectLatest}
+          onSelectRecentlyAdded={handleSelectRecentlyAdded}
+          onSelectRandom={handleSelectRandom}
+          onSelectPopular={handleSelectPopular}
+        />
+      )}
 
       {/* Advanced Search Filter Modal */}
       <AdvancedSearchModal
@@ -2303,13 +2311,16 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xs,
     marginBottom: Spacing.md,
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm + 2,
+    height: 44,
+    maxHeight: 44,
     borderRadius: Radius.lg,
     borderWidth: 0,
     gap: Spacing.sm,
+    overflow: 'hidden',
   },
   searchInput: {
     flex: 1,
+    height: '100%',
     fontSize: Typography.sizes.body,
     paddingVertical: 0,
   },
@@ -2659,6 +2670,7 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     borderRadius: 20,
     height: 36,
+    maxHeight: 36,
     paddingHorizontal: 12,
     width: '100%',
     gap: 8,
@@ -2882,7 +2894,7 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.footnote,
     fontWeight: Typography.weights.semibold,
   },
-  feedSegmentTextActive: { color: '#0A0B0E' },
+  feedSegmentTextActive: { fontWeight: '700' },
   feedSegmentTextInactive: { color: '#D4D4D8' },
   flatRankListHeader: {
     paddingHorizontal: Spacing.md,

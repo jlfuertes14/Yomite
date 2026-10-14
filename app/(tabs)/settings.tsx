@@ -2,42 +2,56 @@
  * Settings Screen — Ultra-Clean Flat Minimalist Theme (Google Stitch Style)
  * Container-free, borderless, modern flat design with subtle dividers and tactile micro-interactions.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  Switch,
   ActivityIndicator,
   Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
   useWindowDimensions,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter, useFocusEffect } from 'expo-router';
-import { Image } from 'expo-image';
-import { ReaderThemes } from '../../constants/Colors';
-import { useReaderStore } from '../../src/store/readerStore';
-import { useHistoryStore } from '../../src/store/historyStore';
-import { useUserStore, getUserDisplayName, getUserHandle, getUserAvatarUrl } from '../../src/store/userStore';
+import { Radius, ReaderThemes, Spacing, Typography } from '../../constants/Colors';
+import { AnimatedPressable } from '../../src/components/AnimatedPressable';
+import { ConfirmationModal } from '../../src/components/ConfirmationModal';
+import { YomiteMascotIcon } from '../../src/components/YomiteMascotIcon';
+import { useThemeColors } from '../../src/hooks/useThemeColor';
 import {
-  useThemeStore,
+  checkLibraryForUpdates,
+  getBackgroundScanConfig,
+  registerLibraryScanTask,
+  saveBackgroundScanConfig,
+  unregisterLibraryScanTask,
+  getLatestChapter,
+} from '../../src/services/backgroundScanner';
+import {
+  requestNotificationPermissions,
+  sendNewChapterNotification,
+} from '../../src/services/notificationService';
+import { useLibraryStore } from '../../src/store/libraryStore';
+import { getUniversalMangaChapters, isExternalSource } from '../../src/sources/adapter';
+import { SourceManager } from '../../src/sources/SourceManager';
+import { useHistoryStore } from '../../src/store/historyStore';
+import { useReaderStore } from '../../src/store/readerStore';
+import {
   AppThemeMode,
   THEME_SCHEME_PRESETS,
+  useThemeStore,
 } from '../../src/store/themeStore';
-import { useThemeColors } from '../../src/hooks/useThemeColor';
-import { requestNotificationPermissions, sendNewChapterNotification } from '../../src/services/notificationService';
-import { registerLibraryScanTask } from '../../src/services/backgroundScanner';
-import { ConfirmationModal } from '../../src/components/ConfirmationModal';
-import { AnimatedPressable } from '../../src/components/AnimatedPressable';
-import { YomiteMascotIcon } from '../../src/components/YomiteMascotIcon';
-import type { ReadingMode, ReaderTheme } from '../../src/types';
+import { getUserAvatarUrl, getUserDisplayName, useUserStore } from '../../src/store/userStore';
+import type { ReaderTheme, ReadingMode } from '../../src/types';
 import { triggerHaptic } from '../../src/utils/haptics';
 
 import { AuthModal } from '../../src/components/AuthModal';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
+import { IntroWelcomeModal } from '../../src/components/IntroWelcomeModal';
 import { syncUserDataWithCloud } from '../../src/services/cloudSync';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 
@@ -133,8 +147,20 @@ export default function SettingsScreen() {
   // Modal & Notification State
   const [authModalVisible, setAuthModalVisible] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [scanIntervalMinutes, setScanIntervalMinutes] = useState(360);
+  const [lastScanTimestamp, setLastScanTimestamp] = useState<number>(0);
   const [isScanning, setIsScanning] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+
+  useEffect(() => {
+    getBackgroundScanConfig()
+      .then((cfg) => {
+        setNotificationsEnabled(cfg.enabled);
+        setScanIntervalMinutes(cfg.intervalMinutes);
+        setLastScanTimestamp(cfg.lastScanTimestamp);
+      })
+      .catch(() => { });
+  }, []);
 
   // Custom Confirmation Dialog State
   const [confirmModalConfig, setConfirmModalConfig] = useState<{
@@ -150,8 +176,10 @@ export default function SettingsScreen() {
     visible: false,
     title: '',
     message: '',
-    onConfirm: () => {},
+    onConfirm: () => { },
   });
+
+  const [showWelcomeIntro, setShowWelcomeIntro] = useState(false);
 
   const handleManualSync = async () => {
     if (!user?.id) return;
@@ -177,11 +205,11 @@ export default function SettingsScreen() {
       const granted = await requestNotificationPermissions();
       if (granted) {
         setNotificationsEnabled(true);
-        await registerLibraryScanTask();
+        await registerLibraryScanTask(scanIntervalMinutes);
         setConfirmModalConfig({
           visible: true,
           title: 'Notifications Enabled',
-          message: 'You will receive alerts when new chapters drop for titles in your Reading or Favorites lists.',
+          message: 'Yomite will periodically check for new chapter releases of titles in your Reading list in the background.',
           iconName: 'notifications-outline',
           confirmText: 'Got It',
           cancelText: '',
@@ -203,28 +231,125 @@ export default function SettingsScreen() {
       }
     } else {
       setNotificationsEnabled(false);
+      await unregisterLibraryScanTask();
+    }
+  };
+
+  const handleSelectInterval = async (minutes: number) => {
+    setScanIntervalMinutes(minutes);
+    await saveBackgroundScanConfig({ intervalMinutes: minutes });
+    if (notificationsEnabled) {
+      await registerLibraryScanTask(minutes);
+    }
+  };
+
+  const handleCheckUpdatesNow = async () => {
+    setIsScanning(true);
+    try {
+      const result = await checkLibraryForUpdates({ forceNotify: true });
+      setIsScanning(false);
+      setLastScanTimestamp(Date.now());
+      setConfirmModalConfig({
+        visible: true,
+        title: 'Library Scan Complete',
+        message:
+          result.newUpdates.length > 0
+            ? `Found ${result.newUpdates.length} new chapter update(s) across your ${result.checkedCount} reading titles.`
+            : `All ${result.checkedCount} reading titles in your library are up to date!`,
+        iconName: result.newUpdates.length > 0 ? 'notifications' : 'checkmark-circle-outline',
+        confirmText: 'OK',
+        cancelText: '',
+        confirmVariant: 'primary',
+        onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
+      });
+    } catch {
+      setIsScanning(false);
     }
   };
 
   const handleTestNotification = async () => {
     setIsScanning(true);
-    await sendNewChapterNotification({
-      mangaTitle: 'Yomite Manga Reader',
-      chapterNum: '100',
-      mangaId: 'test',
-      chapterId: 'test',
-    });
-    setIsScanning(false);
-    setConfirmModalConfig({
-      visible: true,
-      title: 'Test Local Push Sent',
-      message: 'A test chapter alert push notification has been delivered to your device.',
-      iconName: 'paper-plane-outline',
-      confirmText: 'OK',
-      cancelText: '',
-      confirmVariant: 'primary',
-      onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
-    });
+    try {
+      const libraryEntries = Object.values(useLibraryStore.getState().entries);
+      const targetManga =
+        libraryEntries.find((e) => e.category === 'reading') ||
+        libraryEntries.find((e) => e.category === 'favorites') ||
+        libraryEntries[0];
+
+      if (!targetManga) {
+        setIsScanning(false);
+        setConfirmModalConfig({
+          visible: true,
+          title: 'Library is Empty',
+          message:
+            'You do not have any manga in your library yet! Add manga to your "Reading" list so Yomite can track and alert you about new chapters.',
+          iconName: 'bookmarks-outline',
+          confirmText: 'Go to Discover',
+          cancelText: 'Cancel',
+          confirmVariant: 'primary',
+          onConfirm: () => {
+            setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
+            router.push('/(tabs)');
+          },
+        });
+        return;
+      }
+
+      // Query latest real chapter for user's library manga via Universal Fetcher
+      let chapterNum = 'New';
+      let chapterId = targetManga.lastReadChapterId || 'latest';
+      let sourceName = 'MangaDex';
+      if (isExternalSource(targetManga.mangaId)) {
+        const resolved = SourceManager.resolveSource(targetManga.mangaId);
+        sourceName = resolved?.parser?.metadata?.name || 'External Catalog';
+      }
+
+      try {
+        const chapters = await getUniversalMangaChapters(targetManga.mangaId);
+        const latest = getLatestChapter(chapters);
+        if (latest) {
+          chapterId = latest.id;
+          chapterNum = String(latest.attributes?.chapter || 'New');
+        }
+      } catch {
+        // Fall back to stored info if network query fails
+      }
+
+      const delivered = await sendNewChapterNotification({
+        mangaTitle: targetManga.title,
+        chapterNum,
+        mangaId: targetManga.mangaId,
+        chapterId,
+        sourceName,
+      });
+      setIsScanning(false);
+
+      if (delivered) {
+        setConfirmModalConfig({
+          visible: true,
+          title: 'Library Test Notification Sent',
+          message: `A test alert for "${targetManga.title}" (Ch. ${chapterNum}) was sent. Tap the notification in your tray to test deep-linking straight into the chapter reader!`,
+          iconName: 'paper-plane-outline',
+          confirmText: 'Got It',
+          cancelText: '',
+          confirmVariant: 'primary',
+          onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
+        });
+      } else {
+        setConfirmModalConfig({
+          visible: true,
+          title: 'Notification Failed',
+          message: 'Could not send test notification. Please verify notification permissions in device settings.',
+          iconName: 'information-circle-outline',
+          confirmText: 'Understood',
+          cancelText: '',
+          confirmVariant: 'primary',
+          onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
+        });
+      }
+    } catch {
+      setIsScanning(false);
+    }
   };
 
   const handleLogout = async () => {
@@ -268,7 +393,7 @@ export default function SettingsScreen() {
   /* ── SECTION 1: ACCOUNT & PROFILE (FLAT) ── */
   const renderAccountSection = () => (
     <View style={styles.section}>
-      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}> 
+      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>
         Yomite Account & Profile Settings
       </Text>
 
@@ -322,6 +447,7 @@ export default function SettingsScreen() {
               accessibilityLabel="Open profile settings"
               style={[
                 styles.profileActionBtn,
+                { backgroundColor: colors.surfaceElevated },
                 Platform.OS === 'web' && { cursor: 'pointer' as any },
               ]}
             >
@@ -338,6 +464,7 @@ export default function SettingsScreen() {
               accessibilityLabel="Synchronize library with cloud"
               style={[
                 styles.profileActionBtn,
+                { backgroundColor: colors.surfaceElevated },
                 Platform.OS === 'web' && { cursor: 'pointer' as any },
               ]}
             >
@@ -357,11 +484,12 @@ export default function SettingsScreen() {
               accessibilityLabel="Sign out of Yomite"
               style={[
                 styles.profileActionBtn,
+                { backgroundColor: colors.surfaceElevated },
                 Platform.OS === 'web' && { cursor: 'pointer' as any },
               ]}
             >
               <Ionicons name="log-out-outline" size={15} color={colors.textSecondary} />
-              <Text style={[styles.profileActionBtnText, { color: colors.textSecondary }]}> 
+              <Text style={[styles.profileActionBtnText, { color: colors.textSecondary }]}>
                 Sign out
               </Text>
             </AnimatedPressable>
@@ -602,10 +730,17 @@ export default function SettingsScreen() {
     </View>
   );
 
-  /* ── SECTION 6: NOTIFICATIONS (FLAT DIVIDED LIST) ── */
+  /* ── SECTION 6: BACKGROUND UPDATES & NOTIFICATIONS ── */
+  const SCAN_INTERVALS = [
+    { label: '2 Hours', minutes: 120 },
+    { label: '6 Hours', minutes: 360 },
+    { label: '12 Hours', minutes: 720 },
+    { label: '24 Hours', minutes: 1440 },
+  ];
+
   const renderNotificationsSection = () => (
     <View style={styles.section}>
-      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}> 
+      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>
         Background Updates & Notifications
       </Text>
       <View style={styles.flatDividedList}>
@@ -615,10 +750,7 @@ export default function SettingsScreen() {
               <Ionicons name="notifications-outline" size={18} color={accentColor} />
             </View>
             <View style={styles.optionTextCol}>
-            <Text style={[styles.optionTitle, { color: colors.text }]}>New Chapter Alerts</Text>
-              <Text style={[styles.optionSubtitle, { color: colors.textMuted }]}>
-                Notify when library titles get new chapters
-              </Text>
+              <Text style={[styles.optionTitle, { color: colors.text }]}>New Chapter Alerts</Text>
             </View>
           </View>
           <CustomSwitch
@@ -627,6 +759,76 @@ export default function SettingsScreen() {
             activeColor={accentColor}
           />
         </View>
+
+        {notificationsEnabled && (
+          <>
+            <View style={styles.hairlineDivider} />
+            <View style={styles.frequencyRow}>
+              <Text style={[styles.frequencyLabel, { color: colors.textSecondary }]}>Check Frequency</Text>
+              <View style={styles.intervalChipsRow}>
+                {SCAN_INTERVALS.map((item) => {
+                  const isSelected = scanIntervalMinutes === item.minutes;
+                  return (
+                    <Pressable
+                      key={item.minutes}
+                      onPress={() => handleSelectInterval(item.minutes)}
+                      style={[
+                        styles.intervalChip,
+                        {
+                          backgroundColor: isSelected ? accentColor : colors.cardBackground,
+                        },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Set scan interval to ${item.label}`}
+                    >
+                      <Text
+                        style={[
+                          styles.intervalChipText,
+                          { color: isSelected ? '#FFFFFF' : colors.textMuted },
+                        ]}
+                      >
+                        {item.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.hairlineDivider} />
+
+            <Pressable
+              onPress={handleCheckUpdatesNow}
+              disabled={isScanning}
+              accessibilityRole="button"
+              accessibilityLabel="Check library updates now"
+              style={({ pressed, hovered }: any) => [
+                styles.flatRow,
+                (pressed || hovered) && { backgroundColor: 'rgba(39, 39, 42, 0.25)' },
+                Platform.OS === 'web' && { cursor: 'pointer' as any },
+              ]}
+            >
+              <View style={styles.optionLeft}>
+                <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
+                  <Ionicons name="sync-outline" size={18} color={accentColor} />
+                </View>
+                <View style={styles.optionTextCol}>
+                  <Text style={[styles.optionTitle, { color: colors.text }]}>Check Updates Now</Text>
+                  <Text style={[styles.optionSubtitle, { color: colors.textMuted }]}>
+                    {lastScanTimestamp
+                      ? `Last checked: ${new Date(lastScanTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                      : 'Scan reading list immediately'}
+                  </Text>
+                </View>
+              </View>
+              {isScanning ? (
+                <ActivityIndicator size="small" color={accentColor} />
+              ) : (
+                <Ionicons name="chevron-forward" size={16} color="#71717A" />
+              )}
+            </Pressable>
+          </>
+        )}
 
         <View style={styles.hairlineDivider} />
 
@@ -645,7 +847,7 @@ export default function SettingsScreen() {
             <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
               <Ionicons name="paper-plane-outline" size={18} color={accentColor} />
             </View>
-            <Text style={[styles.optionTitle, { color: colors.text }]}>Send Test Local Push Notification</Text>
+            <Text style={[styles.optionTitle, { color: colors.text }]}>Send Test Notification</Text>
           </View>
           {isScanning ? (
             <ActivityIndicator size="small" color={accentColor} />
@@ -660,7 +862,7 @@ export default function SettingsScreen() {
   /* ── SECTION 7: DATA & PERFORMANCE (FLAT DIVIDED LIST) ── */
   const renderDataSection = () => (
     <View style={styles.section}>
-        <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>Data & Performance</Text>
+      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>Data & Performance</Text>
       <View style={styles.flatDividedList}>
         <View style={styles.flatRow}>
           <View style={styles.optionLeft}>
@@ -668,7 +870,7 @@ export default function SettingsScreen() {
               <Ionicons name="wifi-outline" size={18} color={accentColor} />
             </View>
             <View style={styles.optionTextCol}>
-            <Text style={[styles.optionTitle, { color: colors.text }]}>Data Saver (Compressed images)</Text>
+              <Text style={[styles.optionTitle, { color: colors.text }]}>Data Saver (Compressed images)</Text>
               <Text style={[styles.optionSubtitle, { color: colors.textMuted }]}>
                 Load lower resolution images to save mobile data
               </Text>
@@ -709,7 +911,7 @@ export default function SettingsScreen() {
               />
             </View>
             <View style={styles.optionTextCol}>
-            <Text style={[styles.optionTitle, { color: colors.text }]}>Subtle Haptic Feedback</Text>
+              <Text style={[styles.optionTitle, { color: colors.text }]}>Subtle Haptic Feedback</Text>
               <Text style={[styles.optionSubtitle, { color: colors.textMuted }]}>
                 Vibrate lightly when tapping buttons and controls
               </Text>
@@ -741,6 +943,35 @@ export default function SettingsScreen() {
             <Text style={[styles.optionTitle, { color: '#EF4444' }]}>
               Clear Reading History
             </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color="#71717A" />
+        </Pressable>
+
+        <View style={styles.hairlineDivider} />
+
+        <Pressable
+          onPress={() => {
+            triggerHaptic();
+            setShowWelcomeIntro(true);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Preview welcome introductory screen"
+          style={({ pressed, hovered }: any) => [
+            styles.flatRow,
+            (pressed || hovered) && { backgroundColor: 'rgba(39, 39, 42, 0.25)' },
+            Platform.OS === 'web' && { cursor: 'pointer' as any },
+          ]}
+        >
+          <View style={styles.optionLeft}>
+            <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
+              <Ionicons name="sparkles-outline" size={18} color={accentColor} />
+            </View>
+            <View style={styles.optionTextCol}>
+              <Text style={[styles.optionTitle, { color: colors.text }]}>Welcome Introduction</Text>
+              <Text style={[styles.optionSubtitle, { color: colors.textMuted }]}>
+                Replay first-launch welcome screen
+              </Text>
+            </View>
           </View>
           <Ionicons name="chevron-forward" size={16} color="#71717A" />
         </Pressable>
@@ -809,7 +1040,7 @@ export default function SettingsScreen() {
               </Pressable>
             )}
             <View>
-                  <Text style={[styles.title, isDesktop && styles.titleDesktop, { color: colors.text }]}>Settings</Text>
+              <Text style={[styles.title, isDesktop && styles.titleDesktop, { color: colors.text }]}>Settings</Text>
               {isDesktop && (
                 <Text style={[styles.desktopSubtitle, { color: colors.textMuted }]}>
                   Manage your account, reader preferences, themes, and storage.
@@ -855,9 +1086,9 @@ export default function SettingsScreen() {
 
           {/* App Info Footer */}
           <View style={styles.footer}>
-            <Text style={[styles.footerTitle, { color: colors.textMuted }]}>Yomite Manga Reader v1.2.2</Text>
+            <Text style={[styles.footerTitle, { color: colors.textMuted }]}>Yomite Manga Reader v1.2.3</Text>
             <Text style={[styles.footerSubtitle, { color: colors.textMuted }]}>
-              Powered by MangaDex API & Supabase Cloud Sync
+              Powered by MangaDex API, Kotatsu and Supabase Cloud Sync
             </Text>
           </View>
         </ScrollView>
@@ -880,6 +1111,14 @@ export default function SettingsScreen() {
 
         {/* Sidebar Drawer */}
         <SidebarDrawer visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
+
+        {/* Welcome Intro Modal (Preview / Replay) */}
+        {showWelcomeIntro && (
+          <IntroWelcomeModal
+            forceVisible
+            onDismiss={() => setShowWelcomeIntro(false)}
+          />
+        )}
       </View>
     </SafeAreaView>
   );
@@ -1041,22 +1280,29 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   profileActionRow: {
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 20,
-    paddingTop: 8,
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingTop: 10,
     paddingBottom: 4,
   },
   profileActionBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 6,
-    paddingVertical: 6,
-    minHeight: 36,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    minHeight: 44,
   },
   profileActionBtnText: {
     fontSize: 13,
     fontWeight: '600',
+    textAlign: 'center',
   },
 
   /* Signed out state */
@@ -1188,5 +1434,33 @@ const styles = StyleSheet.create({
   footerSubtitle: {
     fontSize: 11,
     color: '#52525B',
+  },
+
+  /* Frequency Selection */
+  frequencyRow: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 2,
+    gap: 8,
+  },
+  frequencyLabel: {
+    fontSize: Typography.sizes.caption,
+    fontWeight: Typography.weights.semibold,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  intervalChipsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  intervalChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: Radius.full,
+  },
+  intervalChipText: {
+    fontSize: Typography.sizes.caption,
+    fontWeight: Typography.weights.semibold,
   },
 });

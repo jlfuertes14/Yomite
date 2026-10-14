@@ -313,10 +313,13 @@ const WebHeader: React.FC<WebHeaderProps> = ({
                   placeholder={isMobile ? 'Search...' : 'Search'}
                   placeholderTextColor="rgba(255,255,255,0.45)"
                   value={searchQuery}
+                  multiline={false}
+                  numberOfLines={1}
                   onChangeText={(text) => {
-                    setSearchQuery(text);
+                    const sanitized = text.replace(/[\r\n]+/g, ' ');
+                    setSearchQuery(sanitized);
                     setIsWebDropdownVisible(true);
-                    if (text.trim().length > 0) {
+                    if (sanitized.trim().length > 0) {
                       onFocusHandler();
                     }
                   }}
@@ -1398,7 +1401,9 @@ export default function DiscoverScreen() {
                   placeholder="Search titles, authors..."
                   placeholderTextColor={colors.textMuted}
                   value={searchQuery}
-                  onChangeText={setSearchQuery}
+                  multiline={false}
+                  numberOfLines={1}
+                  onChangeText={(text) => setSearchQuery(text.replace(/[\r\n]+/g, ' '))}
                   returnKeyType="search"
                   autoCorrect={false}
                 />
@@ -2083,13 +2088,16 @@ const styles = StyleSheet.create({
     marginHorizontal: Spacing.lg,
     marginVertical: Spacing.md,
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm + 2,
+    height: 44,
+    maxHeight: 44,
     borderRadius: Radius.md,
     borderWidth: 1,
     gap: Spacing.sm,
+    overflow: 'hidden',
   },
   searchInput: {
     flex: 1,
+    height: '100%',
     fontSize: Typography.sizes.body,
     paddingVertical: 0,
   },
@@ -2435,6 +2443,7 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     borderRadius: 20,
     height: 36,
+    maxHeight: 36,
     paddingHorizontal: 12,
     width: '100%',
     gap: 8,

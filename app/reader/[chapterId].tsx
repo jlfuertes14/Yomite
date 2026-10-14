@@ -412,10 +412,12 @@ export default function ReaderScreen() {
     chapterId: rawChapterParam,
     mangaId: rawMangaParam,
     page,
+    scanlator: rawScanlatorParam,
   } = useLocalSearchParams<{
     chapterId: string;
     mangaId?: string;
     page?: string;
+    scanlator?: string;
   }>();
 
   const chapterId = useMemo(() => {
@@ -435,6 +437,27 @@ export default function ReaderScreen() {
       return rawMangaParam;
     }
   }, [rawMangaParam]);
+
+  const [selectedScanlator, setSelectedScanlator] = useState<string | undefined>(() => {
+    if (rawScanlatorParam) {
+      try {
+        return decodeURIComponent(rawScanlatorParam);
+      } catch {
+        return rawScanlatorParam;
+      }
+    }
+    return undefined;
+  });
+
+  useEffect(() => {
+    if (rawScanlatorParam) {
+      try {
+        setSelectedScanlator(decodeURIComponent(rawScanlatorParam));
+      } catch {
+        setSelectedScanlator(rawScanlatorParam);
+      }
+    }
+  }, [rawScanlatorParam]);
 
   // Dynamic Tap zones for page turning
   const TAP_LEFT = windowWidth * 0.3;
@@ -1067,54 +1090,6 @@ export default function ReaderScreen() {
             </Pressable>
           </View>
         )}
-
-        <View
-          style={{
-            paddingHorizontal: 16,
-            paddingVertical: 12,
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            backgroundColor: colors.surfaceElevated,
-          }}
-        >
-          <Text style={{ color: colors.textSecondary, fontSize: 12, flex: 1, marginRight: 12 }}>
-            Tap Done once verification completes.
-          </Text>
-          <Pressable
-            onPress={() => {
-              cfWebViewRef.current?.injectJavaScript(`
-                (function() {
-                  window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
-                    type: 'CF_SOLVED',
-                    cookie: document.cookie || '',
-                    url: window.location.href
-                  }));
-                })();
-                true;
-              `);
-              handleCloudflareSolved();
-            }}
-            style={({ pressed }) => [
-              {
-                backgroundColor: colors.accent,
-                paddingHorizontal: 20,
-                paddingVertical: 10,
-                borderRadius: Radius.md,
-                minHeight: 44,
-                justifyContent: 'center',
-                alignItems: 'center',
-              },
-              pressed && { opacity: 0.8 },
-            ]}
-            accessibilityRole="button"
-            aria-label="Done"
-          >
-            <Text style={{ color: getContrastTextColor(colors.accent), fontWeight: '700', fontSize: 13 }}>
-              Done
-            </Text>
-          </Pressable>
-        </View>
       </SafeAreaView>
     </Modal>
   );
@@ -1190,12 +1165,58 @@ export default function ReaderScreen() {
           if (grp && grp !== 'No Scanlation Group') {
             setScanlationGroup(grp);
           }
+          if (!selectedScanlator || selectedScanlator === 'all') {
+            const chScanlator = getChapterScanlator(activeCh);
+            if (chScanlator && chScanlator !== 'Unknown') {
+              setSelectedScanlator(chScanlator);
+            }
+          }
         }
       }
     } catch (err) {
       console.error('Failed to load reader metadata:', err);
     }
   };
+
+  // Helper to extract scanlation group name from a chapter
+  const getChapterScanlator = useCallback((chapter: Chapter): string => {
+    const group = chapter.relationships?.find((r) => r.type === 'scanlation_group');
+    const groupName = group?.attributes?.name;
+    if (groupName && groupName.trim()) return groupName.trim();
+    const user = chapter.relationships?.find((r) => r.type === 'user');
+    const userName = user?.attributes?.username;
+    if (userName && userName.trim()) return userName.trim();
+    return 'Unknown';
+  }, []);
+
+  // Scanlation group selector is exclusively for MangaDot sources.
+  // MangaDex mangas already have the language sort and do not use the scanlation dropdown.
+  const isMangaDot = useMemo(() => {
+    const target = (mangaId || chapterId || resolvedMangaId || '').toLowerCase();
+    return target.includes('mangadot');
+  }, [mangaId, chapterId, resolvedMangaId]);
+
+  // Compute available scanlation groups only for MangaDot
+  const availableScanlators = useMemo(() => {
+    if (!isMangaDot) return [];
+    const counts: Record<string, number> = {};
+    for (const c of chapterList) {
+      const sc = getChapterScanlator(c);
+      counts[sc] = (counts[sc] || 0) + 1;
+    }
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name, count]) => ({ name, count }));
+  }, [chapterList, getChapterScanlator, isMangaDot]);
+
+  // Chapters filtered strictly according to user chosen scanlation group
+  const effectiveChapterList = useMemo(() => {
+    if (isMangaDot && selectedScanlator && selectedScanlator !== 'all') {
+      const filtered = chapterList.filter((c) => getChapterScanlator(c) === selectedScanlator);
+      if (filtered.length > 0) return filtered;
+    }
+    return chapterList;
+  }, [chapterList, selectedScanlator, getChapterScanlator, isMangaDot]);
 
   // Save progress to history & update library unread badge
   useEffect(() => {
@@ -1216,8 +1237,8 @@ export default function ReaderScreen() {
       const libStore = useLibraryStore.getState();
       if (libStore.isInLibrary(activeMangaId)) {
         let unread: number | undefined;
-        if (chapterList && chapterList.length > 0) {
-          const idx = chapterList.findIndex((c) => c.id === chapterId);
+        if (effectiveChapterList && effectiveChapterList.length > 0) {
+          const idx = effectiveChapterList.findIndex((c) => c.id === chapterId);
           if (idx >= 0) {
             unread = Math.max(0, idx);
           }
@@ -1225,13 +1246,13 @@ export default function ReaderScreen() {
         libStore.updateReadProgress(activeMangaId, chapterId!, currentPage, unread);
       }
     }
-  }, [activeWebtoonChapterId, chapterId, currentPage, mode, pages.length, mangaTitle, chapterTitle, coverUrl, chapterList]);
+  }, [activeWebtoonChapterId, chapterId, currentPage, mode, pages.length, mangaTitle, chapterTitle, coverUrl, effectiveChapterList]);
 
-  // Chapter Switching
-  const currentChapterIdx = chapterList.findIndex((c) => c.id === chapterId);
+  // Chapter Switching (strictly aware of chosen scanlation group)
+  const currentChapterIdx = effectiveChapterList.findIndex((c) => c.id === chapterId);
   const currentChapter = currentChapterIdx >= 0
-    ? chapterList[currentChapterIdx]
-    : chapterList.find((c) => {
+    ? effectiveChapterList[currentChapterIdx]
+    : effectiveChapterList.find((c) => {
         const currentNumber = getChapterNumberFromId(chapterId || '');
         return currentNumber !== null && Number(c.attributes.chapter) === currentNumber;
       });
@@ -1240,10 +1261,21 @@ export default function ReaderScreen() {
     : getChapterNumberFromId(chapterId || '');
 
   const nextChapterId = currentChapterNumber !== null
-    ? chapterList
+    ? effectiveChapterList
         .filter((chapter) => Number(chapter.attributes.chapter) > currentChapterNumber)
         .sort((a, b) => Number(a.attributes.chapter) - Number(b.attributes.chapter))[0]?.id
-    : (currentChapterIdx > 0 ? chapterList[currentChapterIdx - 1]?.id : undefined);
+    : (currentChapterIdx > 0 ? effectiveChapterList[currentChapterIdx - 1]?.id : undefined);
+
+  const prevChapterId = currentChapterNumber !== null
+    ? effectiveChapterList
+        .filter((chapter) => Number(chapter.attributes.chapter) < currentChapterNumber)
+        .sort((a, b) => Number(b.attributes.chapter) - Number(a.attributes.chapter))[0]?.id
+    : (currentChapterIdx >= 0 && currentChapterIdx < effectiveChapterList.length - 1
+        ? effectiveChapterList[currentChapterIdx + 1]?.id
+        : undefined);
+
+  const hasNextChapter = !!nextChapterId;
+  const hasPrevChapter = !!prevChapterId;
 
   // Keep the next chapter unloaded until the reader reaches the current chapter's
   // boundary. This mirrors Kotatsu's lazy adjacent-chapter loading behavior.
@@ -1376,21 +1408,15 @@ export default function ReaderScreen() {
     });
   }, [activeAppendedChapter, activeChapterTitle, activePageCount, addHistoryEntry, chapterId, coverUrl, currentPage, mangaId, mangaTitle, mode, resolvedMangaId]);
 
-  const prevChapterId = (currentChapterIdx >= 0 && currentChapterIdx < chapterList.length - 1)
-    ? chapterList[currentChapterIdx + 1]?.id
-    : undefined;
-
-  const hasNextChapter = !!nextChapterId;
-  const hasPrevChapter = !!prevChapterId;
-
   const navigateToChapter = useCallback(
     (targetChapterId: string) => {
       setSideMenuVisible(false);
       const mId = mangaId || resolvedMangaId;
-      const query = mId ? `?mangaId=${encodeURIComponent(mId)}` : '';
+      const scanlatorQuery = selectedScanlator && selectedScanlator !== 'all' ? `&scanlator=${encodeURIComponent(selectedScanlator)}` : '';
+      const query = mId ? `?mangaId=${encodeURIComponent(mId)}${scanlatorQuery}` : (scanlatorQuery ? `?${scanlatorQuery.slice(1)}` : '');
       router.replace(`/reader/${encodeURIComponent(targetChapterId)}${query}` as any);
     },
-    [mangaId, resolvedMangaId, router]
+    [mangaId, resolvedMangaId, selectedScanlator, router]
   );
 
   const handlePrevChapter = useCallback(() => {
@@ -2160,12 +2186,15 @@ export default function ReaderScreen() {
         totalPages={activePageCount}
         onSelectPage={goToPage}
         currentChapterId={activeWebtoonChapterId || chapterId!}
-        chapters={chapterList.map((c) => ({
+        chapters={effectiveChapterList.map((c) => ({
           id: c.id,
           chapterNum: c.attributes.chapter ?? '?',
           title: c.attributes.title ?? '',
           publishAt: c.attributes.publishAt || c.attributes.readableAt,
         }))}
+        selectedScanlator={selectedScanlator}
+        availableScanlators={availableScanlators}
+        onSelectScanlator={(sc) => setSelectedScanlator(sc)}
         onSelectChapter={navigateToChapter}
         hasPrevChapter={hasPrevChapter}
         hasNextChapter={hasNextChapter}

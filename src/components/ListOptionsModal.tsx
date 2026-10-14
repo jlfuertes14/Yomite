@@ -373,7 +373,7 @@ export function ListOptionsModal<SortType extends string>({
                       }}
                       style={[
                         styles.tabBtn,
-                        isSelected && [styles.tabBtnActive, { backgroundColor: colors.cardBackground }],
+                        isSelected && [styles.tabBtnActive, { backgroundColor: colors.accent }],
                       ]}
                       accessibilityRole="button"
                       accessibilityLabel={`${m.label} mode`}
@@ -381,12 +381,12 @@ export function ListOptionsModal<SortType extends string>({
                       <Ionicons
                         name={m.icon as any}
                         size={16}
-                        color={isSelected ? colors.text : colors.textMuted}
+                        color={isSelected ? colors.accentForeground : colors.textMuted}
                       />
                       <Text
                         style={[
                           styles.tabText,
-                          isSelected && [styles.tabTextActive, { color: colors.text }],
+                          isSelected && [styles.tabTextActive, { color: colors.accentForeground }],
                         ]}
                       >
                         {m.label}
@@ -402,8 +402,8 @@ export function ListOptionsModal<SortType extends string>({
               <View style={styles.sectionBlock}>
                 <View style={styles.sectionTitleRow}>
                   <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Grid size</Text>
-                  <View style={styles.badge}>
-                    <Text style={[styles.badgeText, { color: '#FFFFFF' }]}> 
+                  <View style={[styles.badge, { backgroundColor: colors.accent }]}>
+                    <Text style={[styles.badgeText, { color: colors.accentForeground }]}> 
                       {gridColumns} Columns
                     </Text>
                   </View>
@@ -477,14 +477,14 @@ export function ListOptionsModal<SortType extends string>({
                         <Text
                           style={[
                             styles.dropdownItemText,
-                            { color: isSelected ? colors.text : colors.textSecondary },
+                            { color: isSelected ? colors.accent : colors.textSecondary },
                             isSelected && styles.dropdownItemTextActive,
                           ]}
                         >
                           {opt.label}
                         </Text>
                         {isSelected && (
-                          <Ionicons name="checkmark" size={18} color={colors.text} />
+                          <Ionicons name="checkmark" size={18} color={colors.accent} />
                         )}
                       </Pressable>
                     );

@@ -193,8 +193,15 @@ export default function MangaDetailScreen() {
     return 'Unknown';
   }, []);
 
-  // Compute list of available scanlation groups with chapter counts
+  // Scanlation group selector is exclusively for MangaDot sources.
+  // MangaDex mangas already have the language sort and do not use the scanlation dropdown.
+  const isMangaDot = useMemo(() => {
+    return !!(id && id.toLowerCase().includes('mangadot'));
+  }, [id]);
+
+  // Compute list of available scanlation groups with chapter counts (only for MangaDot)
   const availableScanlators = useMemo(() => {
+    if (!isMangaDot) return [];
     const counts: Record<string, number> = {};
     for (const c of chapters) {
       const sc = getChapterScanlator(c);
@@ -203,7 +210,7 @@ export default function MangaDetailScreen() {
     return Object.entries(counts)
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .map(([name, count]) => ({ name, count }));
-  }, [chapters, getChapterScanlator]);
+  }, [chapters, getChapterScanlator, isMangaDot]);
 
   // Count unique chapters (for deduplicated view)
   const uniqueChapterCount = useMemo(() => {
@@ -215,8 +222,9 @@ export default function MangaDetailScreen() {
     return seen.size;
   }, [chapters]);
 
-  // Filtered chapters according to selected scanlation group
+  // Filtered chapters according to selected scanlation group (only applied on MangaDot)
   const displayedChapters = useMemo(() => {
+    if (!isMangaDot) return chapters;
     if (selectedScanlator === 'deduplicated') {
       const seen = new Set<string>();
       return chapters.filter((c) => {
@@ -230,7 +238,7 @@ export default function MangaDetailScreen() {
       return chapters.filter((c) => getChapterScanlator(c) === selectedScanlator);
     }
     return chapters;
-  }, [chapters, selectedScanlator, getChapterScanlator]);
+  }, [chapters, selectedScanlator, getChapterScanlator, isMangaDot]);
 
   // Reset selected scanlator when switching manga
   useEffect(() => {
@@ -490,6 +498,7 @@ export default function MangaDetailScreen() {
           lastReadPage: progress?.pageIndex || 0,
           totalChapters: chapters.length,
           unreadCount: Math.max(0, unread),
+          description: getMangaDescription(manga) || '',
         });
       }
     },
@@ -515,16 +524,28 @@ export default function MangaDetailScreen() {
 
   const handleReadChapter = useCallback(
     (chapterId: string, pageIndex?: number) => {
+      let activeScanlator = selectedScanlator;
+      if (selectedScanlator === 'all' || selectedScanlator === 'deduplicated') {
+        const ch = chapters.find((c) => c.id === chapterId);
+        if (ch) {
+          const sc = getChapterScanlator(ch);
+          if (sc && sc !== 'Unknown' && sc !== 'No Scanlation Group') {
+            activeScanlator = sc;
+          }
+        }
+      }
+
       router.push({
         pathname: '/reader/[chapterId]',
         params: {
           chapterId,
           mangaId: id,
+          ...(activeScanlator && activeScanlator !== 'all' ? { scanlator: activeScanlator } : {}),
           ...(pageIndex !== undefined ? { page: String(pageIndex) } : {}),
         },
       } as any);
     },
-    [router, id]
+    [router, id, selectedScanlator, chapters, getChapterScanlator]
   );
 
   const handleStartReading = useCallback(async () => {
@@ -555,7 +576,7 @@ export default function MangaDetailScreen() {
     } finally {
       setIsStartingReading(false);
     }
-  }, [chapters, handleReadChapter, id, isStartingReading, lastProgress, selectedLanguage]);
+  }, [displayedChapters, handleReadChapter, id, isStartingReading, lastProgress, selectedLanguage]);
 
   const handleToggleSelectDownload = (chapterId: string) => {
     triggerHaptic();
@@ -1054,8 +1075,8 @@ export default function MangaDetailScreen() {
               </View>
             )}
 
-            {/* Scanlation Group Dropdown (when 2 or more groups exist) */}
-            {availableScanlators.length > 1 && (
+            {/* Scanlation Group Dropdown (Exclusively for MangaDot when 2 or more groups exist) */}
+            {isMangaDot && availableScanlators.length > 1 && (
               <View style={styles.groupPickerContainer}>
                 <Pressable
                   onPress={() => {
@@ -1617,8 +1638,8 @@ export default function MangaDetailScreen() {
         onRemoveFromLibrary={() => removeFromLibrary(id!)}
       />
 
-      {/* Native Mobile Chapter Scanlation Group Selection Modal */}
-      {Platform.OS !== 'web' && (
+      {/* Native Mobile Chapter Scanlation Group Selection Modal (Exclusively for MangaDot) */}
+      {isMangaDot && Platform.OS !== 'web' && (
         <Modal
           visible={isScanlatorDropdownOpen}
           transparent={true}

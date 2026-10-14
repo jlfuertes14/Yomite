@@ -28,6 +28,7 @@ import * as WebBrowser from 'expo-web-browser';
 import * as Haptics from 'expo-haptics';
 import { WebView } from 'react-native-webview';
 import { BridgedImage } from '../../src/components/BridgedImage';
+import { GridColumnsIcon } from '../../src/components/GridColumnsIcon';
 import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
@@ -38,6 +39,7 @@ import { CloudFlareCookieManager } from '../../src/sources/network/cloudflare';
 import { webViewBridge } from '../../src/sources/network/webViewBridge';
 import { DEFAULT_USER_AGENT } from '../../src/sources/network/httpClient';
 import { triggerHaptic } from '../../src/utils/haptics';
+import { normalizeRatingToTen } from '../../src/utils/rating';
 import { computeTitleMatchScore } from '../../src/sources/parsers/MangaDotParser';
 import {
   getPopularManga,
@@ -376,7 +378,7 @@ interface CatalogMangaItem {
   title: string;
   coverUrl: string | null;
   coverHeaders?: Record<string, string>;
-  ratingPercent?: number | null;
+  rating?: number | null;
   sourceId: string;
   locale?: string;
 }
@@ -945,6 +947,37 @@ export default function ExtensionsScreen() {
   const [debouncedMangaQuery, setDebouncedMangaQuery] = useState('');
   const [sortPickerVisible, setSortPickerVisible] = useState(false);
   const [columnsMode, setColumnsMode] = useState<2 | 3>(3);
+  const gridIconScale = useRef(new Animated.Value(1)).current;
+  const gridIconRotate = useRef(new Animated.Value(0)).current;
+
+  const handleToggleColumnsMode = useCallback(() => {
+    triggerHaptic();
+
+    // Tactile spring scale pop
+    gridIconScale.setValue(0.72);
+    Animated.spring(gridIconScale, {
+      toValue: 1,
+      friction: 4,
+      tension: 180,
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
+
+    // Fluid 90deg rotation
+    gridIconRotate.setValue(0);
+    Animated.timing(gridIconRotate, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.bezier(0.23, 1, 0.32, 1),
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
+
+    setColumnsMode((prev) => (prev === 3 ? 2 : 3));
+  }, [gridIconScale, gridIconRotate]);
+
+  const gridIconSpin = gridIconRotate.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '90deg'],
+  });
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -964,8 +997,6 @@ export default function ExtensionsScreen() {
   const cfWebViewRef = useRef<any>(null);
   const [persistentBridgeUrl, setPersistentBridgeUrl] = useState('https://mangadot.net/');
   const persistentBridgeRef = useRef<any>(null);
-  const [isCfCookieModalOpen, setIsCfCookieModalOpen] = useState(false);
-  const [cfCookieInput, setCfCookieInput] = useState('');
   const [isModalLoading, setIsModalLoading] = useState(false);
   const [isModalLoadingMore, setIsModalLoadingMore] = useState(false);
   const [modalPage, setModalPage] = useState(1);
@@ -1218,13 +1249,13 @@ export default function ExtensionsScreen() {
             const coverUrl = fileName ? getCoverUrl(m.id, fileName, '256') : null;
             const stat = statsMap[m.id];
             const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
-            const ratingPercent = ratingVal ? Math.round(ratingVal * 10) : null;
+            const rating = normalizeRatingToTen(ratingVal, 'mangadex');
 
             return {
               id: m.id,
               title: getMangaTitle(m),
               coverUrl,
-              ratingPercent,
+              rating,
               sourceId: 'mangadex',
             };
           });
@@ -1262,7 +1293,7 @@ export default function ExtensionsScreen() {
                   : parser!.metadata.id === 'hitomila'
                   ? { Referer: 'https://hitomi.la/' }
                   : undefined),
-              ratingPercent: m.rating ? Math.round(m.rating > 10 ? m.rating : m.rating * 10) : null,
+              rating: normalizeRatingToTen(m.rating, parser!.metadata.id),
               sourceId: parser!.metadata.id,
               locale: m.locale || detectMangaLanguage(m.title, undefined, m.tags, parser!.metadata.id),
             }));
@@ -1390,22 +1421,6 @@ export default function ExtensionsScreen() {
       subscription.remove();
     };
   }, [loadModalMangas]);
-
-  const handleOpenCookieModal = useCallback(() => {
-    triggerHaptic();
-    const domain = modalCfDomain || activeMangaSource.domain || 'comix.to';
-    const existing = CloudFlareCookieManager.getCookie(domain) || '';
-    setCfCookieInput(existing);
-    setIsCfCookieModalOpen(true);
-  }, [modalCfDomain, activeMangaSource]);
-
-  const handleSaveCookie = useCallback(async () => {
-    triggerHaptic();
-    const domain = modalCfDomain || activeMangaSource.domain || 'comix.to';
-    await CloudFlareCookieManager.setCookie(domain, cfCookieInput.trim());
-    setIsCfCookieModalOpen(false);
-    loadModalMangas(1, false);
-  }, [modalCfDomain, activeMangaSource, cfCookieInput, loadModalMangas]);
 
   // Auto-restore source catalog when returning back from manga details / chapter list
   useFocusEffect(
@@ -1813,7 +1828,9 @@ export default function ExtensionsScreen() {
                   placeholder="Search 1,223 sources by name or domain..."
                   placeholderTextColor={colors.textMuted}
                   value={catalogSearchQuery}
-                  onChangeText={setCatalogSearchQuery}
+                  multiline={false}
+                  numberOfLines={1}
+                  onChangeText={(text) => setCatalogSearchQuery(text.replace(/[\r\n]+/g, ' '))}
                   autoFocus
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -2118,15 +2135,24 @@ export default function ExtensionsScreen() {
                 </Pressable>
 
                 <Pressable
-                  onPress={() => {
-                    triggerHaptic();
-                    setColumnsMode((prev) => (prev === 3 ? 2 : 3));
-                  }}
+                  onPress={handleToggleColumnsMode}
                   hitSlop={8}
                   style={styles.modalActionBtn}
-                  aria-label="Toggle Column Layout"
+                  aria-label={`Switch between 2 and 3 column layout, currently ${columnsMode} columns`}
                 >
-                  <Ionicons name="grid-outline" size={22} color={colors.text} />
+                  <Animated.View
+                    style={{
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transform: [{ scale: gridIconScale }, { rotate: gridIconSpin }],
+                    }}
+                  >
+                    <GridColumnsIcon
+                      columns={columnsMode}
+                      size={22}
+                      color={colors.text}
+                    />
+                  </Animated.View>
                 </Pressable>
 
                 <Pressable
@@ -2152,7 +2178,9 @@ export default function ExtensionsScreen() {
                   placeholder={`Search ${activeMangaSource.name}...`}
                   placeholderTextColor={colors.textMuted}
                   value={mangaSearchQuery}
-                  onChangeText={setMangaSearchQuery}
+                  multiline={false}
+                  numberOfLines={1}
+                  onChangeText={(text) => setMangaSearchQuery(text.replace(/[\r\n]+/g, ' '))}
                   onSubmitEditing={() => setDebouncedMangaQuery(mangaSearchQuery.trim())}
                   returnKeyType="search"
                   autoFocus
@@ -2339,18 +2367,6 @@ export default function ExtensionsScreen() {
                         </Text>
                       </Pressable>
                     </View>
-
-                    {/* Subtle Manual Cookie Option */}
-                    <Pressable
-                      onPress={handleOpenCookieModal}
-                      hitSlop={10}
-                      style={{ marginTop: 16, paddingVertical: 4 }}
-                      aria-label="Enter clearance cookie manually"
-                    >
-                      <Text style={{ fontSize: 11, color: colors.textMuted }}>
-                        Paste cookie manually
-                      </Text>
-                    </Pressable>
                   </View>
                 ) : (
                   <View style={{ alignItems: 'center', width: '100%', maxWidth: 320 }}>
@@ -2486,24 +2502,11 @@ export default function ExtensionsScreen() {
                           </View>
                         )}
 
-                        {/* Rating or Percentage Badge matching Image 2 e.g. "71%" */}
-                        {item.ratingPercent !== undefined && item.ratingPercent !== null && (
-                          <View style={styles.percentBadge}>
-                            <Text style={styles.percentBadgeText}>{item.ratingPercent}%</Text>
-                          </View>
-                        )}
-
-                        {/* Language Flag Badge e.g. 🇯🇵 JA, 🇨🇳 ZH, 🇬🇧 EN - NHentai only */}
-                        {(item.sourceId === 'nhentai' || activeMangaSource?.id === 'nhentai') && item.locale ? (
-                          <View style={styles.localeBadge}>
-                            <Image
-                              source={{ uri: getLanguageInfo(item.locale).flagUrl }}
-                              style={styles.localeFlagImage}
-                              contentFit="cover"
-                            />
-                            <Text style={styles.localeBadgeText}>
-                              {item.locale.toUpperCase()}
-                            </Text>
+                        {/* Rating overlay badge matching MangaDex format (e.g. ★ 8.4) */}
+                        {item.rating && item.rating > 0 ? (
+                          <View style={styles.ratingBadge}>
+                            <Ionicons name="star" size={10} color={colors.accent} />
+                            <Text style={styles.ratingText}>{item.rating.toFixed(1)}</Text>
                           </View>
                         ) : null}
                       </View>
@@ -2604,58 +2607,6 @@ export default function ExtensionsScreen() {
               </Modal>
             )}
 
-            {/* Cloudflare Clearance Cookie Input Modal */}
-            {isCfCookieModalOpen && (
-              <ConfirmationModal
-                visible={isCfCookieModalOpen}
-                title="Clearance Cookie"
-                message={`Paste the clearance cookie for ${modalCfDomain || activeMangaSource.name}:`}
-                iconName="shield-checkmark-outline"
-                iconColor={colors.accent}
-                confirmText="Save & Continue"
-                cancelText="Cancel"
-                onConfirm={handleSaveCookie}
-                onCancel={() => setIsCfCookieModalOpen(false)}
-              >
-                <View style={{ width: '100%', marginVertical: 10 }}>
-                  <TextInput
-                    style={{
-                      backgroundColor: colors.surfaceElevated || colors.surface,
-                      color: colors.text,
-                      borderWidth: 0,
-                      borderRadius: Radius.md,
-                      padding: 10,
-                      fontSize: 12,
-                      minHeight: 56,
-                      textAlignVertical: 'top',
-                    }}
-                    placeholder="cf_clearance=... or full cookie"
-                    placeholderTextColor={colors.textMuted}
-                    value={cfCookieInput}
-                    onChangeText={setCfCookieInput}
-                    multiline
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                  {CloudFlareCookieManager.hasCookie(modalCfDomain || activeMangaSource.domain || 'comix.to') && (
-                    <Pressable
-                      onPress={async () => {
-                        triggerHaptic();
-                        const domain = modalCfDomain || activeMangaSource.domain || 'comix.to';
-                        await CloudFlareCookieManager.removeCookie(domain);
-                        setCfCookieInput('');
-                      }}
-                      style={{ marginTop: 8, alignSelf: 'flex-start' }}
-                    >
-                      <Text style={{ color: '#EF4444', fontSize: 12, fontWeight: '600' }}>
-                        Clear Saved Cookie
-                      </Text>
-                    </Pressable>
-                  )}
-                </View>
-              </ConfirmationModal>
-            )}
-
             {/* In-App Verification Modal */}
             {isCfInAppModalOpen && (
               <Modal
@@ -2702,39 +2653,6 @@ export default function ExtensionsScreen() {
                         {modalCfDomain || activeMangaSource.domain}
                       </Text>
                     </View>
-
-                    <Pressable
-                      onPress={async () => {
-                        triggerHaptic();
-                        const domain = modalCfDomain || activeMangaSource.domain;
-                        if (domain) {
-                          webViewBridge.setDomainVerified(domain, true);
-                          setPersistentBridgeUrl(`https://${domain}/`);
-                          if (persistentBridgeRef.current) {
-                            persistentBridgeRef.current.reload();
-                          }
-                        }
-                        setIsCfInAppModalOpen(false);
-                        setModalError(null);
-                        setModalIsCloudflare(false);
-                        loadModalMangas(1, false);
-                      }}
-                      hitSlop={8}
-                      style={{
-                        paddingHorizontal: 14,
-                        paddingVertical: 7,
-                        borderRadius: Radius.md,
-                        backgroundColor: colors.accent,
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                      }}
-                      aria-label="Done with verification"
-                    >
-                      <Ionicons name="checkmark" size={16} color="#FFFFFF" style={{ marginRight: 4 }} />
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#FFFFFF' }}>
-                        Done
-                      </Text>
-                    </Pressable>
 
                     <Pressable
                       onPress={() => {
@@ -3225,10 +3143,12 @@ const styles = StyleSheet.create({
     marginHorizontal: Spacing.md,
     marginVertical: Spacing.xs,
     height: 40,
+    maxHeight: 40,
     borderRadius: Radius.md,
     borderWidth: 0,
     paddingHorizontal: Spacing.sm,
     gap: Spacing.xs,
+    overflow: 'hidden',
   },
   catalogSearchInput: {
     flex: 1,
@@ -3386,10 +3306,12 @@ const styles = StyleSheet.create({
     marginHorizontal: Spacing.md,
     marginTop: Spacing.xs,
     height: 40,
+    maxHeight: 40,
     borderRadius: Radius.md,
     borderWidth: 0,
     paddingHorizontal: Spacing.sm,
     gap: Spacing.xs,
+    overflow: 'hidden',
   },
   modalSearchInput: {
     flex: 1,
@@ -3465,42 +3387,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  percentBadge: {
+  ratingBadge: {
     position: 'absolute',
     bottom: 6,
-    right: 6,
-    backgroundColor: 'rgba(15, 23, 42, 0.75)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 10,
-  },
-  percentBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: Typography.weights.bold,
-  },
-  localeBadge: {
-    position: 'absolute',
-    top: 6,
     left: 6,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3.5,
-    backgroundColor: 'rgba(15, 23, 42, 0.82)',
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 6,
+    gap: 3,
+    backgroundColor: 'rgba(9, 9, 11, 0.85)',
+    paddingHorizontal: Platform.OS === 'web' ? 8 : 6,
+    paddingVertical: Platform.OS === 'web' ? 3 : 2,
+    borderRadius: Radius.xs,
   },
-  localeFlagImage: {
-    width: 14,
-    height: 10,
-    borderRadius: 1.5,
-  },
-  localeBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 9.5,
-    fontWeight: '800',
-    letterSpacing: 0.5,
+  ratingText: {
+    color: '#FAFAFA',
+    fontSize: Platform.OS === 'web' ? 11 : 10,
+    fontWeight: Typography.weights.bold,
   },
   mangaCardTitle: {
     fontSize: 12,

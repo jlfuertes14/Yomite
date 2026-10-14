@@ -32,6 +32,7 @@ import { SidebarDrawer } from '../../src/components/SidebarDrawer';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 import type { HistoryEntry } from '../../src/types';
 import { triggerHaptic } from '../../src/utils/haptics';
+import { deduplicateHistoryEntries } from '../../src/utils/mangaTitleNormalizer';
 
 function formatTimeAgo(timestamp: number): string {
   const diff = Date.now() - timestamp;
@@ -82,6 +83,8 @@ function HistoryRowItem({
   const dlItem = useDownloadStore((s) => s.chapters[item.chapterId]);
   const isDownloading = dlItem?.status === 'downloading';
   const isDownloaded = dlItem?.status === 'completed';
+
+
 
   const coverHeaders = useMemo(() => {
     if (!item.mangaId) return undefined;
@@ -215,9 +218,14 @@ function HistoryRowItem({
           <Text style={[styles.mangaTitle, { color: colors.text }]} numberOfLines={1}>
             {item.title}
           </Text>
-          <Text style={[styles.chapterSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
-            {item.chapterTitle || `Page ${item.pageIndex + 1}`}
-          </Text>
+          <View style={styles.subtitleRow}>
+            <Text
+              style={[styles.chapterSubtitle, { color: colors.textSecondary }]}
+              numberOfLines={1}
+            >
+              {item.chapterTitle || `Page ${item.pageIndex + 1}`}
+            </Text>
+          </View>
 
           {/* Reading Progress Bar & Timestamp */}
           <View style={styles.progressRow}>
@@ -298,10 +306,17 @@ export default function HistoryScreen() {
   const isDesktop = width >= 860;
 
   const [drawerVisible, setDrawerVisible] = useState(false);
-  const entries = useHistoryStore((s) => s.entries);
+  const rawEntries = useHistoryStore((s) => s.entries);
+  const entries = useMemo(() => deduplicateHistoryEntries(rawEntries), [rawEntries]);
   const removeEntry = useHistoryStore((s) => s.removeEntry);
   const removeEntries = useHistoryStore((s) => s.removeEntries);
   const clearHistory = useHistoryStore((s) => s.clearHistory);
+  const cleanDuplicates = useHistoryStore((s) => s.cleanDuplicates);
+
+  // Clean existing historical duplicates from persistent store on mount
+  useEffect(() => {
+    cleanDuplicates();
+  }, [cleanDuplicates]);
 
   // Search & Pagination state
   const [searchQuery, setSearchQuery] = useState('');
@@ -516,7 +531,9 @@ export default function HistoryScreen() {
                 placeholder="Search history by title or chapter…"
                 placeholderTextColor={colors.textMuted}
                 value={searchQuery}
-                onChangeText={setSearchQuery}
+                multiline={false}
+                numberOfLines={1}
+                onChangeText={(text) => setSearchQuery(text.replace(/[\r\n]+/g, ' '))}
                 returnKeyType="search"
               />
               {searchQuery.length > 0 && (
@@ -655,8 +672,8 @@ export default function HistoryScreen() {
                     Platform.OS === 'web' && { cursor: 'pointer' as any },
                   ]}
                 >
-                  <Ionicons name="trash" size={16} color="#09090B" />
-                  <Text style={styles.deleteSelectedText}>Delete Selected</Text>
+                  <Ionicons name="trash" size={16} color={colors.accentForeground} />
+                  <Text style={[styles.deleteSelectedText, { color: colors.accentForeground }]}>Delete Selected</Text>
                 </Pressable>
               </View>
             )}
@@ -755,6 +772,7 @@ const styles = StyleSheet.create({
   },
   searchBox: {
     height: 42,
+    maxHeight: 42,
     borderRadius: 12,
     backgroundColor: '#18181C',
     borderWidth: 0,
@@ -762,9 +780,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 12,
     gap: 10,
+    overflow: 'hidden',
   },
   searchInput: {
     flex: 1,
+    height: '100%',
     fontSize: 16,
     color: '#E4E4E7',
     paddingVertical: 0,
@@ -832,10 +852,18 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     letterSpacing: -0.2,
   },
+  subtitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+    minWidth: 0,
+  },
+
   chapterSubtitle: {
     fontSize: 12,
     color: '#A1A1AA',
-    marginTop: 1,
+    flex: 1,
   },
   progressRow: {
     flexDirection: 'row',
@@ -977,7 +1005,6 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   deleteSelectedText: {
-    color: '#09090B',
     fontSize: 12,
     fontWeight: '700',
   },

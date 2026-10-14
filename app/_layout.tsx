@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, Pressable, Platform, StyleSheet } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,6 +16,9 @@ import { CacheManager } from '../src/utils/cacheManager';
 import { useDocumentTitle } from '../src/utils/useDocumentTitle';
 import { webViewBridge } from '../src/sources/network/webViewBridge';
 import { DEFAULT_USER_AGENT } from '../src/sources/network/httpClient';
+import '../src/services/backgroundScanner';
+import { getNotificationsModule } from '../src/services/notificationService';
+import { IntroWelcomeModal } from '../src/components/IntroWelcomeModal';
 
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -33,6 +36,7 @@ const YomiteDarkTheme = {
 
 export default function RootLayout() {
   useDocumentTitle();
+  const router = useRouter();
   const authSuccessMessage = useUserStore((s) => s.authSuccessMessage);
   const clearAuthSuccessMessage = useUserStore((s) => s.clearAuthSuccessMessage);
   const globalBridgeRef = useRef<any>(null);
@@ -40,6 +44,46 @@ export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
   });
+
+  // Handle local notification tap response & deep-linking directly into chapter/manga
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+
+    try {
+      const Notifications = getNotificationsModule();
+      if (!Notifications) return;
+
+      // 1. Cold start response (App opened from a closed state by tapping notification)
+      Notifications.getLastNotificationResponseAsync?.().then((response: any) => {
+        const data = response?.notification?.request?.content?.data;
+        if (data?.chapterId) {
+          router.push(`/reader/${data.chapterId}`);
+        } else if (data?.mangaId) {
+          router.push(`/manga/${data.mangaId}`);
+        } else if (data?.url) {
+          router.push(data.url);
+        }
+      }).catch(() => {});
+
+      // 2. Foreground / background resume listener (App active or minimized when tapped)
+      const subscription = Notifications.addNotificationResponseReceivedListener?.((response: any) => {
+        const data = response?.notification?.request?.content?.data;
+        if (data?.chapterId) {
+          router.push(`/reader/${data.chapterId}`);
+        } else if (data?.mangaId) {
+          router.push(`/manga/${data.mangaId}`);
+        } else if (data?.url) {
+          router.push(data.url);
+        }
+      });
+
+      return () => {
+        subscription?.remove?.();
+      };
+    } catch (err) {
+      console.warn('Failed to bind notification response listener:', err);
+    }
+  }, [router]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') {
@@ -150,6 +194,9 @@ export default function RootLayout() {
               options={{ title: 'Not Found', headerShown: true }}
             />
           </Stack>
+
+          {/* First-Install Introductory Welcome Screen (1-Tap) */}
+          <IntroWelcomeModal />
 
           {/* Persistent Global Background WebView for Cloudflare & MangaDot Authenticated Requests */}
           {Platform.OS !== 'web' && (
