@@ -1,56 +1,57 @@
-import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Haptics from 'expo-haptics';
+import { Image } from 'expo-image';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
+  ActivityIndicator,
+  Animated,
+  AppState,
+  BackHandler,
+  Easing,
+  FlatList,
+  LayoutAnimation,
+  Linking,
+  Modal,
+  Platform,
   Pressable,
   ScrollView,
-  ActivityIndicator,
-  Platform,
-  FlatList,
-  Modal,
-  Linking,
-  useWindowDimensions,
-  BackHandler,
-  AppState,
-  Animated,
-  Easing,
-  LayoutAnimation,
+  StyleSheet,
+  Text,
+  TextInput,
   UIManager,
+  useWindowDimensions,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Image } from 'expo-image';
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as WebBrowser from 'expo-web-browser';
-import * as Haptics from 'expo-haptics';
 import { WebView } from 'react-native-webview';
-import { BridgedImage } from '../../src/components/BridgedImage';
-import { GridColumnsIcon } from '../../src/components/GridColumnsIcon';
-import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
-import { useThemeColors } from '../../src/hooks/useThemeColor';
-import { ConfirmationModal } from '../../src/components/ConfirmationModal';
-import { SidebarDrawer } from '../../src/components/SidebarDrawer';
-import { SourceManager } from '../../src/sources/SourceManager';
-import { CatalogSourceItem, SourceTag, SourceSortOption } from '../../src/sources/types';
-import { CloudFlareCookieManager } from '../../src/sources/network/cloudflare';
-import { webViewBridge } from '../../src/sources/network/webViewBridge';
-import { DEFAULT_USER_AGENT } from '../../src/sources/network/httpClient';
-import { triggerHaptic } from '../../src/utils/haptics';
-import { normalizeRatingToTen } from '../../src/utils/rating';
-import { computeTitleMatchScore } from '../../src/sources/parsers/MangaDotParser';
+import { Radius, Spacing, Typography } from '../../constants/Colors';
 import {
+  extractCoverFileName,
+  getBatchMangaStatistics,
+  getCoverUrl,
+  getMangaTitle,
   getPopularManga,
   searchManga,
-  getCoverUrl,
-  extractCoverFileName,
-  getMangaTitle,
-  getBatchMangaStatistics,
 } from '../../src/api/mangadex';
-import type { Manga, SearchFilters } from '../../src/types';
-import { getLanguageInfo, detectMangaLanguage } from '../../src/utils/language';
+import { BridgedImage } from '../../src/components/BridgedImage';
+import { ConfirmationModal } from '../../src/components/ConfirmationModal';
+import { GridColumnsIcon } from '../../src/components/GridColumnsIcon';
+import { SidebarDrawer } from '../../src/components/SidebarDrawer';
+import { useThemeColors } from '../../src/hooks/useThemeColor';
+import { useColorScheme } from '../../src/hooks/useColorScheme';
+import { CloudFlareCookieManager } from '../../src/sources/network/cloudflare';
+import { DEFAULT_USER_AGENT } from '../../src/sources/network/httpClient';
+import { webViewBridge } from '../../src/sources/network/webViewBridge';
+import { computeTitleMatchScore } from '../../src/sources/parsers/MangaDotParser';
+import { SourceManager } from '../../src/sources/SourceManager';
+import { CatalogSourceItem, SourceSortOption, SourceTag } from '../../src/sources/types';
+import type { Manga } from '../../src/types';
+import { triggerHaptic } from '../../src/utils/haptics';
+import { detectMangaLanguage, getLanguageInfo } from '../../src/utils/language';
+import { normalizeRatingToTen } from '../../src/utils/rating';
 
 const STORAGE_KEY_INSTALLED_SOURCES = '@mangaapp_installed_sources_v2';
 
@@ -79,19 +80,19 @@ interface CuratedSourceMeta {
   domain: string;
   icon?: string;
   iconType:
-    | 'batoto'
-    | 'comick'
-    | 'linewebtoon'
-    | 'mangadex'
-    | 'mangafire'
-    | 'mangapill'
-    | 'mangaplus'
-    | 'mangareader'
-    | 'myreadingmanga'
-    | 'ninemanga'
-    | 'webtoons'
-    | 'asuracomic'
-    | 'custom';
+  | 'batoto'
+  | 'comick'
+  | 'linewebtoon'
+  | 'mangadex'
+  | 'mangafire'
+  | 'mangapill'
+  | 'mangaplus'
+  | 'mangareader'
+  | 'myreadingmanga'
+  | 'ninemanga'
+  | 'webtoons'
+  | 'asuracomic'
+  | 'custom';
   letter?: string;
   letterColor?: string;
   bgColor?: string;
@@ -608,8 +609,10 @@ function SourceGridCell({
   colors: any;
   exploding: boolean;
   onPress: () => void;
-  onLongPress: () => void;
+  onLongPress: (layout?: { x: number; y: number; width: number; height: number }) => void;
 }) {
+  const cellRef = useRef<View>(null);
+  const touchCoords = useRef({ pageX: 0, pageY: 0 });
   const iconScale = useRef(new Animated.Value(1)).current;
   const iconOpacity = useRef(new Animated.Value(1)).current;
   const labelOpacity = useRef(new Animated.Value(1)).current;
@@ -763,16 +766,70 @@ function SourceGridCell({
 
   }, [exploding, iconScale, iconOpacity, labelOpacity, ringScale, ringOpacity, bgScale, bgOpacity, bgFlashOpacity, particles, bgShards, runBurst]);
 
+  const handleCellLongPress = useCallback(() => {
+    if (exploding) return;
+    if (cellRef.current && typeof (cellRef.current as any).measureInWindow === 'function') {
+      (cellRef.current as any).measureInWindow((x: number, y: number, width: number, height: number) => {
+        if (typeof x === 'number' && typeof y === 'number' && width > 0) {
+          onLongPress({ x, y, width, height });
+        } else {
+          onLongPress({
+            x: touchCoords.current.pageX - 36,
+            y: touchCoords.current.pageY - 36,
+            width: 72,
+            height: 72,
+          });
+        }
+      });
+    } else {
+      onLongPress({
+        x: touchCoords.current.pageX - 36,
+        y: touchCoords.current.pageY - 36,
+        width: 72,
+        height: 72,
+      });
+    }
+  }, [exploding, onLongPress]);
+
   return (
     <Pressable
+      ref={cellRef as any}
       onPress={onPress}
-      onLongPress={onLongPress}
+      onLongPress={handleCellLongPress}
       delayLongPress={350}
       disabled={exploding}
+      onTouchStart={(e) => {
+        const native = e.nativeEvent as any;
+        const px = typeof native.clientX === 'number' ? native.clientX : native.pageX;
+        const py = typeof native.clientY === 'number' ? native.clientY : native.pageY;
+        touchCoords.current = { pageX: px, pageY: py };
+      }}
       {...{
         onContextMenu: (e: any) => {
           e?.preventDefault?.();
-          if (!exploding) onLongPress();
+          if (!exploding) {
+            if (cellRef.current && typeof (cellRef.current as any).measureInWindow === 'function') {
+              (cellRef.current as any).measureInWindow((x: number, y: number, width: number, height: number) => {
+                if (typeof x === 'number' && typeof y === 'number' && width > 0) {
+                  onLongPress({ x, y, width, height });
+                } else {
+                  onLongPress({
+                    x: (e.clientX ?? 50) - 36,
+                    y: (e.clientY ?? 50) - 36,
+                    width: 72,
+                    height: 72,
+                  });
+                }
+              });
+            } else {
+              onLongPress({
+                x: (e.clientX ?? 50) - 36,
+                y: (e.clientY ?? 50) - 36,
+                width: 72,
+                height: 72,
+              });
+            }
+          }
         },
       }}
       style={({ pressed, hovered }: any) => [
@@ -889,7 +946,9 @@ function SourceGridCell({
 export default function ExtensionsScreen() {
   const router = useRouter();
   const colors = useThemeColors();
-  const { width: windowWidth } = useWindowDimensions();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { reopenCatalog } = useLocalSearchParams<{ reopenCatalog?: string }>();
 
   // State preservation when navigating to manga details and returning
@@ -902,7 +961,7 @@ export default function ExtensionsScreen() {
   // Installed Sources on the 4-column grid (Image 1)
   const [installedIds, setInstalledIds] = useState<string[]>(DEFAULT_INSTALLED_IDS);
 
-  // Source Card Action Menu state (Long Press on Grid Card)
+  // Source Card Action Floating Bar state (Long Press on Grid Card)
   const [sourceActionModalVisible, setSourceActionModalVisible] = useState(false);
   const [selectedSourceForAction, setSelectedSourceForAction] = useState<{
     id: string;
@@ -911,6 +970,63 @@ export default function ExtensionsScreen() {
     icon?: string;
     displayName?: string;
   } | null>(null);
+  const [sourceActionLayout, setSourceActionLayout] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    isFirstRow?: boolean;
+  } | null>(null);
+
+  const fabAnimScale = useRef(new Animated.Value(0)).current;
+  const fabAnimOpacity = useRef(new Animated.Value(0)).current;
+  const isClosingFabRef = useRef(false);
+
+  const dismissFab = useCallback((onComplete?: () => void) => {
+    if (isClosingFabRef.current) return;
+    isClosingFabRef.current = true;
+
+    Animated.parallel([
+      Animated.timing(fabAnimScale, {
+        toValue: 0,
+        duration: 170,
+        easing: Easing.bezier(0.4, 0, 1, 1),
+        useNativeDriver: true,
+      }),
+      Animated.timing(fabAnimOpacity, {
+        toValue: 0,
+        duration: 140,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setSourceActionModalVisible(false);
+      isClosingFabRef.current = false;
+      onComplete?.();
+    });
+  }, [fabAnimScale, fabAnimOpacity]);
+
+  useEffect(() => {
+    if (sourceActionModalVisible) {
+      isClosingFabRef.current = false;
+      fabAnimScale.setValue(0);
+      fabAnimOpacity.setValue(0);
+      Animated.parallel([
+        Animated.timing(fabAnimScale, {
+          toValue: 1,
+          duration: 180,
+          easing: Easing.bezier(0.23, 1, 0.32, 1),
+          useNativeDriver: true,
+        }),
+        Animated.timing(fabAnimOpacity, {
+          toValue: 1,
+          duration: 150,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [sourceActionModalVisible, fabAnimScale, fabAnimOpacity]);
 
   // Xiaomi HyperOS style delete: which grid cell is currently shattering
   const [explodingId, setExplodingId] = useState<string | null>(null);
@@ -1049,7 +1165,7 @@ export default function ExtensionsScreen() {
           updated = [...prev, sourceId];
           SourceManager.setSourceEnabled(sourceId, true);
         }
-        AsyncStorage.setItem(STORAGE_KEY_INSTALLED_SOURCES, JSON.stringify(updated)).catch(() => {});
+        AsyncStorage.setItem(STORAGE_KEY_INSTALLED_SOURCES, JSON.stringify(updated)).catch(() => { });
         return updated;
       });
     },
@@ -1057,15 +1173,21 @@ export default function ExtensionsScreen() {
   );
 
   const handleSourceLongPress = useCallback(
-    (source: {
-      id: string;
-      name: string;
-      domain?: string;
-      icon?: string;
-      displayName?: string;
-    }) => {
+    (
+      source: {
+        id: string;
+        name: string;
+        domain?: string;
+        icon?: string;
+        displayName?: string;
+      },
+      layout?: { x: number; y: number; width: number; height: number; isFirstRow?: boolean }
+    ) => {
       triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
       setSelectedSourceForAction(source);
+      if (layout) {
+        setSourceActionLayout(layout);
+      }
       setSourceActionModalVisible(true);
     },
     []
@@ -1093,7 +1215,7 @@ export default function ExtensionsScreen() {
       setInstalledIds((prev) => {
         const updated = prev.filter((id) => id !== sourceId);
         SourceManager.setSourceEnabled(sourceId, false);
-        AsyncStorage.setItem(STORAGE_KEY_INSTALLED_SOURCES, JSON.stringify(updated)).catch(() => {});
+        AsyncStorage.setItem(STORAGE_KEY_INSTALLED_SOURCES, JSON.stringify(updated)).catch(() => { });
         return updated;
       });
       setExplodingId(null);
@@ -1167,8 +1289,8 @@ export default function ExtensionsScreen() {
           curated?.displayName && curated.displayName !== 'AsuraCo...'
             ? curated.displayName
             : name.length > 8
-            ? `${name.slice(0, 7)}…`
-            : name,
+              ? `${name.slice(0, 7)}…`
+              : name,
         domain,
         icon,
         iconType: curated?.iconType || 'custom',
@@ -1289,10 +1411,10 @@ export default function ExtensionsScreen() {
                 (parser!.metadata.id === 'manganato'
                   ? { Referer: 'https://www.manganato.gg/' }
                   : parser!.metadata.id === 'mangadot'
-                  ? { Referer: 'https://mangadot.net/' }
-                  : parser!.metadata.id === 'hitomila'
-                  ? { Referer: 'https://hitomi.la/' }
-                  : undefined),
+                    ? { Referer: 'https://mangadot.net/' }
+                    : parser!.metadata.id === 'hitomila'
+                      ? { Referer: 'https://hitomi.la/' }
+                      : undefined),
               rating: normalizeRatingToTen(m.rating, parser!.metadata.id),
               sourceId: parser!.metadata.id,
               locale: m.locale || detectMangaLanguage(m.title, undefined, m.tags, parser!.metadata.id),
@@ -1328,8 +1450,8 @@ export default function ExtensionsScreen() {
         const errMsg = isCf
           ? `${activeMangaSource.name} requires a quick bot check to browse.`
           : err.response?.status === 404
-          ? 'Catalog page not found. Please try again later.'
-          : err.message || 'Unable to connect to source server.';
+            ? 'Catalog page not found. Please try again later.'
+            : err.message || 'Unable to connect to source server.';
         if (!append) {
           setModalMangas([]);
           setModalError(errMsg);
@@ -1362,7 +1484,7 @@ export default function ExtensionsScreen() {
         await WebBrowser.openBrowserAsync(targetUrl);
       }
     } catch {
-      Linking.openURL(targetUrl).catch(() => {});
+      Linking.openURL(targetUrl).catch(() => { });
     }
   }, [activeMangaSource, modalCfDomain, modalCfUrl, allCatalog]);
 
@@ -1537,6 +1659,76 @@ export default function ExtensionsScreen() {
     loadSourceFilters(source.id);
   }, [loadSourceFilters]);
 
+  // Floating Action Bar dynamic position calculation based on card location
+  const fabCoordinates = useMemo(() => {
+    const fabWidth = 112;
+    const fabHeight = 42;
+    const GAP = 8;
+
+    if (!sourceActionLayout) {
+      return {
+        top: Math.max(60, windowHeight / 2 - fabHeight / 2),
+        left: Math.max(16, windowWidth / 2 - fabWidth / 2),
+      };
+    }
+
+    const { x, y, width, height, isFirstRow } = sourceActionLayout;
+
+    // 1. Vertical calculation:
+    // Bottom rendering applies ONLY on the first row of cards!
+    // For all other rows (row 2, row 3, row 4...), the FAB always renders on TOP of the card.
+    let top: number;
+    if (isFirstRow) {
+      top = y + height + GAP;
+    } else {
+      top = y - fabHeight - GAP;
+    }
+    top = Math.max(24, Math.min(windowHeight - fabHeight - 24, top));
+
+    // 2. Horizontal calculation:
+    // If card is on the left half of the screen, span from card to the RIGHT.
+    // If card is on the right half, span from card to the LEFT.
+    const cardCenterX = x + width / 2;
+    const isLeftHalf = cardCenterX < windowWidth / 2;
+
+    let left: number;
+    if (isLeftHalf) {
+      left = Math.round(x + (width - 62) / 2);
+    } else {
+      left = Math.round(x + (width + 62) / 2 - fabWidth);
+    }
+    left = Math.max(12, Math.min(windowWidth - fabWidth - 12, left));
+
+    return { top, left, isLeftHalf, isFirstRow: !!isFirstRow };
+  }, [sourceActionLayout, windowWidth, windowHeight]);
+
+  // Origin-aware directional scaling:
+  // - Left-side cards: extends from LEFT TO RIGHT (shrinks RIGHT TO LEFT).
+  // - Right-side cards: extends from RIGHT TO LEFT (shrinks LEFT TO RIGHT).
+  // - First row cards: extends from TOP TO BOTTOM (shrinks BOTTOM TO TOP).
+  // - Other rows cards: extends from BOTTOM TO TOP (shrinks TOP TO BOTTOM).
+  const fabTranslateX = useMemo(() => {
+    return fabAnimScale.interpolate({
+      inputRange: [0, 1],
+      outputRange: fabCoordinates.isLeftHalf ? [-56, 0] : [56, 0],
+    });
+  }, [fabAnimScale, fabCoordinates.isLeftHalf]);
+
+  const fabTranslateY = useMemo(() => {
+    return fabAnimScale.interpolate({
+      inputRange: [0, 1],
+      outputRange: fabCoordinates.isFirstRow ? [-21, 0] : [21, 0],
+    });
+  }, [fabAnimScale, fabCoordinates.isFirstRow]);
+
+  const handleBrowseCatalogFromFab = useCallback(() => {
+    if (!selectedSourceForAction) return;
+    const src = selectedSourceForAction;
+    dismissFab(() => {
+      handleOpenMangaModal(src);
+    });
+  }, [selectedSourceForAction, dismissFab, handleOpenMangaModal]);
+
   const handleLoadMoreModalMangas = useCallback(() => {
     if (!isModalLoading && !isModalLoadingMore && hasMoreMangas) {
       const next = modalPage + 1;
@@ -1610,7 +1802,8 @@ export default function ExtensionsScreen() {
             </View>
           ) : (
             <View style={styles.fourColumnGrid}>
-              {displayGridSources.map((source) => {
+              {displayGridSources.map((source, index) => {
+                const isFirstRow = index < 4;
                 return (
                   <SourceGridCell
                     key={source.id}
@@ -1621,9 +1814,9 @@ export default function ExtensionsScreen() {
                       if (explodingId) return;
                       handleOpenMangaModal(source);
                     }}
-                    onLongPress={() => {
+                    onLongPress={(layout) => {
                       if (explodingId) return;
-                      handleSourceLongPress(source);
+                      handleSourceLongPress(source, layout ? { ...layout, isFirstRow } : undefined);
                     }}
                   />
                 );
@@ -1633,141 +1826,81 @@ export default function ExtensionsScreen() {
         </ScrollView>
 
         {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            SOURCE CARD ACTION MENU MODAL (Triggered on Card Long Press)
+            SOURCE CARD ACTION FLOATING ACTION BAR (Pill anchored to Card)
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
         <Modal
           visible={sourceActionModalVisible}
           transparent
-          animationType="fade"
-          onRequestClose={() => setSourceActionModalVisible(false)}
+          animationType="none"
+          onRequestClose={() => dismissFab()}
         >
-          <View style={styles.actionModalOverlay}>
+          <View style={styles.fabModalRoot}>
+            {/* Transparent backdrop to dismiss when tapping outside with outro shrink */}
             <Pressable
-              style={styles.actionModalBackdrop}
-              onPress={() => setSourceActionModalVisible(false)}
+              style={styles.fabModalBackdrop}
+              onPress={() => dismissFab()}
+              accessibilityLabel="Close action menu"
             />
-            <View
-              style={[
-                styles.actionModalCard,
-                {
-                  backgroundColor: colors.surface,
-                  borderWidth: 0,
-                },
-              ]}
-            >
-              {/* Header: Icon + Title + Domain */}
-              {selectedSourceForAction && (
-                <View style={styles.actionModalHeader}>
-                  <View
-                    style={[
-                    styles.actionModalIconBox,
-                    {
-                      backgroundColor: colors.surfaceElevated,
-                      borderWidth: 0,
-                    },
-                    ]}
-                  >
-                    <SourceFavicon
-                      icon={selectedSourceForAction.icon}
-                      letter={selectedSourceForAction.name.charAt(0).toUpperCase()}
-                      letterColor={colors.accent}
-                      imageStyle={styles.actionModalFavicon}
-                      textStyle={styles.actionModalMonogram}
-                    />
-                  </View>
-                  <View style={{ flex: 1, gap: 2 }}>
-                    <Text style={[styles.actionModalTitle, { color: colors.text }]}>
-                      {selectedSourceForAction.name}
-                    </Text>
-                    {selectedSourceForAction.domain ? (
-                      <Text style={[styles.actionModalDomain, { color: colors.textMuted }]}>
-                        {selectedSourceForAction.domain}
-                      </Text>
-                    ) : null}
-                  </View>
-                </View>
-              )}
 
-              <View style={[styles.actionModalDivider, { backgroundColor: colors.border }]} />
-
-              {/* Action 1: Browse Manga */}
-              <Pressable
-                onPress={() => {
-                  if (!selectedSourceForAction) return;
-                  const src = selectedSourceForAction;
-                  setSourceActionModalVisible(false);
-                  handleOpenMangaModal(src);
-                }}
-                style={({ pressed }) => [
-                  styles.actionModalRow,
-                  { backgroundColor: pressed ? `${colors.text}08` : 'transparent' },
+            {selectedSourceForAction && (
+              <Animated.View
+                style={[
+                  styles.floatingActionBar,
+                  {
+                    top: fabCoordinates.top,
+                    left: fabCoordinates.left,
+                    opacity: fabAnimOpacity,
+                    transform: [
+                      { translateX: fabTranslateX },
+                      { translateY: fabTranslateY },
+                      { scale: fabAnimScale },
+                    ],
+                    backgroundColor: isDark ? '#222329' : '#FFFFFF',
+                    borderColor: isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.08)',
+                    borderWidth: StyleSheet.hairlineWidth * 2,
+                    shadowOpacity: isDark ? 0.45 : 0.22,
+                  },
                 ]}
               >
-                <Ionicons name="book-outline" size={20} color={colors.text} />
-                <Text style={[styles.actionModalRowText, { color: colors.text }]}>
-                  Browse Catalog
-                </Text>
-              </Pressable>
-
-              {/* Action 2: Visit Website */}
-              {selectedSourceForAction && (
+                {/* 1. Browse Catalog Button */}
                 <Pressable
-                  onPress={() => {
-                    if (!selectedSourceForAction) return;
-                    const url = resolveSourceWebsiteUrl(
-                      selectedSourceForAction.id,
-                      selectedSourceForAction.domain,
-                      undefined,
-                      allCatalog
-                    );
-                    setSourceActionModalVisible(false);
-                    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-                      window.open(url, '_blank', 'noopener,noreferrer');
-                    } else {
-                      WebBrowser.openBrowserAsync(url).catch(() => Linking.openURL(url).catch(() => {}));
-                    }
-                  }}
+                  onPress={handleBrowseCatalogFromFab}
                   style={({ pressed }) => [
-                    styles.actionModalRow,
-                    { backgroundColor: pressed ? `${colors.text}08` : 'transparent' },
+                    styles.fabActionButton,
+                    pressed && {
+                      opacity: 0.7,
+                      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.10)' : 'rgba(0, 0, 0, 0.06)',
+                      transform: [{ scale: 0.92 }],
+                    },
+                    Platform.OS === 'web' && { cursor: 'pointer' as any },
                   ]}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Browse catalog for ${selectedSourceForAction.name}`}
                 >
-                  <Ionicons name="open-outline" size={20} color={colors.text} />
-                  <Text style={[styles.actionModalRowText, { color: colors.text }]}>
-                    Visit Website
-                  </Text>
+                  <Ionicons name="book-outline" size={20} color={isDark ? '#F4F4F5' : '#18181B'} />
                 </Pressable>
-              )}
 
-              {/* Action 3: Remove from Extensions (Destructive) */}
-              <Pressable
-                onPress={handleRemoveSourceFromGrid}
-                style={({ pressed }) => [
-                  styles.actionModalRow,
-                  { backgroundColor: pressed ? '#EF444415' : 'transparent' },
-                ]}
-              >
-                <Ionicons name="trash-outline" size={20} color="#EF4444" />
-                <Text style={[styles.actionModalRowText, { color: '#EF4444', fontWeight: '600' }]}>
-                  Remove from Extensions
-                </Text>
-              </Pressable>
-
-              <View style={[styles.actionModalDivider, { backgroundColor: colors.border }]} />
-
-              {/* Action 4: Cancel */}
-              <Pressable
-                onPress={() => setSourceActionModalVisible(false)}
-                style={({ pressed }) => [
-                  styles.actionModalRow,
-                  { backgroundColor: pressed ? `${colors.text}08` : 'transparent', justifyContent: 'center' },
-                ]}
-              >
-                <Text style={[styles.actionModalCancelText, { color: colors.textSecondary }]}>
-                  Cancel
-                </Text>
-              </Pressable>
-            </View>
+                {/* 2. Remove / Delete Button (-) */}
+                <Pressable
+                  onPress={handleRemoveSourceFromGrid}
+                  style={({ pressed }) => [
+                    styles.fabActionButton,
+                    pressed && {
+                      opacity: 0.7,
+                      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.10)' : 'rgba(0, 0, 0, 0.06)',
+                      transform: [{ scale: 0.92 }],
+                    },
+                    Platform.OS === 'web' && { cursor: 'pointer' as any },
+                  ]}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove ${selectedSourceForAction.name} from extensions`}
+                >
+                  <Ionicons name="remove-circle-outline" size={22} color={isDark ? '#F4F4F5' : '#18181B'} />
+                </Pressable>
+              </Animated.View>
+            )}
           </View>
         </Modal>
 
@@ -1919,8 +2052,8 @@ export default function ExtensionsScreen() {
                   item.contentType === 'hentai'
                     ? 'Hentai'
                     : item.contentType === 'comic'
-                    ? 'Comics'
-                    : 'Manga';
+                      ? 'Comics'
+                      : 'Manga';
                 const langLabel =
                   (item.locale && LANGUAGE_NAMES[item.locale]) ||
                   (item.locale ? item.locale.toUpperCase() : 'EN');
@@ -1986,7 +2119,7 @@ export default function ExtensionsScreen() {
                             window.open(targetUrl, '_blank', 'noopener,noreferrer');
                           } else {
                             WebBrowser.openBrowserAsync(targetUrl).catch(() =>
-                              Linking.openURL(targetUrl).catch(() => {})
+                              Linking.openURL(targetUrl).catch(() => { })
                             );
                           }
                         }}
@@ -2214,11 +2347,11 @@ export default function ExtensionsScreen() {
                   setSortPickerVisible((prev) => !prev);
                 }}
                 style={[
-                    styles.sortFilterBtn,
-                    {
-                      backgroundColor: sortPickerVisible ? colors.surfaceElevated : colors.surface,
-                      borderWidth: 0,
-                    },
+                  styles.sortFilterBtn,
+                  {
+                    backgroundColor: sortPickerVisible ? colors.surfaceElevated : colors.surface,
+                    borderWidth: 0,
+                  },
                 ]}
                 aria-label="Change Sort Order"
               >
@@ -2580,8 +2713,8 @@ export default function ExtensionsScreen() {
                               backgroundColor: isSelected
                                 ? `${colors.accent}18`
                                 : pressed
-                                ? `${colors.text}08`
-                                : 'transparent',
+                                  ? `${colors.text}08`
+                                  : 'transparent',
                             },
                           ]}
                         >
@@ -2658,7 +2791,7 @@ export default function ExtensionsScreen() {
                       onPress={() => {
                         triggerHaptic();
                         if (cfInAppUrl) {
-                          Linking.openURL(cfInAppUrl).catch(() => {});
+                          Linking.openURL(cfInAppUrl).catch(() => { });
                         }
                       }}
                       hitSlop={8}
@@ -2881,7 +3014,7 @@ export default function ExtensionsScreen() {
                               loadModalMangas(1, false);
                             }
                           }
-                        } catch {}
+                        } catch { }
                       }}
                     />
                   ) : (
@@ -2949,7 +3082,7 @@ export default function ExtensionsScreen() {
                 try {
                   const parsed = JSON.parse(event.nativeEvent.data);
                   webViewBridge.handleMessage(parsed);
-                } catch {}
+                } catch { }
               }}
             />
           </View>
@@ -3518,88 +3651,42 @@ const styles = StyleSheet.create({
   },
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // Source Card Action Menu Modal (Long-Press)
+  // Floating Action Bar (Anchored Pill Popover)
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  actionModalOverlay: {
+  fabModalRoot: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: Spacing.md,
+    position: 'relative',
   },
-  actionModalBackdrop: {
+  fabModalBackdrop: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
+    backgroundColor: 'transparent',
   },
-  actionModalCard: {
-    width: Platform.OS === 'web' ? '100%' : '78%',
-    maxWidth: Platform.OS === 'web' ? 320 : 260,
-    borderRadius: Radius.lg,
-    borderWidth: 0,
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.md,
-    elevation: 10,
+  floatingActionBar: {
+    position: 'absolute',
+    width: 112,
+    height: 42,
+    borderRadius: 21,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-evenly',
+    paddingHorizontal: 4,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
+    shadowOpacity: 0.28,
+    shadowRadius: 12,
+    elevation: 10,
+    zIndex: 99999,
   },
-  actionModalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    paddingBottom: Spacing.xs,
-  },
-  actionModalIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    borderWidth: 0,
+  fabActionButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  actionModalFavicon: {
-    width: 26,
-    height: 26,
-  },
-  actionModalMonogram: {
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  actionModalTitle: {
-    fontSize: 15,
-    fontWeight: Typography.weights.bold,
-  },
-  actionModalDomain: {
-    fontSize: 11,
-  },
-  actionModalDivider: {
-    height: StyleSheet.hairlineWidth,
-    marginVertical: Spacing.xs,
-  },
-  actionModalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    paddingVertical: 11,
-    paddingHorizontal: Spacing.xs,
-    borderRadius: Radius.md,
-    marginVertical: 1,
-    cursor: 'pointer' as any,
-  },
-  actionModalRowText: {
-    fontSize: 13.5,
-    fontWeight: Typography.weights.medium,
-  },
-  actionModalCancelText: {
-    fontSize: 13.5,
-    fontWeight: Typography.weights.semibold,
-    textAlign: 'center',
-    width: '100%',
   },
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

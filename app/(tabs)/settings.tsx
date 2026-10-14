@@ -23,6 +23,7 @@ import { AnimatedPressable } from '../../src/components/AnimatedPressable';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
 import { YomiteMascotIcon } from '../../src/components/YomiteMascotIcon';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
+import { useColorScheme } from '../../src/hooks/useColorScheme';
 import {
   checkLibraryForUpdates,
   getBackgroundScanConfig,
@@ -89,13 +90,19 @@ function CustomSwitch({
   activeColor: string;
 }) {
   const colors = useThemeColors();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+
   return (
     <Switch
       value={value}
       onValueChange={onValueChange}
-      trackColor={{ false: colors.surfaceElevated, true: activeColor }}
-      thumbColor={value ? getContrastTextColor(activeColor) : colors.textMuted}
-      ios_backgroundColor={colors.surfaceElevated}
+      trackColor={{
+        false: isDark ? '#3F3F46' : colors.surfaceElevated,
+        true: activeColor,
+      }}
+      thumbColor="#FFFFFF"
+      ios_backgroundColor={isDark ? '#3F3F46' : colors.surfaceElevated}
     />
   );
 }
@@ -444,7 +451,7 @@ export default function SettingsScreen() {
               accessibilityLabel="Open profile settings"
               style={[
                 styles.profileActionBtn,
-                { backgroundColor: colors.surfaceElevated },
+                { backgroundColor: 'transparent' },
                 Platform.OS === 'web' && { cursor: 'pointer' as any },
               ]}
             >
@@ -461,7 +468,7 @@ export default function SettingsScreen() {
               accessibilityLabel="Synchronize library with cloud"
               style={[
                 styles.profileActionBtn,
-                { backgroundColor: colors.surfaceElevated },
+                { backgroundColor: 'transparent' },
                 Platform.OS === 'web' && { cursor: 'pointer' as any },
               ]}
             >
@@ -481,7 +488,7 @@ export default function SettingsScreen() {
               accessibilityLabel="Sign out of Yomite"
               style={[
                 styles.profileActionBtn,
-                { backgroundColor: colors.surfaceElevated },
+                { backgroundColor: 'transparent' },
                 Platform.OS === 'web' && { cursor: 'pointer' as any },
               ]}
             >
