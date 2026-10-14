@@ -35,6 +35,11 @@ interface IntroWelcomeModalProps {
 }
 
 export function IntroWelcomeModal({ forceVisible = false, onDismiss }: IntroWelcomeModalProps) {
+  // Do not render on web/browser platform
+  if (Platform.OS === 'web') {
+    return null;
+  }
+
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
 

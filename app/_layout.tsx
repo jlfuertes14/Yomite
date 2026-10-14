@@ -196,7 +196,7 @@ export default function RootLayout() {
           </Stack>
 
           {/* First-Install Introductory Welcome Screen (1-Tap) */}
-          <IntroWelcomeModal />
+          {Platform.OS !== 'web' && <IntroWelcomeModal />}
 
           {/* Persistent Global Background WebView for Cloudflare & MangaDot Authenticated Requests */}
           {Platform.OS !== 'web' && (
