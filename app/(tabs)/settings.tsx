@@ -51,7 +51,6 @@ import { triggerHaptic } from '../../src/utils/haptics';
 
 import { AuthModal } from '../../src/components/AuthModal';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
-import { IntroWelcomeModal } from '../../src/components/IntroWelcomeModal';
 import { syncUserDataWithCloud } from '../../src/services/cloudSync';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 
@@ -178,8 +177,6 @@ export default function SettingsScreen() {
     message: '',
     onConfirm: () => { },
   });
-
-  const [showWelcomeIntro, setShowWelcomeIntro] = useState(false);
 
   const handleManualSync = async () => {
     if (!user?.id) return;
@@ -690,14 +687,22 @@ export default function SettingsScreen() {
     </View>
   );
 
-  /* ── SECTION 5: READER BACKGROUND (FLAT CHIPS) ── */
+  /* ── SECTION 5: READER BACKGROUND (SLIDING CAROUSEL) ── */
   const renderReaderThemeSection = () => (
     <View style={styles.section}>
       <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>Reader Background</Text>
-      <View style={styles.themeChipsGrid}>
+      <Text style={[styles.sectionSubDescription, { color: colors.textMuted }]}>
+        Canvas background tone for reading manga pages
+      </Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.schemeScrollRow}
+      >
         {THEME_KEYS.map((key) => {
           const t = ReaderThemes[key];
-          const isActive = readerTheme === key;
+          const isSelected = readerTheme === key;
+          const isLightTone = key === 'white' || key === 'sepia';
           return (
             <Pressable
               key={key}
@@ -706,27 +711,45 @@ export default function SettingsScreen() {
                 setTheme(key);
               }}
               accessibilityRole="button"
+              accessibilityState={{ selected: isSelected }}
               accessibilityLabel={`Set reader theme to ${t.name}`}
               style={({ pressed, hovered }: any) => [
-                styles.themeChip,
-                {
-                  backgroundColor: t.background,
-                  borderColor: isActive ? 'rgba(255, 255, 255, 0.28)' : '#27272A',
-                },
-                (pressed || hovered) && { opacity: 0.8 },
+                styles.schemeChip,
+                (pressed || hovered) && { opacity: 0.72 },
                 Platform.OS === 'web' && { cursor: 'pointer' as any },
               ]}
             >
-              <Text style={[styles.themeChipText, { color: t.text }]}>
+              <View
+                style={[
+                  styles.schemeSwatch,
+                  {
+                    backgroundColor: t.background,
+                    borderColor: isSelected ? '#FFFFFF' : (key === 'white' ? '#52525B' : colors.border),
+                  },
+                  isSelected && styles.schemeSwatchSelected,
+                ]}
+              >
+                {isSelected && (
+                  <Ionicons
+                    name="checkmark"
+                    size={18}
+                    color={isLightTone ? '#09090B' : '#FFFFFF'}
+                  />
+                )}
+              </View>
+              <Text
+                style={[
+                  styles.schemeChipText,
+                  { color: isSelected ? colors.text : colors.textSecondary },
+                ]}
+                numberOfLines={1}
+              >
                 {t.name}
               </Text>
-              {isActive && (
-                <Ionicons name="checkmark-circle" size={14} color={accentColor} />
-              )}
             </Pressable>
           );
         })}
-      </View>
+      </ScrollView>
     </View>
   );
 
@@ -946,35 +969,6 @@ export default function SettingsScreen() {
           </View>
           <Ionicons name="chevron-forward" size={16} color="#71717A" />
         </Pressable>
-
-        <View style={styles.hairlineDivider} />
-
-        <Pressable
-          onPress={() => {
-            triggerHaptic();
-            setShowWelcomeIntro(true);
-          }}
-          accessibilityRole="button"
-          accessibilityLabel="Preview welcome introductory screen"
-          style={({ pressed, hovered }: any) => [
-            styles.flatRow,
-            (pressed || hovered) && { backgroundColor: 'rgba(39, 39, 42, 0.25)' },
-            Platform.OS === 'web' && { cursor: 'pointer' as any },
-          ]}
-        >
-          <View style={styles.optionLeft}>
-            <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
-              <Ionicons name="sparkles-outline" size={18} color={accentColor} />
-            </View>
-            <View style={styles.optionTextCol}>
-              <Text style={[styles.optionTitle, { color: colors.text }]}>Welcome Introduction</Text>
-              <Text style={[styles.optionSubtitle, { color: colors.textMuted }]}>
-                Replay first-launch welcome screen
-              </Text>
-            </View>
-          </View>
-          <Ionicons name="chevron-forward" size={16} color="#71717A" />
-        </Pressable>
       </View>
     </View>
   );
@@ -1111,14 +1105,6 @@ export default function SettingsScreen() {
 
         {/* Sidebar Drawer */}
         <SidebarDrawer visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
-
-        {/* Welcome Intro Modal (Preview / Replay) */}
-        {showWelcomeIntro && (
-          <IntroWelcomeModal
-            forceVisible
-            onDismiss={() => setShowWelcomeIntro(false)}
-          />
-        )}
       </View>
     </SafeAreaView>
   );

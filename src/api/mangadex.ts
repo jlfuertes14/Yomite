@@ -518,6 +518,62 @@ export async function getRecentlyAdded(
   return result;
 }
 
+export async function getTopRatedManga(
+  limit = 20,
+  offset = 0,
+  bypassCache = false
+): Promise<{ data: Manga[]; total: number }> {
+  const cacheKey = `top_rated_v1_${limit}_${offset}`;
+  if (!bypassCache) {
+    const cached = await CacheManager.get<{ data: Manga[]; total: number }>(cacheKey);
+    if (cached) return cached;
+  }
+
+  const res = await api.get<MangaDexResponse<Manga[]>>('/manga', {
+    params: {
+      limit,
+      offset,
+      includes: ['cover_art', 'author', 'artist'],
+      'contentRating[]': DEFAULT_CONTENT_RATINGS,
+      'order[rating]': 'desc',
+      hasAvailableChapters: true,
+    },
+  });
+
+  const filteredData = res.data.data.filter((m) => m.attributes?.contentRating !== 'pornographic');
+  const result = { data: filteredData, total: res.data.total ?? 0 };
+  await CacheManager.set(cacheKey, result, 10 * 60 * 1000); // 10 min TTL
+  return result;
+}
+
+export async function getMostPopularManga(
+  limit = 20,
+  offset = 0,
+  bypassCache = false
+): Promise<{ data: Manga[]; total: number }> {
+  const cacheKey = `most_popular_alltime_v1_${limit}_${offset}`;
+  if (!bypassCache) {
+    const cached = await CacheManager.get<{ data: Manga[]; total: number }>(cacheKey);
+    if (cached) return cached;
+  }
+
+  const res = await api.get<MangaDexResponse<Manga[]>>('/manga', {
+    params: {
+      limit,
+      offset,
+      includes: ['cover_art', 'author', 'artist'],
+      'contentRating[]': DEFAULT_CONTENT_RATINGS,
+      'order[followedCount]': 'desc',
+      hasAvailableChapters: true,
+    },
+  });
+
+  const filteredData = res.data.data.filter((m) => m.attributes?.contentRating !== 'pornographic');
+  const result = { data: filteredData, total: res.data.total ?? 0 };
+  await CacheManager.set(cacheKey, result, 10 * 60 * 1000); // 10 min TTL
+  return result;
+}
+
 export async function getRandomManga(): Promise<Manga> {
   const res = await api.get<MangaDexResponse<Manga>>('/manga/random', {
     params: {

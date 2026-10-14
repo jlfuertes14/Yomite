@@ -6,8 +6,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -27,7 +27,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Radius, Spacing, Typography } from '../../constants/Colors';
 import {
-  extractArtistName,
   extractAuthorName,
   extractCoverFileName,
   getBatchMangaStatistics,
@@ -35,11 +34,13 @@ import {
   getLatestUpdates,
   getMangaDescription,
   getMangaTitle,
+  getMostPopularManga,
   getPopularManga,
   getRandomManga,
   getRecentlyAdded,
+  getTopRatedManga,
   MangaStatistics,
-  searchManga,
+  searchManga
 } from '../../src/api/mangadex';
 import { AdvancedSearchModal } from '../../src/components/AdvancedSearchModal';
 import { AuthModal } from '../../src/components/AuthModal';
@@ -48,14 +49,14 @@ import { CARD_GAP, MangaCard } from '../../src/components/MangaCard';
 import { OfflineState } from '../../src/components/OfflineState';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
 import { Skeleton } from '../../src/components/Skeleton';
-import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
 import { useColorScheme } from '../../src/hooks/useColorScheme';
+import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
-import { useUserStore, getUserDisplayName, getUserHandle, getUserAvatarUrl } from '../../src/store/userStore';
 import { syncUserDataWithCloud } from '../../src/services/cloudSync';
-import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
+import { getUserAvatarUrl, getUserDisplayName, getUserHandle, useUserStore } from '../../src/store/userStore';
 import type { Manga, SearchFilters } from '../../src/types';
-import { formatChapterDate } from '../../src/utils/date';
+import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
+import { BannerCacheManager } from '../../src/utils/bannerCache';
 
 type VectorIcon = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -91,10 +92,10 @@ const formatCompactNumber = (num: number): string => {
   return num.toLocaleString();
 };
 
-const getMangaCover = (manga: Manga): string | null => {
+const getMangaCover = (manga: Manga, size: '256' | '512' | 'original' = '512'): string | null => {
   const fileName = extractCoverFileName(manga);
   if (!fileName) return null;
-  return getCoverUrl(manga.id, fileName, '256');
+  return getCoverUrl(manga.id, fileName, size);
 };
 
 interface WebHeaderProps {
@@ -222,9 +223,9 @@ const WebHeader: React.FC<WebHeaderProps> = ({
             borderBottomColor: isTransparentAtTop ? 'transparent' : colors.border,
             ...(Platform.OS === 'web'
               ? ({
-                  transition:
-                    'background-color 0.25s cubic-bezier(0.23, 1, 0.32, 1), border-color 0.25s cubic-bezier(0.23, 1, 0.32, 1), margin-bottom 0.2s ease',
-                } as any)
+                transition:
+                  'background-color 0.25s cubic-bezier(0.23, 1, 0.32, 1), border-color 0.25s cubic-bezier(0.23, 1, 0.32, 1), margin-bottom 0.2s ease',
+              } as any)
               : {}),
           },
         ]}
@@ -274,9 +275,9 @@ const WebHeader: React.FC<WebHeaderProps> = ({
               style={[
                 { position: 'relative', zIndex: 100 },
                 Platform.OS === 'web' &&
-                  (isMobile
-                    ? { flex: 1, minWidth: 90, maxWidth: isSearchFocused ? 280 : 160 }
-                    : { width: searchBarWidthAnim }),
+                (isMobile
+                  ? { flex: 1, minWidth: 90, maxWidth: isSearchFocused ? 280 : 160 }
+                  : { width: searchBarWidthAnim }),
               ]}
             >
               <View
@@ -289,11 +290,11 @@ const WebHeader: React.FC<WebHeaderProps> = ({
                       : 'transparent',
                     ...(Platform.OS === 'web'
                       ? ({
-                          boxShadow: isSearchFocused
-                            ? 'none'
-                            : 'none',
-                          transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
-                        } as any)
+                        boxShadow: isSearchFocused
+                          ? 'none'
+                          : 'none',
+                        transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+                      } as any)
                       : {}),
                   },
                 ]}
@@ -565,160 +566,160 @@ const WebHeader: React.FC<WebHeaderProps> = ({
                 )}
               </Pressable>
 
-            {/* Profile Dropdown Menu */}
-            {profileDropdownVisible && user && (
-              <>
-                <Pressable
-                  style={styles.dropdownBackdrop}
-                  onPress={() => setProfileDropdownVisible(false)}
-                />
-                <View
-                  style={[
-                    styles.webProfileDropdown,
-                    {
-                      backgroundColor: colors.surface,
-                      borderColor: colors.border,
-                    },
-                  ]}
-                >
-                  {/* User Info Header */}
-                  <View style={[styles.dropdownUserHeader, { borderBottomColor: colors.border }]}>
-                    <View style={[styles.dropdownAvatarCircle, { backgroundColor: colors.accent, overflow: 'hidden' }]}>
-                      {getUserAvatarUrl(user) ? (
-                        <Image
-                          source={{ uri: getUserAvatarUrl(user)! }}
-                          style={{ width: '100%', height: '100%' }}
-                          contentFit="cover"
-                        />
-                      ) : (
-                        <Text style={styles.dropdownAvatarText}>
-                          {getUserDisplayName(user).charAt(0).toUpperCase()}
+              {/* Profile Dropdown Menu */}
+              {profileDropdownVisible && user && (
+                <>
+                  <Pressable
+                    style={styles.dropdownBackdrop}
+                    onPress={() => setProfileDropdownVisible(false)}
+                  />
+                  <View
+                    style={[
+                      styles.webProfileDropdown,
+                      {
+                        backgroundColor: colors.surface,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    {/* User Info Header */}
+                    <View style={[styles.dropdownUserHeader, { borderBottomColor: colors.border }]}>
+                      <View style={[styles.dropdownAvatarCircle, { backgroundColor: colors.accent, overflow: 'hidden' }]}>
+                        {getUserAvatarUrl(user) ? (
+                          <Image
+                            source={{ uri: getUserAvatarUrl(user)! }}
+                            style={{ width: '100%', height: '100%' }}
+                            contentFit="cover"
+                          />
+                        ) : (
+                          <Text style={styles.dropdownAvatarText}>
+                            {getUserDisplayName(user).charAt(0).toUpperCase()}
+                          </Text>
+                        )}
+                      </View>
+                      <View style={{ flex: 1, gap: 2 }}>
+                        <Text style={[styles.dropdownUserName, { color: colors.text }]} numberOfLines={1}>
+                          {getUserDisplayName(user)}
                         </Text>
-                      )}
+                        <Text style={[styles.dropdownUserHandle, { color: colors.textMuted }]} numberOfLines={1}>
+                          @{getUserHandle(user)}
+                        </Text>
+                        <Text style={[styles.dropdownUserEmail, { color: colors.textSecondary }]} numberOfLines={1}>
+                          {user.email}
+                        </Text>
+                      </View>
                     </View>
-                    <View style={{ flex: 1, gap: 2 }}>
-                      <Text style={[styles.dropdownUserName, { color: colors.text }]} numberOfLines={1}>
-                        {getUserDisplayName(user)}
-                      </Text>
-                      <Text style={[styles.dropdownUserHandle, { color: colors.textMuted }]} numberOfLines={1}>
-                        @{getUserHandle(user)}
-                      </Text>
-                      <Text style={[styles.dropdownUserEmail, { color: colors.textSecondary }]} numberOfLines={1}>
-                        {user.email}
-                      </Text>
-                    </View>
-                  </View>
 
-                  {/* Menu Links */}
-                  <View style={styles.dropdownMenuList}>
-                    <Pressable
-                      onPress={() => {
-                        setProfileDropdownVisible(false);
-                        router.push('/profile' as any);
-                      }}
-                      style={({ pressed }) => [
-                        styles.dropdownMenuItem,
-                        { backgroundColor: pressed ? colors.surfaceElevated : 'transparent' },
-                      ]}
-                    >
-                      <Ionicons name="person-outline" size={17} color={colors.accent} />
-                      <Text style={[styles.dropdownMenuText, { color: colors.text }]}>My Profile</Text>
-                    </Pressable>
-
-                    <Pressable
-                      onPress={() => {
-                        setProfileDropdownVisible(false);
-                        router.push('/(tabs)/library' as any);
-                      }}
-                      style={({ pressed }) => [
-                        styles.dropdownMenuItem,
-                        { backgroundColor: pressed ? colors.surfaceElevated : 'transparent' },
-                      ]}
-                    >
-                      <Ionicons name="library-outline" size={17} color={colors.textSecondary} />
-                      <Text style={[styles.dropdownMenuText, { color: colors.text }]}>My Library</Text>
-                    </Pressable>
-
-                    <Pressable
-                      onPress={() => {
-                        setProfileDropdownVisible(false);
-                        router.push('/(tabs)/history' as any);
-                      }}
-                      style={({ pressed }) => [
-                        styles.dropdownMenuItem,
-                        { backgroundColor: pressed ? colors.surfaceElevated : 'transparent' },
-                      ]}
-                    >
-                      <Ionicons name="time-outline" size={17} color={colors.textSecondary} />
-                      <Text style={[styles.dropdownMenuText, { color: colors.text }]}>Reading History</Text>
-                    </Pressable>
-
-                    <Pressable
-                      onPress={() => {
-                        setProfileDropdownVisible(false);
-                        router.push('/(tabs)/settings' as any);
-                      }}
-                      style={({ pressed }) => [
-                        styles.dropdownMenuItem,
-                        { backgroundColor: pressed ? colors.surfaceElevated : 'transparent' },
-                      ]}
-                    >
-                      <Ionicons name="settings-outline" size={17} color={colors.textSecondary} />
-                      <Text style={[styles.dropdownMenuText, { color: colors.text }]}>Settings</Text>
-                    </Pressable>
-
-                    <Pressable
-                      onPress={async () => {
-                        if (user?.id) {
-                          setIsSyncingHeader(true);
-                          await syncUserDataWithCloud(user.id);
-                          setIsSyncingHeader(false);
+                    {/* Menu Links */}
+                    <View style={styles.dropdownMenuList}>
+                      <Pressable
+                        onPress={() => {
                           setProfileDropdownVisible(false);
-                        }
-                      }}
-                      disabled={isSyncingHeader}
-                      style={({ pressed }) => [
-                        styles.dropdownMenuItem,
-                        { backgroundColor: pressed ? colors.surfaceElevated : 'transparent' },
-                      ]}
-                    >
-                      {isSyncingHeader ? (
-                        <ActivityIndicator size="small" color={colors.emerald} />
-                      ) : (
-                        <Ionicons name="sync-outline" size={17} color={colors.emerald} />
-                      )}
-                      <Text style={[styles.dropdownMenuText, { color: colors.text }]}>
-                        {isSyncingHeader ? 'Syncing...' : 'Sync with Cloud'}
-                      </Text>
-                    </Pressable>
+                          router.push('/profile' as any);
+                        }}
+                        style={({ pressed }) => [
+                          styles.dropdownMenuItem,
+                          { backgroundColor: pressed ? colors.surfaceElevated : 'transparent' },
+                        ]}
+                      >
+                        <Ionicons name="person-outline" size={17} color={colors.accent} />
+                        <Text style={[styles.dropdownMenuText, { color: colors.text }]}>My Profile</Text>
+                      </Pressable>
 
-                    <View style={[styles.dropdownDivider, { backgroundColor: colors.border }]} />
+                      <Pressable
+                        onPress={() => {
+                          setProfileDropdownVisible(false);
+                          router.push('/(tabs)/library' as any);
+                        }}
+                        style={({ pressed }) => [
+                          styles.dropdownMenuItem,
+                          { backgroundColor: pressed ? colors.surfaceElevated : 'transparent' },
+                        ]}
+                      >
+                        <Ionicons name="library-outline" size={17} color={colors.textSecondary} />
+                        <Text style={[styles.dropdownMenuText, { color: colors.text }]}>My Library</Text>
+                      </Pressable>
 
-                    <Pressable
-                      onPress={async () => {
-                        setProfileDropdownVisible(false);
-                        await signOut();
-                      }}
-                      style={({ pressed }) => [
-                        styles.dropdownMenuItem,
-                        { backgroundColor: pressed ? colors.surfaceElevated : 'transparent' },
-                      ]}
-                    >
-                      <Ionicons name="log-out-outline" size={17} color={colors.accent} />
-                      <Text style={[styles.dropdownMenuText, { color: colors.accent, fontWeight: 'bold' }]}>
-                        Sign Out
-                      </Text>
-                    </Pressable>
+                      <Pressable
+                        onPress={() => {
+                          setProfileDropdownVisible(false);
+                          router.push('/(tabs)/history' as any);
+                        }}
+                        style={({ pressed }) => [
+                          styles.dropdownMenuItem,
+                          { backgroundColor: pressed ? colors.surfaceElevated : 'transparent' },
+                        ]}
+                      >
+                        <Ionicons name="time-outline" size={17} color={colors.textSecondary} />
+                        <Text style={[styles.dropdownMenuText, { color: colors.text }]}>Reading History</Text>
+                      </Pressable>
+
+                      <Pressable
+                        onPress={() => {
+                          setProfileDropdownVisible(false);
+                          router.push('/(tabs)/settings' as any);
+                        }}
+                        style={({ pressed }) => [
+                          styles.dropdownMenuItem,
+                          { backgroundColor: pressed ? colors.surfaceElevated : 'transparent' },
+                        ]}
+                      >
+                        <Ionicons name="settings-outline" size={17} color={colors.textSecondary} />
+                        <Text style={[styles.dropdownMenuText, { color: colors.text }]}>Settings</Text>
+                      </Pressable>
+
+                      <Pressable
+                        onPress={async () => {
+                          if (user?.id) {
+                            setIsSyncingHeader(true);
+                            await syncUserDataWithCloud(user.id);
+                            setIsSyncingHeader(false);
+                            setProfileDropdownVisible(false);
+                          }
+                        }}
+                        disabled={isSyncingHeader}
+                        style={({ pressed }) => [
+                          styles.dropdownMenuItem,
+                          { backgroundColor: pressed ? colors.surfaceElevated : 'transparent' },
+                        ]}
+                      >
+                        {isSyncingHeader ? (
+                          <ActivityIndicator size="small" color={colors.emerald} />
+                        ) : (
+                          <Ionicons name="sync-outline" size={17} color={colors.emerald} />
+                        )}
+                        <Text style={[styles.dropdownMenuText, { color: colors.text }]}>
+                          {isSyncingHeader ? 'Syncing...' : 'Sync with Cloud'}
+                        </Text>
+                      </Pressable>
+
+                      <View style={[styles.dropdownDivider, { backgroundColor: colors.border }]} />
+
+                      <Pressable
+                        onPress={async () => {
+                          setProfileDropdownVisible(false);
+                          await signOut();
+                        }}
+                        style={({ pressed }) => [
+                          styles.dropdownMenuItem,
+                          { backgroundColor: pressed ? colors.surfaceElevated : 'transparent' },
+                        ]}
+                      >
+                        <Ionicons name="log-out-outline" size={17} color={colors.accent} />
+                        <Text style={[styles.dropdownMenuText, { color: colors.accent, fontWeight: 'bold' }]}>
+                          Sign Out
+                        </Text>
+                      </Pressable>
+                    </View>
                   </View>
-                </View>
-              </>
-            )}
+                </>
+              )}
+            </View>
           </View>
         </View>
       </View>
-    </View>
-  </>
-);
+    </>
+  );
 };
 
 export default function DiscoverScreen() {
@@ -743,6 +744,14 @@ export default function DiscoverScreen() {
   const [isLoadingPopular, setIsLoadingPopular] = useState(true);
   const [isLoadingFeed, setIsLoadingFeed] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Mobile Multi-Carousel Discover States
+  const [topRatedManga, setTopRatedManga] = useState<Manga[]>([]);
+  const [mostPopularManga, setMostPopularManga] = useState<Manga[]>([]);
+  const [recentlyAddedManga, setRecentlyAddedManga] = useState<Manga[]>([]);
+  const [latestUpdatesManga, setLatestUpdatesManga] = useState<Manga[]>([]);
+  const [isLoadingCarousels, setIsLoadingCarousels] = useState(true);
+  const [activeSeeAllSection, setActiveSeeAllSection] = useState<'top_rated' | 'most_popular' | 'recently_added' | 'latest' | null>(null);
 
   // Search & Navigation Feed States
   const [searchQuery, setSearchQuery] = useState('');
@@ -891,6 +900,7 @@ export default function DiscoverScreen() {
   const mainScrollViewRef = useRef<ScrollView>(null);
 
   const handleResetToDiscover = useCallback(async () => {
+    setActiveSeeAllSection(null);
     setSearchQuery('');
     setIsWebDropdownVisible(false);
     contractSearchBar();
@@ -916,6 +926,39 @@ export default function DiscoverScreen() {
       setIsLoadingFeed(false);
     }
   }, [contractSearchBar]);
+
+  const handleOpenSeeAll = useCallback(async (section: 'top_rated' | 'most_popular' | 'recently_added' | 'latest') => {
+    setActiveSeeAllSection(section);
+    setCurrentPage(1);
+    mainScrollViewRef.current?.scrollTo({ y: 0, animated: true });
+
+    let title = 'Top Rated Manga';
+    if (section === 'most_popular') title = 'Most Popular';
+    else if (section === 'recently_added') title = 'Recently Added';
+    else if (section === 'latest') title = 'Latest Updates';
+    setActiveFeedTitle(title);
+
+    try {
+      setIsLoadingFeed(true);
+      let res: { data: Manga[]; total: number };
+      if (section === 'top_rated') {
+        res = await getTopRatedManga(PAGE_SIZE, 0);
+      } else if (section === 'most_popular') {
+        res = await getMostPopularManga(PAGE_SIZE, 0);
+      } else if (section === 'latest') {
+        res = await getLatestUpdates(PAGE_SIZE, 0);
+      } else {
+        res = await getRecentlyAdded(PAGE_SIZE, 0);
+      }
+      setFeedManga(res.data);
+      setTotalMangaCount(res.total);
+      fetchStatsForList(res.data);
+    } catch (err) {
+      console.error('Failed to load see-all section:', err);
+    } finally {
+      setIsLoadingFeed(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -953,27 +996,96 @@ export default function DiscoverScreen() {
 
   // Hero carousel active index
   const [heroIndex, setHeroIndex] = useState(0);
+  const [cachedHeroBanners, setCachedHeroBanners] = useState<Record<string, string>>({});
+  const [screenFocusKey, setScreenFocusKey] = useState(0);
 
   const fetchData = useCallback(async () => {
     try {
       setIsLoadingPopular(true);
       setIsLoadingFeed(true);
       setCurrentPage(1);
-      const [pop, feedResult] = await Promise.all([
-        getPopularManga(POPULAR_TOP_LIMIT),
-        getRecentlyAdded(PAGE_SIZE, 0),
-      ]);
-      setPopular(pop);
-      setFeedManga(feedResult.data);
-      setTotalMangaCount(feedResult.total);
-      setActiveFeedTitle('Recently Added');
-      setActiveNavId('recently_added');
-      fetchStatsForList([...pop, ...feedResult.data]);
+
+      if (Platform.OS !== 'web') {
+        setIsLoadingCarousels(true);
+        const [pop, topRatedRes, mostPopRes, recentRes, latestRes] = await Promise.all([
+          getPopularManga(POPULAR_TOP_LIMIT),
+          getTopRatedManga(14, 0),
+          getMostPopularManga(14, 0),
+          getRecentlyAdded(14, 0),
+          getLatestUpdates(14, 0),
+        ]);
+        setPopular(pop);
+        setTopRatedManga(topRatedRes.data);
+        setMostPopularManga(mostPopRes.data);
+        setRecentlyAddedManga(recentRes.data);
+        setLatestUpdatesManga(latestRes.data);
+        setFeedManga(recentRes.data);
+        setTotalMangaCount(recentRes.total);
+        setActiveFeedTitle('Recently Added');
+        setActiveNavId('recently_added');
+
+        // Preload & cache ALL 10 popular hero banner covers into memory-disk cache & local persistent storage
+        const heroItems = pop.slice(0, POPULAR_TOP_LIMIT).map((m) => ({
+          id: m.id,
+          url: getMangaCover(m, '512'),
+        }));
+        const heroCoverUrls = heroItems.map((h) => h.url).filter(Boolean) as string[];
+        const heroPlaceholderUrls = pop
+          .slice(0, POPULAR_TOP_LIMIT)
+          .map((m) => getMangaCover(m, '256'))
+          .filter(Boolean) as string[];
+
+        const allPrefetchUrls = [...heroCoverUrls, ...heroPlaceholderUrls];
+        if (allPrefetchUrls.length > 0) {
+          Image.prefetch(allPrefetchUrls, 'memory-disk');
+        }
+        BannerCacheManager.prefetchHeroBanners(heroItems).then((resolved) => {
+          if (Object.keys(resolved).length > 0) {
+            setCachedHeroBanners((prev) => ({ ...prev, ...resolved }));
+          }
+        });
+
+        const allLoaded = [
+          ...pop,
+          ...topRatedRes.data,
+          ...mostPopRes.data,
+          ...recentRes.data,
+          ...latestRes.data,
+        ];
+        fetchStatsForList(allLoaded);
+        setIsLoadingCarousels(false);
+      } else {
+        const [pop, feedResult] = await Promise.all([
+          getPopularManga(POPULAR_TOP_LIMIT),
+          getRecentlyAdded(PAGE_SIZE, 0),
+        ]);
+        setPopular(pop);
+
+        const heroCoverUrls = pop
+          .slice(0, POPULAR_TOP_LIMIT)
+          .map((m) => getMangaCover(m, '512'))
+          .filter(Boolean) as string[];
+        const heroPlaceholderUrls = pop
+          .slice(0, POPULAR_TOP_LIMIT)
+          .map((m) => getMangaCover(m, '256'))
+          .filter(Boolean) as string[];
+        const allPrefetchUrls = [...heroCoverUrls, ...heroPlaceholderUrls];
+        if (allPrefetchUrls.length > 0) {
+          Image.prefetch(allPrefetchUrls, 'memory-disk');
+        }
+
+        setFeedManga(feedResult.data);
+        setTotalMangaCount(feedResult.total);
+        setActiveFeedTitle('Recently Added');
+        setActiveNavId('recently_added');
+        fetchStatsForList([...pop, ...feedResult.data]);
+      }
     } catch (err) {
       console.error('Failed to fetch discover data:', err);
     } finally {
       setIsLoadingPopular(false);
       setIsLoadingFeed(false);
+      setIsLoadingCarousels(false);
     }
   }, []);
 
@@ -981,18 +1093,29 @@ export default function DiscoverScreen() {
     fetchData();
   }, [fetchData]);
 
-  const nextHeroRef = useRef<() => void>(() => {});
+  const nextHeroRef = useRef<() => void>(() => { });
+  const [isScreenFocused, setIsScreenFocused] = useState(true);
 
-  // Auto-advance hero banner every 7 seconds with slide animation
+  useFocusEffect(
+    useCallback(() => {
+      setIsScreenFocused(true);
+      setScreenFocusKey((k) => k + 1);
+      return () => {
+        setIsScreenFocused(false);
+      };
+    }, [])
+  );
+
+  // Auto-advance hero banner every 7 seconds with slide animation only while screen is focused
   useEffect(() => {
-    if (popular.length === 0) return;
+    if (popular.length === 0 || !isScreenFocused) return;
     const interval = setInterval(() => {
       if (nextHeroRef.current) {
         nextHeroRef.current();
       }
     }, 7000);
     return () => clearInterval(interval);
-  }, [popular.length]);
+  }, [popular.length, isScreenFocused]);
 
   const isShowingSearch =
     activeNavId === 'search_results' ||
@@ -1002,16 +1125,53 @@ export default function DiscoverScreen() {
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     setCurrentPage(1);
-    const feedRequest =
-      activeNavId === 'latest'
-        ? getLatestUpdates(PAGE_SIZE, 0, true)
-        : getRecentlyAdded(PAGE_SIZE, 0, true);
+
+    if (Platform.OS !== 'web' && !activeSeeAllSection && !isShowingSearch) {
+      try {
+        const [pop, topRatedRes, mostPopRes, recentRes, latestRes] = await Promise.all([
+          getPopularManga(POPULAR_TOP_LIMIT, true),
+          getTopRatedManga(14, 0, true),
+          getMostPopularManga(14, 0, true),
+          getRecentlyAdded(14, 0, true),
+          getLatestUpdates(14, 0, true),
+        ]);
+        setPopular(pop);
+        setTopRatedManga(topRatedRes.data);
+        setMostPopularManga(mostPopRes.data);
+        setRecentlyAddedManga(recentRes.data);
+        setLatestUpdatesManga(latestRes.data);
+        fetchStatsForList([
+          ...pop,
+          ...topRatedRes.data,
+          ...mostPopRes.data,
+          ...recentRes.data,
+          ...latestRes.data,
+        ]);
+      } catch (err) {
+        console.error('Mobile refresh failed:', err);
+      } finally {
+        setRefreshing(false);
+      }
+      return;
+    }
+
+    let feedRequest;
+    if (activeSeeAllSection === 'top_rated') {
+      feedRequest = getTopRatedManga(PAGE_SIZE, 0, true);
+    } else if (activeSeeAllSection === 'most_popular' || activeNavId === 'popular') {
+      feedRequest = getMostPopularManga(PAGE_SIZE, 0, true);
+    } else if (activeSeeAllSection === 'latest' || activeNavId === 'latest') {
+      feedRequest = getLatestUpdates(PAGE_SIZE, 0, true);
+    } else {
+      feedRequest = getRecentlyAdded(PAGE_SIZE, 0, true);
+    }
+
     const [pop, feedResult] = await Promise.all([
       getPopularManga(POPULAR_TOP_LIMIT, true),
       feedRequest,
     ]);
     setPopular(pop);
-    if (!isShowingSearch && activeNavId === 'popular') {
+    if (!isShowingSearch && activeNavId === 'popular' && activeSeeAllSection === null) {
       setTotalMangaCount(pop.length);
       fetchStatsForList(pop);
     } else {
@@ -1020,7 +1180,7 @@ export default function DiscoverScreen() {
       fetchStatsForList([...pop, ...feedResult.data]);
     }
     setRefreshing(false);
-  }, [activeNavId, isShowingSearch]);
+  }, [activeNavId, activeSeeAllSection, isShowingSearch]);
 
   const handleSearch = useCallback(async () => {
     if (!searchQuery.trim()) {
@@ -1166,7 +1326,11 @@ export default function DiscoverScreen() {
         fetchStatsForList(result.data);
       } else {
         let result: { data: Manga[]; total: number };
-        if (activeNavId === 'latest') {
+        if (activeSeeAllSection === 'top_rated') {
+          result = await getTopRatedManga(PAGE_SIZE, offset);
+        } else if (activeSeeAllSection === 'most_popular') {
+          result = await getMostPopularManga(PAGE_SIZE, offset);
+        } else if (activeSeeAllSection === 'latest' || activeNavId === 'latest') {
           result = await getLatestUpdates(PAGE_SIZE, offset);
         } else {
           result = await getRecentlyAdded(PAGE_SIZE, offset);
@@ -1284,13 +1448,58 @@ export default function DiscoverScreen() {
   const currentHeroStats = currentHeroManga ? mangaStatsMap[currentHeroManga.id] : null;
   const currentHeroRating = currentHeroStats?.rating?.bayesian || currentHeroStats?.rating?.average || null;
   const currentHeroFollows = currentHeroStats?.follows ?? null;
-  const currentHeroCover = currentHeroManga ? getMangaCover(currentHeroManga) : null;
+
+  // Prioritize persistent local file-system cached cover to avoid blank screens
+  const localCachedHeroUri = currentHeroManga
+    ? (cachedHeroBanners[currentHeroManga.id] || BannerCacheManager.getCachedUri(currentHeroManga.id))
+    : null;
+  const currentHeroCover = localCachedHeroUri || (currentHeroManga ? getMangaCover(currentHeroManga, '512') : null);
+  const currentHeroPlaceholder = currentHeroManga ? getMangaCover(currentHeroManga, '256') : null;
   const currentHeroTitle = currentHeroManga ? getMangaTitle(currentHeroManga) : '';
   const currentHeroAuthor = currentHeroManga ? extractAuthorName(currentHeroManga) : '';
   const currentHeroDesc = currentHeroManga
     ? (getMangaDescription(currentHeroManga) || 'No description available for this title.')
     : '';
   const currentHeroTags = currentHeroManga?.attributes.tags?.slice(0, 3) ?? [];
+
+  // Proactively cache active banner to persistent disk
+  useEffect(() => {
+    if (!currentHeroManga || Platform.OS === 'web') return;
+    const coverUrl = getMangaCover(currentHeroManga, '512');
+    if (!coverUrl) return;
+    BannerCacheManager.getOrCacheBanner(currentHeroManga.id, coverUrl).then((localUri) => {
+      if (localUri && localUri.startsWith('file://')) {
+        setCachedHeroBanners((prev) => {
+          if (prev[currentHeroManga.id] === localUri) return prev;
+          return { ...prev, [currentHeroManga.id]: localUri };
+        });
+      }
+    });
+  }, [currentHeroManga]);
+
+  const heroTouchStartX = useRef(0);
+
+  const mobileHeroRatingDisplay = useMemo(() => {
+    if (currentHeroRating == null || isNaN(currentHeroRating)) return null;
+    const val = currentHeroRating > 5 ? currentHeroRating / 2 : currentHeroRating;
+    return val.toFixed(1);
+  }, [currentHeroRating]);
+
+  const mobileHeroRatingCount = useMemo(() => {
+    if (currentHeroStats?.rating?.distribution) {
+      const total = Object.values(currentHeroStats.rating.distribution).reduce(
+        (acc, v) => acc + (typeof v === 'number' ? v : 0),
+        0
+      );
+      if (total > 0) {
+        return `${total.toLocaleString()} ratings`;
+      }
+    }
+    if (currentHeroFollows != null && currentHeroFollows > 0) {
+      return `${formatCompactNumber(currentHeroFollows)} ratings`;
+    }
+    return null;
+  }, [currentHeroStats, currentHeroFollows]);
 
   const navItems: SidebarNavItem[] = [
     {
@@ -1373,60 +1582,31 @@ export default function DiscoverScreen() {
 
           {/* Top Header (Mobile Native Only) */}
           {Platform.OS !== 'web' && (
-            <>
-              <View style={styles.header}>
-                <View style={styles.headerLeft}>
-                  <Pressable
-                    onPress={handleResetToDiscover}
-                    style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}
-                    hitSlop={8}
-                  >
-                    <Text style={[styles.appTitle, { color: colors.text }]}>Discover</Text>
-                  </Pressable>
-                </View>
-
-                <View style={styles.headerRight}>
-                  <Pressable
-                    onPress={() => setAdvancedSearchVisible(true)}
-                    style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1 }]}
-                    hitSlop={8}
-                  >
-                    <Ionicons name="options-outline" size={24} color={colors.text} />
-                  </Pressable>
-                </View>
+            <View style={styles.header}>
+              <View style={styles.headerLeft}>
+                <Pressable
+                  onPress={handleResetToDiscover}
+                  style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Discover home"
+                >
+                  <Text style={[styles.appTitle, { color: colors.text }]}>Discover</Text>
+                </Pressable>
               </View>
 
-              {/* Search Input Bar */}
-              <View
-                style={[
-                  styles.searchContainer,
-                  { backgroundColor: colors.surfaceElevated },
-                ]}
-              >
-                <Ionicons name="search-outline" size={16} color={colors.textMuted} />
-                <TextInput
-                  style={[styles.searchInput, { color: colors.text }]}
-                  placeholder="Search titles, authors…"
-                  placeholderTextColor={colors.textMuted}
-                  value={searchQuery}
-                  multiline={false}
-                  numberOfLines={1}
-                  onChangeText={(text) => setSearchQuery(text.replace(/[\r\n]+/g, ' '))}
-                  returnKeyType="search"
-                  autoCorrect={false}
-                />
-                {searchQuery.length > 0 && (
-                  <Pressable
-                    onPress={() => setSearchQuery('')}
-                    hitSlop={8}
-                    style={{ padding: 4, backgroundColor: 'transparent', borderWidth: 0 }}
-                    accessibilityLabel="Clear search"
-                  >
-                    <Ionicons name="close-circle" size={16} color={colors.textMuted} />
-                  </Pressable>
-                )}
+              <View style={styles.headerRight}>
+                <Pressable
+                  onPress={() => setAdvancedSearchVisible(true)}
+                  style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1, padding: 6 }]}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Search titles"
+                >
+                  <Ionicons name="search-outline" size={22} color={colors.text} />
+                </Pressable>
               </View>
-            </>
+            </View>
           )}
 
           {/* Compact Offline Notification Banner when device is offline */}
@@ -1451,49 +1631,6 @@ export default function DiscoverScreen() {
               {isShowingSearch ? (
                 /* ─── Search Results ─── */
                 <View style={[styles.section, Platform.OS === 'web' && styles.webCenteredContent]}>
-                  {/* Active Filter Pill Badge on top of Search Results */}
-                  {activeFilters !== null && (
-                    <View style={styles.searchResultsFilterRow}>
-                      <View
-                        style={[
-                          styles.activeFilterPill,
-                          {
-                            backgroundColor: colors.surfaceElevated,
-                          },
-                        ]}
-                      >
-                        <Pressable
-                          onPress={() => setAdvancedSearchVisible(true)}
-                          style={({ pressed }) => [
-                            styles.activeFilterPillBody,
-                            pressed && { opacity: 0.75 },
-                            Platform.OS === 'web' && { cursor: 'pointer' },
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityLabel="Edit Advanced Filters"
-                        >
-                          <Ionicons name="options-outline" size={13} color={colors.text} />
-                          <Text style={[styles.activeFilterText, { color: colors.text }]}>
-                            Advanced Filters Active
-                          </Text>
-                        </Pressable>
-
-                        <Pressable
-                          onPress={handleClearAdvancedSearch}
-                          hitSlop={8}
-                          style={({ pressed }) => [
-                            styles.activeFilterCloseBtn,
-                            pressed && { opacity: 0.5 },
-                            Platform.OS === 'web' && { cursor: 'pointer' },
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityLabel="Clear filters"
-                        >
-                          <Ionicons name="close" size={14} color={colors.textMuted} />
-                        </Pressable>
-                      </View>
-                    </View>
-                  )}
 
                   <View style={styles.sectionHeader}>
                     <View style={styles.sectionHeaderLeft}>
@@ -1609,7 +1746,7 @@ export default function DiscoverScreen() {
                           },
                         ]}
                         accessibilityRole="tab"
-                          accessibilityState={{ selected: String(activeNavId) === 'latest' }}
+                        accessibilityState={{ selected: String(activeNavId) === 'latest' }}
                       >
                         <Ionicons
                           name="time-outline"
@@ -1640,7 +1777,7 @@ export default function DiscoverScreen() {
                           },
                         ]}
                         accessibilityRole="tab"
-                          accessibilityState={{ selected: String(activeNavId) === 'recently_added' }}
+                        accessibilityState={{ selected: String(activeNavId) === 'recently_added' }}
                       >
                         <Ionicons
                           name="add-circle-outline"
@@ -1762,11 +1899,116 @@ export default function DiscoverScreen() {
               ) : (
                 <>
                   {/* ─── Trending Spotlight Hero (Flat & Premium, Container-Free) ─── */}
-                  <View style={[styles.heroSection, Platform.OS === 'web' && styles.webHeroSection]}>
+                  {(Platform.OS === 'web' || activeSeeAllSection === null) && (
+                    <View style={[styles.heroSection, Platform.OS === 'web' && styles.webHeroSection]}>
                     {isLoadingPopular || !currentHeroManga ? (
                       <View style={[styles.heroSkeletonWrap, Platform.OS === 'web' && styles.webCenteredContent]}>
-                        <Skeleton width="100%" height={Platform.OS === 'web' ? 340 : 200} borderRadius={Radius.md} />
+                        <Skeleton width="100%" height={Platform.OS === 'web' ? 340 : 380} borderRadius={Platform.OS === 'web' ? Radius.md : 22} />
                       </View>
+                    ) : Platform.OS !== 'web' ? (
+                      /* Mobile Hero Card: Full Cover Art Poster with Bottom-Left Text Overlay */
+                      <Pressable
+                        onPress={() => navigateToManga(currentHeroManga.id)}
+                        onTouchStart={(e) => {
+                          heroTouchStartX.current = e.nativeEvent.pageX;
+                        }}
+                        onTouchEnd={(e) => {
+                          const diff = e.nativeEvent.pageX - heroTouchStartX.current;
+                          if (diff > 45) {
+                            prevHero();
+                          } else if (diff < -45) {
+                            nextHero();
+                          }
+                        }}
+                        style={({ pressed }) => [
+                          styles.mobileHeroCard,
+                          pressed && { opacity: 0.94 },
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Featured: ${currentHeroTitle}`}
+                      >
+                        {/* 1. Full-Bleed High-Res Background Image */}
+                        {currentHeroCover ? (
+                          <Image
+                            key={`hero_banner_${currentHeroManga.id}_${screenFocusKey}`}
+                            source={{
+                              uri: currentHeroCover,
+                            }}
+                            placeholder={
+                              currentHeroPlaceholder
+                                ? { uri: currentHeroPlaceholder }
+                                : undefined
+                            }
+                            placeholderContentFit="cover"
+                            style={styles.mobileHeroImage}
+                            contentFit="cover"
+                            contentPosition="top"
+                            priority="high"
+                            cachePolicy="memory-disk"
+                            transition={150}
+                          />
+                        ) : (
+                          <View style={[styles.mobileHeroImage, styles.trendingCoverPlaceholder]}>
+                            <Ionicons name="book-outline" size={48} color="#71717A" />
+                          </View>
+                        )}
+
+                        {/* 2. Seamless Bottom-Fade Gradient */}
+                        <LinearGradient
+                          colors={[
+                            'transparent',
+                            'rgba(15, 17, 23, 0.05)',
+                            'rgba(15, 17, 23, 0.60)',
+                            'rgba(15, 17, 23, 0.94)',
+                          ]}
+                          locations={[0, 0.38, 0.68, 1.0]}
+                          style={styles.mobileHeroGradient}
+                        />
+
+                        {/* 3. Bottom-Left Overlay Content */}
+                        <View style={styles.mobileHeroOverlayContent} pointerEvents="box-none">
+                          {/* Author Name */}
+                          {currentHeroAuthor ? (
+                            <Text style={styles.mobileHeroAuthor} numberOfLines={1}>
+                              {currentHeroAuthor}
+                            </Text>
+                          ) : null}
+
+                          {/* Manga Title */}
+                          <Text style={styles.mobileHeroTitle} numberOfLines={2}>
+                            {currentHeroTitle}
+                          </Text>
+
+                          {/* Genre / Tag Pills */}
+                          {currentHeroTags.length > 0 && (
+                            <View style={styles.mobileHeroTagRow}>
+                              {currentHeroTags.slice(0, 3).map((t) => {
+                                const tagLabel = (t.attributes.name.en ?? Object.values(t.attributes.name)[0]);
+                                return (
+                                  <View key={t.id} style={styles.mobileHeroTagPill}>
+                                    <Text style={styles.mobileHeroTagText} numberOfLines={1}>
+                                      {tagLabel}
+                                    </Text>
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          )}
+
+                          {/* Rating & Ratings Count Row */}
+                          <View style={styles.mobileHeroRatingRow}>
+                            <Ionicons name="star" size={13} color="#F59E0B" />
+                            <Text style={styles.mobileHeroRatingVal}>
+                              {mobileHeroRatingDisplay ?? '4.5'}
+                            </Text>
+                            {mobileHeroRatingCount ? (
+                              <Text style={styles.mobileHeroRatingCount}>
+                                ({mobileHeroRatingCount})
+                              </Text>
+                            ) : null}
+                          </View>
+                        </View>
+                      </Pressable>
                     ) : (
                       <Animated.View
                         style={[
@@ -1961,171 +2203,407 @@ export default function DiscoverScreen() {
                       </Animated.View>
                     )}
                   </View>
+                  )}
 
-                  {/* ─── Flat Feed Segment Switcher ─── */}
-                  <View style={[styles.feedSegmentContainer, Platform.OS === 'web' && styles.webCenteredContent]}>
-                    <View style={styles.feedSegmentTrack}>
-                      <Pressable
-                        onPress={handleSelectLatest}
-                        style={[
-                          styles.feedSegmentPill,
-                          activeNavId === 'latest' && styles.feedSegmentPillActive,
-                          {
-                            backgroundColor: activeNavId === 'latest' ? colors.accent : colors.surfaceElevated,
-                            borderWidth: 0,
-                          },
-                        ]}
-                        accessibilityRole="tab"
-                        accessibilityState={{ selected: activeNavId === 'latest' }}
-                      >
-                        <Ionicons
-                          name="time-outline"
-                          size={14}
-                          color={activeNavId === 'latest' ? colors.accentForeground : colors.textSecondary}
-                        />
-                        <Text
-                          style={[
-                            styles.feedSegmentText,
-                            activeNavId === 'latest'
-                              ? [styles.feedSegmentTextActive, { color: colors.accentForeground }]
-                              : styles.feedSegmentTextInactive,
-                            activeNavId !== 'latest' && { color: colors.textSecondary },
-                          ]}
-                        >
-                          Latest Updates
-                        </Text>
-                      </Pressable>
-
-                      <Pressable
-                        onPress={handleSelectRecentlyAdded}
-                        style={[
-                          styles.feedSegmentPill,
-                          activeNavId === 'recently_added' && styles.feedSegmentPillActive,
-                          {
-                            backgroundColor: activeNavId === 'recently_added' ? colors.accent : colors.surfaceElevated,
-                            borderWidth: 0,
-                          },
-                        ]}
-                        accessibilityRole="tab"
-                        accessibilityState={{ selected: activeNavId === 'recently_added' }}
-                      >
-                        <Ionicons
-                          name="add-circle-outline"
-                          size={14}
-                          color={activeNavId === 'recently_added' ? colors.accentForeground : colors.textSecondary}
-                        />
-                        <Text
-                          style={[
-                            styles.feedSegmentText,
-                            activeNavId === 'recently_added'
-                              ? [styles.feedSegmentTextActive, { color: colors.accentForeground }]
-                              : styles.feedSegmentTextInactive,
-                            activeNavId !== 'recently_added' && { color: colors.textSecondary },
-                          ]}
-                        >
-                          Recently Added
-                        </Text>
-                      </Pressable>
-
-                    </View>
-                  </View>
-
-                  {/* ─── Dynamic Feed (Latest Updates / Recently Added) ─── */}
-                  <View
-                    nativeID="feed-section"
-                    {...(Platform.OS === 'web' ? { id: 'feed-section' } as any : {})}
-                    style={[styles.section, Platform.OS === 'web' && styles.webCenteredContent]}
-                  >
-                    <View style={styles.sectionHeader}>
-                      <View style={styles.sectionHeaderLeft}>
-                        <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                          {activeFeedTitle}
-                        </Text>
-                        <Text style={[styles.sectionItemCount, { color: colors.textMuted }]}>
-                          ({totalMangaCount.toLocaleString()} titles)
-                        </Text>
-                      </View>
-                    </View>
-
-                    {isLoadingFeed ? (
-                      <View style={styles.mangaGrid}>
-                        {Array.from({ length: 27 }).map((_, i) => (
-                          <View
-                            key={i}
-                            style={{
-                              width: Platform.OS === 'web' ? ('calc((100% - 80px) / 9)' as any) : 110,
-                              marginBottom: 12,
-                            }}
-                          >
-                            <Skeleton width="100%" height={160} borderRadius={Radius.md} />
+                  {Platform.OS !== 'web' && activeSeeAllSection === null ? (
+                    <View style={{ paddingTop: Spacing.sm }}>
+                      {/* 1. Top Rated Manga Carousel */}
+                      <View style={styles.carouselSection}>
+                        <View style={styles.carouselHeaderRow}>
+                          <View style={styles.carouselTitleLeft}>
+                            <Text style={[styles.carouselTitle, { color: colors.text }]}>Top Rated Manga</Text>
                           </View>
-                        ))}
-                      </View>
-                    ) : (
-                      <View style={[styles.mangaGrid, isChangingPage && { opacity: 0.45 }]}>
-                        {feedManga.map((manga, idx) => {
-                          const stat = mangaStatsMap[manga.id];
-                          const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
-                          return (
-                            <MangaCard
-                              key={manga.id}
-                              id={manga.id}
-                              index={idx}
-                              title={getMangaTitle(manga)}
-                              coverUrl={getMangaCover(manga)}
-                              author={extractAuthorName(manga)}
-                              rating={ratingVal}
-                              follows={stat?.follows ?? null}
-                              onPress={navigateToManga}
-                            />
-                          );
-                        })}
-                      </View>
-                    )}
-
-                    {/* Feed Grid Pagination */}
-                    {feedManga.length > 0 && totalMangaCount > PAGE_SIZE && (
-                      <View style={styles.paginationRow}>
-                        <Pressable
-                          disabled={currentPage <= 1 || isLoadingFeed}
-                          onPress={() => handlePageChange(currentPage - 1)}
-                          style={({ pressed }) => [
-                            styles.pageBtn,
-                            { backgroundColor: colors.surfaceElevated },
-                            (currentPage <= 1 || isLoadingFeed) && { opacity: 0.3 },
-                            pressed && { opacity: 0.7 },
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityLabel="Previous page"
-                        >
-                          <Ionicons name="chevron-back" size={15} color={colors.text} />
-                          <Text style={[styles.pageBtnText, { color: colors.text }]}>Prev</Text>
-                        </Pressable>
-
-                        <View style={styles.pageIndicatorPill}>
-                          <Text style={[styles.pageIndicatorText, { color: colors.text }]}>
-                            Page {currentPage} of {Math.ceil(totalMangaCount / PAGE_SIZE)}
-                          </Text>
+                          <Pressable
+                            onPress={() => handleOpenSeeAll('top_rated')}
+                            style={({ pressed }) => [styles.seeAllBtn, pressed && { opacity: 0.6 }]}
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel="See all top rated manga"
+                          >
+                            <Text style={[styles.seeAllBtnText, { color: colors.accent }]}>See All</Text>
+                            <Ionicons name="chevron-forward" size={14} color={colors.accent} />
+                          </Pressable>
                         </View>
 
-                        <Pressable
-                          disabled={currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isLoadingFeed}
-                          onPress={() => handlePageChange(currentPage + 1)}
-                          style={({ pressed }) => [
-                            styles.pageBtn,
-                            { backgroundColor: colors.surfaceElevated },
-                            (currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isLoadingFeed) && { opacity: 0.3 },
-                            pressed && { opacity: 0.7 },
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityLabel="Next page"
-                        >
-                          <Text style={[styles.pageBtnText, { color: colors.text }]}>Next</Text>
-                          <Ionicons name="chevron-forward" size={15} color={colors.text} />
-                        </Pressable>
+                        {isLoadingCarousels ? (
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
+                            {Array.from({ length: 4 }).map((_, i) => (
+                              <View key={i} style={{ width: 124 }}>
+                                <Skeleton width={124} height={178} borderRadius={Radius.md} />
+                                <View style={{ height: 6 }} />
+                                <Skeleton width={100} height={14} borderRadius={Radius.xs} />
+                              </View>
+                            ))}
+                          </ScrollView>
+                        ) : (
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
+                            {topRatedManga.map((manga, idx) => {
+                              const stat = mangaStatsMap[manga.id];
+                              const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
+                              return (
+                                <MangaCard
+                                  key={manga.id}
+                                  id={manga.id}
+                                  index={idx}
+                                  width={124}
+                                  title={getMangaTitle(manga)}
+                                  coverUrl={getMangaCover(manga)}
+                                  author={extractAuthorName(manga)}
+                                  rating={ratingVal}
+                                  follows={stat?.follows ?? null}
+                                  onPress={navigateToManga}
+                                />
+                              );
+                            })}
+                          </ScrollView>
+                        )}
                       </View>
-                    )}
-                  </View>
+
+                      {/* 2. Most Popular Carousel */}
+                      <View style={styles.carouselSection}>
+                        <View style={styles.carouselHeaderRow}>
+                          <View style={styles.carouselTitleLeft}>
+                            <Text style={[styles.carouselTitle, { color: colors.text }]}>Most Popular</Text>
+                          </View>
+                          <Pressable
+                            onPress={() => handleOpenSeeAll('most_popular')}
+                            style={({ pressed }) => [styles.seeAllBtn, pressed && { opacity: 0.6 }]}
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel="See all most popular manga"
+                          >
+                            <Text style={[styles.seeAllBtnText, { color: colors.accent }]}>See All</Text>
+                            <Ionicons name="chevron-forward" size={14} color={colors.accent} />
+                          </Pressable>
+                        </View>
+
+                        {isLoadingCarousels ? (
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
+                            {Array.from({ length: 4 }).map((_, i) => (
+                              <View key={i} style={{ width: 124 }}>
+                                <Skeleton width={124} height={178} borderRadius={Radius.md} />
+                                <View style={{ height: 6 }} />
+                                <Skeleton width={100} height={14} borderRadius={Radius.xs} />
+                              </View>
+                            ))}
+                          </ScrollView>
+                        ) : (
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
+                            {mostPopularManga.map((manga, idx) => {
+                              const stat = mangaStatsMap[manga.id];
+                              const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
+                              return (
+                                <MangaCard
+                                  key={manga.id}
+                                  id={manga.id}
+                                  index={idx}
+                                  width={124}
+                                  title={getMangaTitle(manga)}
+                                  coverUrl={getMangaCover(manga)}
+                                  author={extractAuthorName(manga)}
+                                  rating={ratingVal}
+                                  follows={stat?.follows ?? null}
+                                  onPress={navigateToManga}
+                                />
+                              );
+                            })}
+                          </ScrollView>
+                        )}
+                      </View>
+
+                      {/* 3. Recently Added Carousel */}
+                      <View style={styles.carouselSection}>
+                        <View style={styles.carouselHeaderRow}>
+                          <View style={styles.carouselTitleLeft}>
+                            <Text style={[styles.carouselTitle, { color: colors.text }]}>Recently Added</Text>
+                          </View>
+                          <Pressable
+                            onPress={() => handleOpenSeeAll('recently_added')}
+                            style={({ pressed }) => [styles.seeAllBtn, pressed && { opacity: 0.6 }]}
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel="See all recently added manga"
+                          >
+                            <Text style={[styles.seeAllBtnText, { color: colors.accent }]}>See All</Text>
+                            <Ionicons name="chevron-forward" size={14} color={colors.accent} />
+                          </Pressable>
+                        </View>
+
+                        {isLoadingCarousels ? (
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
+                            {Array.from({ length: 4 }).map((_, i) => (
+                              <View key={i} style={{ width: 124 }}>
+                                <Skeleton width={124} height={178} borderRadius={Radius.md} />
+                                <View style={{ height: 6 }} />
+                                <Skeleton width={100} height={14} borderRadius={Radius.xs} />
+                              </View>
+                            ))}
+                          </ScrollView>
+                        ) : (
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
+                            {recentlyAddedManga.map((manga, idx) => {
+                              const stat = mangaStatsMap[manga.id];
+                              const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
+                              return (
+                                <MangaCard
+                                  key={manga.id}
+                                  id={manga.id}
+                                  index={idx}
+                                  width={124}
+                                  title={getMangaTitle(manga)}
+                                  coverUrl={getMangaCover(manga)}
+                                  author={extractAuthorName(manga)}
+                                  rating={ratingVal}
+                                  follows={stat?.follows ?? null}
+                                  onPress={navigateToManga}
+                                />
+                              );
+                            })}
+                          </ScrollView>
+                        )}
+                      </View>
+
+                      {/* 4. Latest Updates Carousel */}
+                      <View style={styles.carouselSection}>
+                        <View style={styles.carouselHeaderRow}>
+                          <View style={styles.carouselTitleLeft}>
+                            <Text style={[styles.carouselTitle, { color: colors.text }]}>Latest Updates</Text>
+                          </View>
+                          <Pressable
+                            onPress={() => handleOpenSeeAll('latest')}
+                            style={({ pressed }) => [styles.seeAllBtn, pressed && { opacity: 0.6 }]}
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel="See all latest updates"
+                          >
+                            <Text style={[styles.seeAllBtnText, { color: colors.accent }]}>See All</Text>
+                            <Ionicons name="chevron-forward" size={14} color={colors.accent} />
+                          </Pressable>
+                        </View>
+
+                        {isLoadingCarousels ? (
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
+                            {Array.from({ length: 4 }).map((_, i) => (
+                              <View key={i} style={{ width: 124 }}>
+                                <Skeleton width={124} height={178} borderRadius={Radius.md} />
+                                <View style={{ height: 6 }} />
+                                <Skeleton width={100} height={14} borderRadius={Radius.xs} />
+                              </View>
+                            ))}
+                          </ScrollView>
+                        ) : (
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
+                            {latestUpdatesManga.map((manga, idx) => {
+                              const stat = mangaStatsMap[manga.id];
+                              const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
+                              return (
+                                <MangaCard
+                                  key={manga.id}
+                                  id={manga.id}
+                                  index={idx}
+                                  width={124}
+                                  title={getMangaTitle(manga)}
+                                  coverUrl={getMangaCover(manga)}
+                                  author={extractAuthorName(manga)}
+                                  rating={ratingVal}
+                                  follows={stat?.follows ?? null}
+                                  onPress={navigateToManga}
+                                />
+                              );
+                            })}
+                          </ScrollView>
+                        )}
+                      </View>
+                    </View>
+                  ) : (
+                    <>
+                      {/* Web Segment Switcher or Mobile See-All Header */}
+                      {Platform.OS === 'web' ? (
+                        <View style={[styles.feedSegmentContainer, styles.webCenteredContent]}>
+                          <View style={styles.feedSegmentTrack}>
+                            <Pressable
+                              onPress={handleSelectLatest}
+                              style={[
+                                styles.feedSegmentPill,
+                                activeNavId === 'latest' && styles.feedSegmentPillActive,
+                                {
+                                  backgroundColor: activeNavId === 'latest' ? colors.accent : colors.surfaceElevated,
+                                  borderWidth: 0,
+                                },
+                              ]}
+                              accessibilityRole="tab"
+                              accessibilityState={{ selected: activeNavId === 'latest' }}
+                            >
+                              <Ionicons
+                                name="time-outline"
+                                size={14}
+                                color={activeNavId === 'latest' ? colors.accentForeground : colors.textSecondary}
+                              />
+                              <Text
+                                style={[
+                                  styles.feedSegmentText,
+                                  activeNavId === 'latest'
+                                    ? [styles.feedSegmentTextActive, { color: colors.accentForeground }]
+                                    : styles.feedSegmentTextInactive,
+                                  activeNavId !== 'latest' && { color: colors.textSecondary },
+                                ]}
+                              >
+                                Latest Updates
+                              </Text>
+                            </Pressable>
+
+                            <Pressable
+                              onPress={handleSelectRecentlyAdded}
+                              style={[
+                                styles.feedSegmentPill,
+                                activeNavId === 'recently_added' && styles.feedSegmentPillActive,
+                                {
+                                  backgroundColor: activeNavId === 'recently_added' ? colors.accent : colors.surfaceElevated,
+                                  borderWidth: 0,
+                                },
+                              ]}
+                              accessibilityRole="tab"
+                              accessibilityState={{ selected: activeNavId === 'recently_added' }}
+                            >
+                              <Ionicons
+                                name="add-circle-outline"
+                                size={14}
+                                color={activeNavId === 'recently_added' ? colors.accentForeground : colors.textSecondary}
+                              />
+                              <Text
+                                style={[
+                                  styles.feedSegmentText,
+                                  activeNavId === 'recently_added'
+                                    ? [styles.feedSegmentTextActive, { color: colors.accentForeground }]
+                                    : styles.feedSegmentTextInactive,
+                                  activeNavId !== 'recently_added' && { color: colors.textSecondary },
+                                ]}
+                              >
+                                Recently Added
+                              </Text>
+                            </Pressable>
+                          </View>
+                        </View>
+                      ) : (
+                        <View style={styles.seeAllHeaderRow}>
+                          <Pressable
+                            onPress={() => setActiveSeeAllSection(null)}
+                            style={({ pressed }) => [styles.seeAllBackBtn, pressed && { opacity: 0.6 }]}
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel="Back to Discover"
+                          >
+                            <Ionicons name="chevron-back" size={22} color={colors.accent} />
+                          </Pressable>
+                          <View style={styles.seeAllTitleWrap}>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>{activeFeedTitle}</Text>
+                            <Text style={[styles.sectionItemCount, { color: colors.textMuted }]}>
+                              ({totalMangaCount.toLocaleString()} titles)
+                            </Text>
+                          </View>
+                        </View>
+                      )}
+
+                      {/* ─── Dynamic Feed (Latest Updates / Recently Added) ─── */}
+                      <View
+                        nativeID="feed-section"
+                        {...(Platform.OS === 'web' ? { id: 'feed-section' } as any : {})}
+                        style={[styles.section, Platform.OS === 'web' && styles.webCenteredContent]}
+                      >
+                        {Platform.OS === 'web' && (
+                          <View style={styles.sectionHeader}>
+                            <View style={styles.sectionHeaderLeft}>
+                              <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                                {activeFeedTitle}
+                              </Text>
+                              <Text style={[styles.sectionItemCount, { color: colors.textMuted }]}>
+                                ({totalMangaCount.toLocaleString()} titles)
+                              </Text>
+                            </View>
+                          </View>
+                        )}
+
+                        {isLoadingFeed ? (
+                          <View style={styles.mangaGrid}>
+                            {Array.from({ length: 27 }).map((_, i) => (
+                              <View
+                                key={i}
+                                style={{
+                                  width: Platform.OS === 'web' ? ('calc((100% - 80px) / 9)' as any) : 110,
+                                  marginBottom: 12,
+                                }}
+                              >
+                                <Skeleton width="100%" height={160} borderRadius={Radius.md} />
+                              </View>
+                            ))}
+                          </View>
+                        ) : (
+                          <View style={[styles.mangaGrid, isChangingPage && { opacity: 0.45 }]}>
+                            {feedManga.map((manga, idx) => {
+                              const stat = mangaStatsMap[manga.id];
+                              const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
+                              return (
+                                <MangaCard
+                                  key={manga.id}
+                                  id={manga.id}
+                                  index={idx}
+                                  title={getMangaTitle(manga)}
+                                  coverUrl={getMangaCover(manga)}
+                                  author={extractAuthorName(manga)}
+                                  rating={ratingVal}
+                                  follows={stat?.follows ?? null}
+                                  onPress={navigateToManga}
+                                />
+                              );
+                            })}
+                          </View>
+                        )}
+
+                        {/* Feed Grid Pagination */}
+                        {feedManga.length > 0 && totalMangaCount > PAGE_SIZE && (
+                          <View style={styles.paginationRow}>
+                            <Pressable
+                              disabled={currentPage <= 1 || isLoadingFeed}
+                              onPress={() => handlePageChange(currentPage - 1)}
+                              style={({ pressed }) => [
+                                styles.pageBtn,
+                                { backgroundColor: colors.surfaceElevated },
+                                (currentPage <= 1 || isLoadingFeed) && { opacity: 0.3 },
+                                pressed && { opacity: 0.7 },
+                              ]}
+                              accessibilityRole="button"
+                              accessibilityLabel="Previous page"
+                            >
+                              <Ionicons name="chevron-back" size={15} color={colors.text} />
+                              <Text style={[styles.pageBtnText, { color: colors.text }]}>Prev</Text>
+                            </Pressable>
+
+                            <View style={styles.pageIndicatorPill}>
+                              <Text style={[styles.pageIndicatorText, { color: colors.text }]}>
+                                Page {currentPage} of {Math.ceil(totalMangaCount / PAGE_SIZE)}
+                              </Text>
+                            </View>
+
+                            <Pressable
+                              disabled={currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isLoadingFeed}
+                              onPress={() => handlePageChange(currentPage + 1)}
+                              style={({ pressed }) => [
+                                styles.pageBtn,
+                                { backgroundColor: colors.surfaceElevated },
+                                (currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isLoadingFeed) && { opacity: 0.3 },
+                                pressed && { opacity: 0.7 },
+                              ]}
+                              accessibilityRole="button"
+                              accessibilityLabel="Next page"
+                            >
+                              <Text style={[styles.pageBtnText, { color: colors.text }]}>Next</Text>
+                              <Ionicons name="chevron-forward" size={15} color={colors.text} />
+                            </Pressable>
+                          </View>
+                        )}
+                      </View>
+                    </>
+                  )}
                 </>
               )}
 
@@ -2185,6 +2663,67 @@ const styles = StyleSheet.create({
   layoutRow: {
     flex: 1,
     flexDirection: 'row',
+  },
+
+  /* Mobile Multi-Carousel Discover Styles */
+  carouselSection: {
+    marginBottom: Spacing.xl,
+  },
+  carouselHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.md,
+    marginBottom: Spacing.sm,
+  },
+  carouselTitleLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  carouselTitle: {
+    fontSize: Typography.sizes.title3,
+    fontWeight: Typography.weights.bold,
+    letterSpacing: -0.3,
+  },
+  seeAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingVertical: 4,
+    paddingLeft: 4,
+    paddingRight: 0,
+  },
+  seeAllBtnText: {
+    fontSize: Typography.sizes.caption,
+    fontWeight: Typography.weights.semibold,
+  },
+  carouselContent: {
+    paddingHorizontal: Spacing.md,
+    gap: CARD_GAP,
+  },
+  seeAllHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    gap: 4,
+  },
+  seeAllBackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingRight: 0,
+    paddingLeft: 0,
+  },
+  seeAllBackText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  seeAllTitleWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
   },
 
   /* Embedded Left Sidebar Styles (Non-Modal) */
@@ -2280,9 +2819,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: Spacing.md,
     paddingTop: Spacing.sm,
-    paddingBottom: Spacing.xs,
+    paddingBottom: Spacing.sm,
   },
   headerLeft: {
     flexDirection: 'row',
@@ -2365,13 +2904,131 @@ const styles = StyleSheet.create({
 
   /* Hero Section (MangaDex Popular New Titles) */
   heroSection: {
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: Platform.OS === 'web' ? 0 : Spacing.md,
+    paddingTop: Platform.OS === 'web' ? 0 : Spacing.xs,
     marginBottom: Spacing['2xl'],
   },
   heroSectionTitle: {
     fontSize: Typography.sizes.title3,
     fontWeight: Typography.weights.bold,
     marginBottom: Spacing.md,
+  },
+  /* Mobile Featured Banner (Poster Card with Bottom-Left Overlay) */
+  mobileHeroCard: {
+    width: '100%',
+    height: 380,
+    borderRadius: 22,
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: '#18181B',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  mobileHeroImage: {
+    width: '100%',
+    height: '100%',
+  },
+  mobileHeroGradient: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  mobileHeroTopControls: {
+    position: 'absolute',
+    top: 14,
+    right: 14,
+    zIndex: 10,
+  },
+  mobileHeroSlideDots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  mobileHeroDot: {
+    height: 4,
+    borderRadius: 2,
+  },
+  mobileHeroDotActive: {
+    width: 16,
+    backgroundColor: '#FFFFFF',
+  },
+  mobileHeroDotInactive: {
+    width: 5,
+    backgroundColor: 'rgba(255, 255, 255, 0.4)',
+  },
+  mobileHeroOverlayContent: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    paddingTop: 40,
+  },
+  mobileHeroAuthor: {
+    color: '#D4D4D8',
+    fontSize: 13,
+    fontWeight: '500',
+    letterSpacing: 0.2,
+    marginBottom: 4,
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  mobileHeroTitle: {
+    color: '#FFFFFF',
+    fontSize: 21,
+    fontWeight: '700',
+    lineHeight: 26,
+    letterSpacing: -0.3,
+    marginBottom: 8,
+    textShadowColor: 'rgba(0, 0, 0, 0.85)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  mobileHeroTagRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 8,
+  },
+  mobileHeroTagPill: {
+    backgroundColor: 'rgba(28, 28, 34, 0.75)',
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  mobileHeroTagText: {
+    color: '#F4F4F5',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  mobileHeroRatingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  mobileHeroRatingVal: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  mobileHeroRatingCount: {
+    color: '#A1A1AA',
+    fontSize: 12,
+    fontWeight: '400',
   },
   heroBannerFrame: {
     borderRadius: Radius.xl,
@@ -2540,9 +3197,9 @@ const styles = StyleSheet.create({
     zIndex: 998,
     ...(Platform.OS === 'web'
       ? ({
-          backdropFilter: 'blur(1px)',
-          transition: 'background-color 0.2s ease, opacity 0.2s ease',
-        } as any)
+        backdropFilter: 'blur(1px)',
+        transition: 'background-color 0.2s ease, opacity 0.2s ease',
+      } as any)
       : {}),
   },
   webDropdownOverlayContainer: {
@@ -2933,7 +3590,7 @@ const styles = StyleSheet.create({
   flatTagText: { color: '#A1A1AA', fontSize: 9, fontWeight: Typography.weights.medium },
 
   /* Trending spotlight, intentionally image-led and container-free */
-  heroSkeletonWrap: { paddingHorizontal: Spacing.lg },
+  heroSkeletonWrap: { paddingHorizontal: 0 },
   heroInnerContainer: { flex: 1, padding: Spacing.lg },
   trendingEyebrowRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.lg },
   heroHeaderControls: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },

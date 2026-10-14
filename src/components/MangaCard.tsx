@@ -27,6 +27,7 @@ interface MangaCardProps {
   unreadCount?: number;
   index?: number;
   onPress: (id: string) => void;
+  width?: number | string;
 }
 
 function formatStatNumber(num?: number | null): string | null {
@@ -46,6 +47,7 @@ function MangaCardComponent({
   unreadCount,
   index = 0,
   onPress,
+  width,
 }: MangaCardProps) {
   const colors = useThemeColors();
   const { width: windowWidth } = useWindowDimensions();
@@ -67,7 +69,7 @@ function MangaCardComponent({
   const totalGap = (columns - 1) * CARD_GAP;
   const nativeWidth = Math.floor((availableContentWidth - horizontalPadding - totalGap - 2) / columns);
 
-  const cardWidth = Platform.OS === 'web' ? webWidth : nativeWidth;
+  const cardWidth = width ?? (Platform.OS === 'web' ? webWidth : nativeWidth);
   const cardHeight = typeof cardWidth === 'number' ? Math.floor(cardWidth * 1.44) : undefined;
 
   const formattedFollows = formatStatNumber(follows);

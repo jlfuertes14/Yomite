@@ -20,7 +20,8 @@ import { Radius, Spacing, Typography } from '../../constants/Colors';
 import { getTags } from '../api/mangadex';
 import { useThemeColors } from '../hooks/useThemeColor';
 import type { MangaTag, SearchFilters } from '../types';
-import { MobileModalRoot, MobileSheetPanel } from './MobileBottomSheet';
+import { MobileModalRoot, MobileCurtainPanel } from './MobileBottomSheet';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface AdvancedSearchModalProps {
   visible: boolean;
@@ -88,6 +89,7 @@ export function AdvancedSearchModal({
   onRandomManga,
 }: AdvancedSearchModalProps) {
   const colors = useThemeColors();
+  const insets = useSafeAreaInsets();
 
   const [title, setTitle] = useState('');
   const [tags, setTags] = useState<MangaTag[]>([]);
@@ -255,14 +257,63 @@ export function AdvancedSearchModal({
       ]}
     >
       {/* Modal Header */}
-      <View style={[styles.header, { borderBottomColor: colors.border }]}>
+      <View
+        style={[
+          styles.header,
+          {
+            borderBottomColor: colors.border,
+            paddingTop: !isWeb ? Math.max(insets.top, 10) : Spacing.md,
+          },
+        ]}
+      >
         <Text style={[styles.headerTitle, { color: colors.text }]}>
-          Advanced Search
+          Search & Filters
         </Text>
         <View style={styles.headerRight}>
-          <Pressable onPress={handleReset} style={styles.resetBtn}>
+          <Pressable onPress={handleReset} style={styles.resetBtn} hitSlop={8}>
             <Text style={[styles.resetBtnText, { color: colors.accent }]}>Reset</Text>
           </Pressable>
+          {!isWeb && (
+            <Pressable
+              onPress={onClose}
+              hitSlop={8}
+              style={styles.closeBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Close search curtain"
+            >
+              <Ionicons name="close" size={22} color={colors.text} />
+            </Pressable>
+          )}
+        </View>
+      </View>
+
+      {/* Prominent Search Bar (Pinned at top of curtain) */}
+      <View style={styles.pinnedSearchRow}>
+        <View style={[styles.searchBarContainer, { backgroundColor: colors.surfaceElevated }]}>
+          <Ionicons name="search-outline" size={18} color={colors.textMuted} />
+          <TextInput
+            style={[styles.searchBarInput, { color: colors.text }]}
+            placeholder="Search titles, authors, keywords…"
+            placeholderTextColor={colors.textMuted}
+            value={title}
+            multiline={false}
+            numberOfLines={1}
+            onChangeText={(text) => setTitle(text.replace(/[\r\n]+/g, ' '))}
+            returnKeyType="search"
+            onSubmitEditing={handleApply}
+            autoCorrect={false}
+          />
+          {title.length > 0 && (
+            <Pressable
+              onPress={() => setTitle('')}
+              hitSlop={8}
+              style={{ padding: 4 }}
+              accessibilityRole="button"
+              accessibilityLabel="Clear search input"
+            >
+              <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+            </Pressable>
+          )}
         </View>
       </View>
 
@@ -275,17 +326,6 @@ export function AdvancedSearchModal({
         keyboardShouldPersistTaps="handled"
         directionalLockEnabled
       >
-        {/* Title Input */}
-        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Title / Keywords</Text>
-        <TextInput
-          style={[styles.input, { color: colors.text, backgroundColor: colors.surfaceElevated }]}
-          placeholder="Search title or keywords..."
-          placeholderTextColor={colors.textMuted}
-          value={title}
-          multiline={false}
-          numberOfLines={1}
-          onChangeText={(text) => setTitle(text.replace(/[\r\n]+/g, ' '))}
-        />
 
         {/* MangaDex Official 13 Sort Options */}
         <View style={styles.sortHeaderRow}>
@@ -511,17 +551,17 @@ export function AdvancedSearchModal({
           {modalBody}
         </View>
       ) : (
-        <MobileModalRoot style={styles.mobileOverlay}>
+        <MobileModalRoot style={styles.mobileCurtainOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-          <MobileSheetPanel
+          <MobileCurtainPanel
             visible={visible}
             onClose={onClose}
             showHandle
             gestureHandleOnly
-            style={[styles.mobileSheetPanel, { backgroundColor: colors.surface }]}
+            style={[styles.mobileCurtainPanel, { backgroundColor: colors.surface }]}
           >
             {modalBody}
-          </MobileSheetPanel>
+          </MobileCurtainPanel>
         </MobileModalRoot>
       )}
     </Modal>
@@ -536,19 +576,42 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: Spacing.md,
   },
-  mobileOverlay: {
+  mobileCurtainOverlay: {
     flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0, 0, 0, 0.48)',
+    justifyContent: 'flex-start',
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
   },
-  mobileSheetPanel: {
+  mobileCurtainPanel: {
     width: '100%',
     height: '70%',
     maxHeight: '70%',
-    alignSelf: 'flex-end',
-    borderTopLeftRadius: Radius.xl,
-    borderTopRightRadius: Radius.xl,
+    alignSelf: 'flex-start',
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
     overflow: 'hidden',
+  },
+  pinnedSearchRow: {
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.sm,
+  },
+  searchBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    height: 44,
+    gap: Spacing.sm,
+  },
+  searchBarInput: {
+    flex: 1,
+    fontSize: 16,
+    height: '100%',
+    paddingVertical: 0,
+  },
+  closeBtn: {
+    padding: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   modalCard: {
     width: '100%',
@@ -585,9 +648,6 @@ const styles = StyleSheet.create({
   resetBtnText: {
     fontSize: Typography.sizes.footnote,
     fontWeight: Typography.weights.semibold,
-  },
-  closeBtn: {
-    padding: 4,
   },
   scrollBody: {
     flex: 1,

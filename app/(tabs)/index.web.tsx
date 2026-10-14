@@ -90,10 +90,10 @@ const formatCompactNumber = (num: number): string => {
   return num.toLocaleString();
 };
 
-const getMangaCover = (manga: Manga): string | null => {
+const getMangaCover = (manga: Manga, size: '256' | '512' | 'original' = '512'): string | null => {
   const fileName = extractCoverFileName(manga);
   if (!fileName) return null;
-  return getCoverUrl(manga.id, fileName, '256');
+  return getCoverUrl(manga.id, fileName, size);
 };
 
 interface WebHeaderProps {
@@ -1438,50 +1438,6 @@ export default function DiscoverScreen() {
               {isShowingSearch ? (
                 /* ─── Search Results ─── */
                 <View style={[styles.section, Platform.OS === 'web' && styles.webCenteredContent]}>
-                  {/* Active Filter Pill Badge on top of Search Results */}
-                  {activeFilters !== null && (
-                    <View style={styles.searchResultsFilterRow}>
-                      <View
-                        style={[
-                          styles.activeFilterPill,
-                          {
-                            backgroundColor: colors.accentSubtle,
-                            borderWidth: 0,
-                          },
-                        ]}
-                      >
-                        <Pressable
-                          onPress={() => setAdvancedSearchVisible(true)}
-                          style={({ pressed }) => [
-                            styles.activeFilterPillBody,
-                            pressed && { opacity: 0.75 },
-                            Platform.OS === 'web' && { cursor: 'pointer' },
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityLabel="Edit Advanced Filters"
-                        >
-                          <Ionicons name="options" size={13} color={colors.text} />
-                          <Text style={[styles.activeFilterText, { color: colors.text }]}>
-                            Advanced Filters Active
-                          </Text>
-                        </Pressable>
-
-                        <Pressable
-                          onPress={handleClearAdvancedSearch}
-                          hitSlop={8}
-                          style={({ pressed }) => [
-                            styles.activeFilterCloseBtn,
-                            pressed && { opacity: 0.5 },
-                            Platform.OS === 'web' && { cursor: 'pointer' },
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityLabel="Clear filters"
-                        >
-                          <Ionicons name="close" size={14} color={colors.textMuted} />
-                        </Pressable>
-                      </View>
-                    </View>
-                  )}
 
                   <View style={styles.sectionHeader}>
                     <Text style={[styles.sectionTitle, { color: colors.text }]}>Search Results</Text>
@@ -1686,9 +1642,9 @@ export default function DiscoverScreen() {
                         ]}
                       >
                         {/* Backdrop Cover Image Spanning Full Width (Unblurred on Web, Blurred on Mobile) */}
-                        {getMangaCover(currentHeroManga) && (
+                        {getMangaCover(currentHeroManga, 'original') && (
                           <Image
-                            source={{ uri: getMangaCover(currentHeroManga)! }}
+                            source={{ uri: getMangaCover(currentHeroManga, 'original')! }}
                             style={[styles.heroBackdrop, Platform.OS === 'web' && { opacity: 0.55 }]}
                             contentFit="cover"
                             blurRadius={Platform.OS === 'web' ? 0 : 12}

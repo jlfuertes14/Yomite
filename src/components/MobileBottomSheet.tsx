@@ -290,6 +290,93 @@ export const MobileSideSheetPanel = forwardRef<MobileSheetPanelRef, MobileSheetP
   );
 });
 
+/** Top-edge curtain counterpart for search & filter sheets; it slides down from the top. */
+export const MobileCurtainPanel = forwardRef<MobileSheetPanelRef, MobileSheetPanelProps>(function MobileCurtainPanel(
+  { visible, onClose, children, style, showHandle = true, gestureHandleOnly = false },
+  ref,
+) {
+  const { height } = useWindowDimensions();
+  const translateY = useSharedValue(-height);
+  const startY = useSharedValue(0);
+  const isClosing = useSharedValue(false);
+
+  const closeWithAnimation = () => {
+    if (isClosing.value) return;
+    isClosing.value = true;
+    cancelAnimation(translateY);
+    translateY.value = withTiming(-height, { duration: 180 }, (finished) => {
+      if (finished) runCloseCallback(onClose);
+    });
+  };
+
+  useImperativeHandle(ref, () => ({ close: closeWithAnimation }), [height]);
+
+  useEffect(() => {
+    if (!visible) return;
+    isClosing.value = false;
+    translateY.value = -height;
+    translateY.value = withSpring(0, SHEET_SPRING);
+  }, [height, isClosing, translateY, visible]);
+
+  const panGesture = Gesture.Pan()
+    .activeOffsetY([-1000, -6])
+    .failOffsetX([-24, 24])
+    .onStart(() => {
+      cancelAnimation(translateY);
+      startY.value = translateY.value;
+    })
+    .onUpdate((event) => {
+      if (!isClosing.value) {
+        translateY.value = Math.min(0, startY.value + event.translationY);
+      }
+    })
+    .onEnd((event) => {
+      if (event.translationY < -DISMISS_DISTANCE || event.velocityY < -DISMISS_VELOCITY) {
+        isClosing.value = true;
+        translateY.value = withTiming(-height, { duration: 180 }, (finished) => {
+          if (finished) runCloseCallback(onClose);
+        });
+      } else {
+        translateY.value = withSpring(0, { ...SHEET_SPRING, velocity: event.velocityY });
+      }
+    });
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
+
+  if (Platform.OS === 'web') return <View style={style}>{children}</View>;
+
+  if (gestureHandleOnly) {
+    return (
+      <Animated.View style={[style, animatedStyle]}>
+        {children}
+        {showHandle && (
+          <GestureDetector gesture={panGesture}>
+            <View style={styles.handleHitArea}>
+              <View style={styles.handle} />
+            </View>
+          </GestureDetector>
+        )}
+      </Animated.View>
+    );
+  }
+
+  return (
+    <GestureDetector gesture={panGesture}>
+      <Animated.View style={[style, animatedStyle]}>
+        {children}
+        {showHandle && (
+          <View style={styles.handleHitArea}>
+            <View style={styles.handle} />
+          </View>
+        )}
+      </Animated.View>
+    </GestureDetector>
+  );
+});
+
+
 const styles = StyleSheet.create({
   root: {
     flex: 1,
