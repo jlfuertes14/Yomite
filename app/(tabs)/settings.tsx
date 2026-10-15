@@ -22,24 +22,24 @@ import { Radius, ReaderThemes, Spacing, Typography } from '../../constants/Color
 import { AnimatedPressable } from '../../src/components/AnimatedPressable';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
 import { YomiteMascotIcon } from '../../src/components/YomiteMascotIcon';
-import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { useColorScheme } from '../../src/hooks/useColorScheme';
+import { useThemeColors } from '../../src/hooks/useThemeColor';
 import {
   checkLibraryForUpdates,
   getBackgroundScanConfig,
+  getLatestChapter,
   registerLibraryScanTask,
   saveBackgroundScanConfig,
   unregisterLibraryScanTask,
-  getLatestChapter,
 } from '../../src/services/backgroundScanner';
 import {
   requestNotificationPermissions,
   sendNewChapterNotification,
 } from '../../src/services/notificationService';
-import { useLibraryStore } from '../../src/store/libraryStore';
 import { getUniversalMangaChapters, isExternalSource } from '../../src/sources/adapter';
 import { SourceManager } from '../../src/sources/SourceManager';
 import { useHistoryStore } from '../../src/store/historyStore';
+import { useLibraryStore } from '../../src/store/libraryStore';
 import { useReaderStore } from '../../src/store/readerStore';
 import {
   AppThemeMode,
@@ -1087,7 +1087,7 @@ export default function SettingsScreen() {
 
           {/* App Info Footer */}
           <View style={styles.footer}>
-            <Text style={[styles.footerTitle, { color: colors.textMuted }]}>Yomite Manga Reader v1.2.3</Text>
+            <Text style={[styles.footerTitle, { color: colors.textMuted }]}>Yomite Manga Reader v1.2.5</Text>
             <Text style={[styles.footerSubtitle, { color: colors.textMuted }]}>
               Powered by MangaDex API, Kotatsu and Supabase Cloud Sync
             </Text>

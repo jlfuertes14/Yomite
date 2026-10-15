@@ -55,8 +55,8 @@ import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { syncUserDataWithCloud } from '../../src/services/cloudSync';
 import { getUserAvatarUrl, getUserDisplayName, getUserHandle, useUserStore } from '../../src/store/userStore';
 import type { Manga, SearchFilters } from '../../src/types';
-import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 import { BannerCacheManager } from '../../src/utils/bannerCache';
+import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 
 type VectorIcon = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -731,6 +731,10 @@ export default function DiscoverScreen() {
   const { isOffline } = useNetworkStatus();
   const { width: windowWidth } = useWindowDimensions();
   const isDesktop = windowWidth >= 768;
+  const heroCardWidth = windowWidth - Spacing.md * 2;
+  const HERO_CARD_GAP = 24;
+  const mobileHeroScrollRef = useRef<ScrollView>(null);
+  const isUserInteractingHeroRef = useRef(false);
 
   // Responsive Layout Constants
   const sidebarWidth = isDesktop ? 260 : 0;
@@ -1094,6 +1098,7 @@ export default function DiscoverScreen() {
   }, [fetchData]);
 
   const nextHeroRef = useRef<() => void>(() => { });
+  const prevHeroRef = useRef<() => void>(() => { });
   const [isScreenFocused, setIsScreenFocused] = useState(true);
 
   useFocusEffect(
@@ -1106,16 +1111,27 @@ export default function DiscoverScreen() {
     }, [])
   );
 
-  // Auto-advance hero banner every 7 seconds with slide animation only while screen is focused
+  // Auto-advance hero banner every 7 seconds: instant state change with NO swipe animation if not swiped by user
   useEffect(() => {
-    if (popular.length === 0 || !isScreenFocused) return;
+    if (popular.length <= 1 || !isScreenFocused) return;
     const interval = setInterval(() => {
-      if (nextHeroRef.current) {
-        nextHeroRef.current();
+      if (Platform.OS !== 'web') {
+        if (isUserInteractingHeroRef.current) return;
+        const count = Math.min(popular.length, POPULAR_TOP_LIMIT);
+        const snapInterval = heroCardWidth + HERO_CARD_GAP;
+        setHeroIndex((prev) => {
+          const nextIdx = (prev + 1) % count;
+          mobileHeroScrollRef.current?.scrollTo({ x: nextIdx * snapInterval, animated: false });
+          return nextIdx;
+        });
+      } else {
+        if (nextHeroRef.current) {
+          nextHeroRef.current();
+        }
       }
     }, 7000);
     return () => clearInterval(interval);
-  }, [popular.length, isScreenFocused]);
+  }, [popular.length, isScreenFocused, heroCardWidth, HERO_CARD_GAP]);
 
   const isShowingSearch =
     activeNavId === 'search_results' ||
@@ -1381,10 +1397,17 @@ export default function DiscoverScreen() {
   const heroOpacityAnim = useRef(new Animated.Value(1)).current;
   const isAnimatingHero = useRef(false);
 
+  const popularRef = useRef<Manga[]>([]);
+  useEffect(() => {
+    popularRef.current = popular;
+  }, [popular]);
+
   const changeHeroIndex = useCallback((newIndex: number, direction: 'next' | 'prev') => {
     if (popular.length === 0) return;
     if (Platform.OS !== 'web') {
+      const snapInterval = heroCardWidth + HERO_CARD_GAP;
       setHeroIndex(newIndex);
+      mobileHeroScrollRef.current?.scrollTo({ x: newIndex * snapInterval, animated: false });
       return;
     }
     if (isAnimatingHero.current) return;
@@ -1426,7 +1449,7 @@ export default function DiscoverScreen() {
         isAnimatingHero.current = false;
       });
     });
-  }, [popular.length, heroSlideAnim, heroOpacityAnim]);
+  }, [popular.length, heroCardWidth, HERO_CARD_GAP, heroSlideAnim, heroOpacityAnim]);
 
   const nextHero = useCallback(() => {
     if (popular.length === 0) return;
@@ -1442,7 +1465,14 @@ export default function DiscoverScreen() {
 
   useEffect(() => {
     nextHeroRef.current = nextHero;
-  }, [nextHero]);
+    prevHeroRef.current = prevHero;
+  }, [nextHero, prevHero]);
+
+  const popularSlice = useMemo(() => popular.slice(0, POPULAR_TOP_LIMIT), [popular]);
+  const loopHeroCards = useMemo(
+    () => (popularSlice.length > 1 ? [...popularSlice, popularSlice[0]] : popularSlice),
+    [popularSlice]
+  );
 
   const currentHeroManga = popular[heroIndex] ?? null;
   const currentHeroStats = currentHeroManga ? mangaStatsMap[currentHeroManga.id] : null;
@@ -1477,7 +1507,7 @@ export default function DiscoverScreen() {
     });
   }, [currentHeroManga]);
 
-  const heroTouchStartX = useRef(0);
+
 
   const mobileHeroRatingDisplay = useMemo(() => {
     if (currentHeroRating == null || isNaN(currentHeroRating)) return null;
@@ -1901,312 +1931,383 @@ export default function DiscoverScreen() {
                   {/* ─── Trending Spotlight Hero (Flat & Premium, Container-Free) ─── */}
                   {(Platform.OS === 'web' || activeSeeAllSection === null) && (
                     <View style={[styles.heroSection, Platform.OS === 'web' && styles.webHeroSection]}>
-                    {isLoadingPopular || !currentHeroManga ? (
-                      <View style={[styles.heroSkeletonWrap, Platform.OS === 'web' && styles.webCenteredContent]}>
-                        <Skeleton width="100%" height={Platform.OS === 'web' ? 340 : 380} borderRadius={Platform.OS === 'web' ? Radius.md : 22} />
-                      </View>
-                    ) : Platform.OS !== 'web' ? (
-                      /* Mobile Hero Card: Full Cover Art Poster with Bottom-Left Text Overlay */
-                      <Pressable
-                        onPress={() => navigateToManga(currentHeroManga.id)}
-                        onTouchStart={(e) => {
-                          heroTouchStartX.current = e.nativeEvent.pageX;
-                        }}
-                        onTouchEnd={(e) => {
-                          const diff = e.nativeEvent.pageX - heroTouchStartX.current;
-                          if (diff > 45) {
-                            prevHero();
-                          } else if (diff < -45) {
-                            nextHero();
-                          }
-                        }}
-                        style={({ pressed }) => [
-                          styles.mobileHeroCard,
-                          pressed && { opacity: 0.94 },
-                        ]}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Featured: ${currentHeroTitle}`}
-                      >
-                        {/* 1. Full-Bleed High-Res Background Image */}
-                        {currentHeroCover ? (
-                          <Image
-                            key={`hero_banner_${currentHeroManga.id}_${screenFocusKey}`}
-                            source={{
-                              uri: currentHeroCover,
+                      {isLoadingPopular || !currentHeroManga ? (
+                        <View style={[styles.heroSkeletonWrap, Platform.OS === 'web' && styles.webCenteredContent]}>
+                          <Skeleton width="100%" height={Platform.OS === 'web' ? 340 : 380} borderRadius={Platform.OS === 'web' ? Radius.md : 22} />
+                        </View>
+                      ) : Platform.OS !== 'web' ? (
+                        /* Mobile Hero Card: Native Horizontal Pager with Spaced Cards & Infinite Loop */
+                        <View style={styles.mobileHeroCardWrap}>
+                          <ScrollView
+                            ref={mobileHeroScrollRef}
+                            horizontal
+                            pagingEnabled={false}
+                            showsHorizontalScrollIndicator={false}
+                            decelerationRate="fast"
+                            snapToInterval={heroCardWidth + HERO_CARD_GAP}
+                            snapToAlignment="start"
+                            disableIntervalMomentum={true}
+                            bounces={false}
+                            nestedScrollEnabled={true}
+                            onScrollBeginDrag={() => {
+                              isUserInteractingHeroRef.current = true;
                             }}
-                            placeholder={
-                              currentHeroPlaceholder
-                                ? { uri: currentHeroPlaceholder }
-                                : undefined
-                            }
-                            placeholderContentFit="cover"
-                            style={styles.mobileHeroImage}
-                            contentFit="cover"
-                            contentPosition="top"
-                            priority="high"
-                            cachePolicy="memory-disk"
-                            transition={150}
-                          />
-                        ) : (
-                          <View style={[styles.mobileHeroImage, styles.trendingCoverPlaceholder]}>
-                            <Ionicons name="book-outline" size={48} color="#71717A" />
-                          </View>
-                        )}
-
-                        {/* 2. Seamless Bottom-Fade Gradient */}
-                        <LinearGradient
-                          colors={[
-                            'transparent',
-                            'rgba(15, 17, 23, 0.05)',
-                            'rgba(15, 17, 23, 0.60)',
-                            'rgba(15, 17, 23, 0.94)',
-                          ]}
-                          locations={[0, 0.38, 0.68, 1.0]}
-                          style={styles.mobileHeroGradient}
-                        />
-
-                        {/* 3. Bottom-Left Overlay Content */}
-                        <View style={styles.mobileHeroOverlayContent} pointerEvents="box-none">
-                          {/* Author Name */}
-                          {currentHeroAuthor ? (
-                            <Text style={styles.mobileHeroAuthor} numberOfLines={1}>
-                              {currentHeroAuthor}
-                            </Text>
-                          ) : null}
-
-                          {/* Manga Title */}
-                          <Text style={styles.mobileHeroTitle} numberOfLines={2}>
-                            {currentHeroTitle}
-                          </Text>
-
-                          {/* Genre / Tag Pills */}
-                          {currentHeroTags.length > 0 && (
-                            <View style={styles.mobileHeroTagRow}>
-                              {currentHeroTags.slice(0, 3).map((t) => {
-                                const tagLabel = (t.attributes.name.en ?? Object.values(t.attributes.name)[0]);
-                                return (
-                                  <View key={t.id} style={styles.mobileHeroTagPill}>
-                                    <Text style={styles.mobileHeroTagText} numberOfLines={1}>
-                                      {tagLabel}
-                                    </Text>
-                                  </View>
+                            onScrollEndDrag={(e) => {
+                              setTimeout(() => {
+                                isUserInteractingHeroRef.current = false;
+                              }, 3500);
+                              if (e?.nativeEvent && popularSlice.length > 1) {
+                                const velX = Math.abs(e.nativeEvent.velocity?.x || 0);
+                                if (velX < 0.05) {
+                                  const snapInterval = heroCardWidth + HERO_CARD_GAP;
+                                  const rawIdx = Math.round(e.nativeEvent.contentOffset.x / snapInterval);
+                                  if (rawIdx >= popularSlice.length) {
+                                    mobileHeroScrollRef.current?.scrollTo({ x: 0, animated: false });
+                                    if (heroIndex !== 0) setHeroIndex(0);
+                                  }
+                                }
+                              }
+                            }}
+                            onMomentumScrollEnd={(e) => {
+                              const snapInterval = heroCardWidth + HERO_CARD_GAP;
+                              const rawIdx = Math.round(e.nativeEvent.contentOffset.x / snapInterval);
+                              if (popularSlice.length > 1 && rawIdx >= popularSlice.length) {
+                                // Silently snap back to the actual 1st card at offset 0
+                                mobileHeroScrollRef.current?.scrollTo({ x: 0, animated: false });
+                                if (heroIndex !== 0) {
+                                  setHeroIndex(0);
+                                }
+                              } else if (rawIdx >= 0 && rawIdx < popularSlice.length) {
+                                if (rawIdx !== heroIndex) {
+                                  setHeroIndex(rawIdx);
+                                }
+                              }
+                              setTimeout(() => {
+                                isUserInteractingHeroRef.current = false;
+                              }, 2000);
+                            }}
+                            contentContainerStyle={{
+                              paddingRight: 0,
+                            }}
+                          >
+                            {loopHeroCards.map((heroManga, idx) => {
+                              const heroStats = mangaStatsMap[heroManga.id];
+                              const heroRating = heroStats?.rating?.bayesian || heroStats?.rating?.average || null;
+                              const ratingDisplay = heroRating != null && !isNaN(heroRating)
+                                ? (heroRating > 5 ? (heroRating / 2).toFixed(1) : heroRating.toFixed(1))
+                                : '4.5';
+                              let ratingCount: string | null = null;
+                              if (heroStats?.rating?.distribution) {
+                                const total = Object.values(heroStats.rating.distribution).reduce(
+                                  (acc, v) => acc + (typeof v === 'number' ? v : 0),
+                                  0
                                 );
-                              })}
-                            </View>
+                                if (total > 0) ratingCount = formatCompactNumber(total);
+                              }
+                              const coverUri = cachedHeroBanners[heroManga.id] || BannerCacheManager.getCachedUri(heroManga.id) || getMangaCover(heroManga, '512');
+                              const placeholderUri = getMangaCover(heroManga, '256');
+                              const mangaTitle = getMangaTitle(heroManga);
+                              const authorName = extractAuthorName(heroManga);
+                              const tags = heroManga.attributes.tags?.slice(0, 3) ?? [];
+                              const isLast = idx === loopHeroCards.length - 1;
+
+                              return (
+                                <View
+                                  key={`${heroManga.id}_loop_${idx}`}
+                                  style={{
+                                    width: heroCardWidth,
+                                    height: 380,
+                                    marginRight: isLast ? 0 : HERO_CARD_GAP,
+                                  }}
+                                >
+                                  <Pressable
+                                    onPress={() => navigateToManga(heroManga.id)}
+                                    style={({ pressed }) => [
+                                      styles.mobileHeroCard,
+                                      pressed && { opacity: 0.94 },
+                                    ]}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`Featured: ${mangaTitle}`}
+                                  >
+                                    {/* 1. Full-Bleed High-Res Background Image */}
+                                    {coverUri ? (
+                                      <Image
+                                        key={`hero_banner_${heroManga.id}_${idx}_${screenFocusKey}`}
+                                        source={{ uri: coverUri }}
+                                        placeholder={placeholderUri ? { uri: placeholderUri } : undefined}
+                                        placeholderContentFit="cover"
+                                        style={styles.mobileHeroImage}
+                                        contentFit="cover"
+                                        contentPosition="top"
+                                        priority={idx === 0 || idx === loopHeroCards.length - 1 ? 'high' : 'normal'}
+                                        cachePolicy="memory-disk"
+                                        transition={150}
+                                      />
+                                    ) : (
+                                      <View style={[styles.mobileHeroImage, styles.trendingCoverPlaceholder]}>
+                                        <Ionicons name="book-outline" size={48} color="#71717A" />
+                                      </View>
+                                    )}
+
+                                    {/* 2. Seamless Bottom-Fade Gradient */}
+                                    <LinearGradient
+                                      colors={[
+                                        'transparent',
+                                        'rgba(15, 17, 23, 0.05)',
+                                        'rgba(15, 17, 23, 0.60)',
+                                        'rgba(15, 17, 23, 0.94)',
+                                      ]}
+                                      locations={[0, 0.38, 0.68, 1.0]}
+                                      style={styles.mobileHeroGradient}
+                                    />
+
+                                    {/* 3. Bottom-Left Overlay Content */}
+                                    <View style={styles.mobileHeroOverlayContent} pointerEvents="box-none">
+                                      {/* Author Name */}
+                                      {authorName ? (
+                                        <Text style={styles.mobileHeroAuthor} numberOfLines={1}>
+                                          {authorName}
+                                        </Text>
+                                      ) : null}
+
+                                      {/* Manga Title */}
+                                      <Text style={styles.mobileHeroTitle} numberOfLines={2}>
+                                        {mangaTitle}
+                                      </Text>
+
+                                      {/* Genre / Tag Pills */}
+                                      {tags.length > 0 && (
+                                        <View style={styles.mobileHeroTagRow}>
+                                          {tags.map((t) => {
+                                            const tagLabel = t.attributes.name.en ?? Object.values(t.attributes.name)[0];
+                                            return (
+                                              <View key={t.id} style={styles.mobileHeroTagPill}>
+                                                <Text style={styles.mobileHeroTagText} numberOfLines={1}>
+                                                  {tagLabel}
+                                                </Text>
+                                              </View>
+                                            );
+                                          })}
+                                        </View>
+                                      )}
+
+                                      {/* Rating & Ratings Count Row */}
+                                      <View style={styles.mobileHeroRatingRow}>
+                                        <Ionicons name="star" size={13} color="#F59E0B" />
+                                        <Text style={styles.mobileHeroRatingVal}>
+                                          {ratingDisplay}
+                                        </Text>
+                                        {ratingCount ? (
+                                          <Text style={styles.mobileHeroRatingCount}>
+                                            ({ratingCount})
+                                          </Text>
+                                        ) : null}
+                                      </View>
+                                    </View>
+                                  </Pressable>
+                                </View>
+                              );
+                            })}
+                          </ScrollView>
+                        </View>
+                      ) : (
+                        <Animated.View
+                          style={[
+                            styles.heroBannerFrame,
+                            isLightTheme && { backgroundColor: colors.surface, borderWidth: 0 },
+                            Platform.OS === 'web' && styles.webHeroBannerFrame,
+                            Platform.OS === 'web' && {
+                              transform: [{ translateX: heroSlideAnim }],
+                              opacity: heroOpacityAnim,
+                            },
+                          ]}
+                        >
+                          {/* Cinematic Ambient Backdrop Cover (Soft Blurred & Feathered into Background) */}
+                          {currentHeroCover && (
+                            <Image
+                              source={{ uri: currentHeroCover }}
+                              style={[styles.heroBackdrop, isLightTheme && { opacity: 0.5 }]}
+                              contentFit="cover"
+                              blurRadius={Platform.OS === 'web' ? 24 : 18}
+                              transition={250}
+                            />
                           )}
 
-                          {/* Rating & Ratings Count Row */}
-                          <View style={styles.mobileHeroRatingRow}>
-                            <Ionicons name="star" size={13} color="#F59E0B" />
-                            <Text style={styles.mobileHeroRatingVal}>
-                              {mobileHeroRatingDisplay ?? '4.5'}
-                            </Text>
-                            {mobileHeroRatingCount ? (
-                              <Text style={styles.mobileHeroRatingCount}>
-                                ({mobileHeroRatingCount})
+                          {!isLightTheme && (
+                            <LinearGradient
+                              colors={[
+                                'rgba(11, 12, 14, 0.40)',
+                                'rgba(11, 12, 14, 0.72)',
+                                colors.background,
+                              ]}
+                              locations={[0, 0.55, 1.0]}
+                              start={{ x: 0, y: 0 }}
+                              end={{ x: 0, y: 1 }}
+                              style={styles.heroBackdropGradient}
+                            />
+                          )}
+
+                          <View style={[styles.heroInnerContainer, Platform.OS === 'web' && styles.webCenteredContent]}>
+                            {/* Carousel header */}
+                            <View style={styles.trendingEyebrowRow}>
+                              <Text style={[styles.trendingEyebrowText, { color: isLightTheme ? colors.text : '#E4E4E7' }]}>
+                                Popular New Titles
                               </Text>
-                            ) : null}
-                          </View>
-                        </View>
-                      </Pressable>
-                    ) : (
-                      <Animated.View
-                        style={[
-                          styles.heroBannerFrame,
-                          isLightTheme && { backgroundColor: colors.surface, borderWidth: 0 },
-                          Platform.OS === 'web' && styles.webHeroBannerFrame,
-                          Platform.OS === 'web' && {
-                            transform: [{ translateX: heroSlideAnim }],
-                            opacity: heroOpacityAnim,
-                          },
-                        ]}
-                      >
-                        {/* Cinematic Ambient Backdrop Cover (Soft Blurred & Feathered into Background) */}
-                        {currentHeroCover && (
-                          <Image
-                            source={{ uri: currentHeroCover }}
-                            style={[styles.heroBackdrop, isLightTheme && { opacity: 0.5 }]}
-                            contentFit="cover"
-                            blurRadius={Platform.OS === 'web' ? 24 : 18}
-                            transition={250}
-                          />
-                        )}
 
-                        {!isLightTheme && (
-                          <LinearGradient
-                            colors={[
-                              'rgba(11, 12, 14, 0.40)',
-                              'rgba(11, 12, 14, 0.72)',
-                              colors.background,
-                            ]}
-                            locations={[0, 0.55, 1.0]}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 0, y: 1 }}
-                            style={styles.heroBackdropGradient}
-                          />
-                        )}
-
-                        <View style={[styles.heroInnerContainer, Platform.OS === 'web' && styles.webCenteredContent]}>
-                          {/* Carousel header */}
-                          <View style={styles.trendingEyebrowRow}>
-                            <Text style={[styles.trendingEyebrowText, { color: isLightTheme ? colors.text : '#E4E4E7' }]}>
-                              Popular New Titles
-                            </Text>
-
-                            <View style={styles.heroHeaderControls}>
-                              <View style={styles.trendingSlideDots}>
-                                {popular.slice(0, 5).map((_, i) => (
+                              <View style={styles.heroHeaderControls}>
+                                <View style={styles.trendingSlideDots}>
+                                  {popular.slice(0, 5).map((_, i) => (
+                                    <Pressable
+                                      key={i}
+                                      onPress={() => changeHeroIndex(i, i > heroIndex ? 'next' : 'prev')}
+                                      hitSlop={6}
+                                      accessibilityRole="button"
+                                      accessibilityLabel={`Go to slide ${i + 1}`}
+                                    >
+                                      <View
+                                        style={[
+                                          styles.slideDot,
+                                          i === (heroIndex % 5) ? styles.slideDotActive : styles.slideDotInactive,
+                                          i === (heroIndex % 5)
+                                            ? { backgroundColor: colors.accent }
+                                            : { backgroundColor: colors.textMuted },
+                                        ]}
+                                      />
+                                    </Pressable>
+                                  ))}
+                                </View>
+                                <View style={styles.heroControls}>
                                   <Pressable
-                                    key={i}
-                                    onPress={() => changeHeroIndex(i, i > heroIndex ? 'next' : 'prev')}
-                                    hitSlop={6}
+                                    onPress={prevHero}
+                                    style={({ pressed }) => [styles.heroArrowBtn, pressed && { opacity: 0.5 }]}
+                                    hitSlop={8}
                                     accessibilityRole="button"
-                                    accessibilityLabel={`Go to slide ${i + 1}`}
+                                    accessibilityLabel="Previous title"
                                   >
-                                    <View
-                                      style={[
-                                        styles.slideDot,
-                                        i === (heroIndex % 5) ? styles.slideDotActive : styles.slideDotInactive,
-                                        i === (heroIndex % 5)
-                                          ? { backgroundColor: colors.accent }
-                                          : { backgroundColor: colors.textMuted },
-                                      ]}
-                                    />
+                                    <Ionicons name="chevron-back" size={18} color={isLightTheme ? colors.text : '#FAFAFA'} />
                                   </Pressable>
-                                ))}
-                              </View>
-                              <View style={styles.heroControls}>
-                                <Pressable
-                                  onPress={prevHero}
-                                  style={({ pressed }) => [styles.heroArrowBtn, pressed && { opacity: 0.5 }]}
-                                  hitSlop={8}
-                                  accessibilityRole="button"
-                                  accessibilityLabel="Previous title"
-                                >
-                                  <Ionicons name="chevron-back" size={18} color={isLightTheme ? colors.text : '#FAFAFA'} />
-                                </Pressable>
-                                <Pressable
-                                  onPress={nextHero}
-                                  style={({ pressed }) => [styles.heroArrowBtn, pressed && { opacity: 0.5 }]}
-                                  hitSlop={8}
-                                  accessibilityRole="button"
-                                  accessibilityLabel="Next title"
-                                >
-                                  <Ionicons name="chevron-forward" size={18} color={isLightTheme ? colors.text : '#FAFAFA'} />
-                                </Pressable>
+                                  <Pressable
+                                    onPress={nextHero}
+                                    style={({ pressed }) => [styles.heroArrowBtn, pressed && { opacity: 0.5 }]}
+                                    hitSlop={8}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Next title"
+                                  >
+                                    <Ionicons name="chevron-forward" size={18} color={isLightTheme ? colors.text : '#FAFAFA'} />
+                                  </Pressable>
+                                </View>
                               </View>
                             </View>
-                          </View>
 
-                          {/* Hero Main Content Row */}
-                          <View style={[styles.heroContentRow, Platform.OS === 'web' && styles.webHeroContentRow]}>
-                            {/* Left: Floating Borderless Manga Cover Artwork */}
-                            <Pressable
-                              onPress={() => navigateToManga(currentHeroManga.id)}
-                              style={({ pressed }) => [
-                                styles.trendingCoverWrapper,
-                                Platform.OS === 'web' && styles.webTrendingCoverWrapper,
-                                pressed && { opacity: 0.88 },
-                                Platform.OS === 'web' && { cursor: 'pointer' as any },
-                              ]}
-                              accessibilityRole="button"
-                              accessibilityLabel={`View ${currentHeroTitle}`}
-                            >
-                              {currentHeroCover ? (
-                                <Image
-                                  source={{ uri: currentHeroCover }}
-                                  style={styles.trendingCoverImage}
-                                  contentFit="cover"
-                                  transition={200}
-                                />
-                              ) : (
-                                <View style={[styles.trendingCoverImage, styles.trendingCoverPlaceholder]}>
-                                  <Ionicons name="book-outline" size={32} color="#71717A" />
-                                </View>
-                              )}
-                            </Pressable>
-
-                            {/* Right: Editorial Information & Action Column */}
-                            <View style={styles.heroMetaCol}>
-                              {/* Title */}
+                            {/* Hero Main Content Row */}
+                            <View style={[styles.heroContentRow, Platform.OS === 'web' && styles.webHeroContentRow]}>
+                              {/* Left: Floating Borderless Manga Cover Artwork */}
                               <Pressable
                                 onPress={() => navigateToManga(currentHeroManga.id)}
                                 style={({ pressed }) => [
-                                  pressed && { opacity: 0.8 },
+                                  styles.trendingCoverWrapper,
+                                  Platform.OS === 'web' && styles.webTrendingCoverWrapper,
+                                  pressed && { opacity: 0.88 },
                                   Platform.OS === 'web' && { cursor: 'pointer' as any },
                                 ]}
+                                accessibilityRole="button"
+                                accessibilityLabel={`View ${currentHeroTitle}`}
                               >
-                                <Text
-                                  style={[styles.heroTitleText, Platform.OS === 'web' && styles.webHeroTitleText, isLightTheme && { color: colors.text }]}
-                                  numberOfLines={2}
-                                >
-                                  {currentHeroTitle}
-                                </Text>
+                                {currentHeroCover ? (
+                                  <Image
+                                    source={{ uri: currentHeroCover }}
+                                    style={styles.trendingCoverImage}
+                                    contentFit="cover"
+                                    transition={200}
+                                  />
+                                ) : (
+                                  <View style={[styles.trendingCoverImage, styles.trendingCoverPlaceholder]}>
+                                    <Ionicons name="book-outline" size={32} color="#71717A" />
+                                  </View>
+                                )}
                               </Pressable>
 
-                              {/* Meta Line: Rating, Follows, Author */}
-                              <View style={styles.trendingMetaRow}>
-                                {currentHeroRating != null && (
-                                  <View style={styles.trendingMetaBadge}>
-                                    <Ionicons name="star" size={12} color={colors.accent} />
-                                    <Text style={[styles.trendingRatingText, isLightTheme && { color: colors.text }]}>
-                                      {currentHeroRating.toFixed(1)}
-                                    </Text>
-                                  </View>
-                                )}
-
-                                {currentHeroFollows != null && (
-                                  <View style={styles.trendingMetaBadge}>
-                                    <Ionicons name="bookmark-outline" size={12} color={isLightTheme ? colors.textSecondary : '#94A3B8'} />
-                                    <Text style={[styles.trendingMetaText, isLightTheme && { color: colors.text }]}>
-                                      {formatCompactNumber(currentHeroFollows)} follows
-                                    </Text>
-                                  </View>
-                                )}
-
-                                {currentHeroAuthor ? (
-                                  <Text style={[styles.heroAuthorText, isLightTheme && { color: colors.text }]} numberOfLines={1}>
-                                    by {currentHeroAuthor}
+                              {/* Right: Editorial Information & Action Column */}
+                              <View style={styles.heroMetaCol}>
+                                {/* Title */}
+                                <Pressable
+                                  onPress={() => navigateToManga(currentHeroManga.id)}
+                                  style={({ pressed }) => [
+                                    pressed && { opacity: 0.8 },
+                                    Platform.OS === 'web' && { cursor: 'pointer' as any },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[styles.heroTitleText, Platform.OS === 'web' && styles.webHeroTitleText, isLightTheme && { color: colors.text }]}
+                                    numberOfLines={2}
+                                  >
+                                    {currentHeroTitle}
                                   </Text>
-                                ) : null}
-                              </View>
+                                </Pressable>
 
-                              {/* Flat Genre Chips */}
-                              <View style={styles.heroTagRow}>
-                                {currentHeroTags.map((t) => {
-                                  const tagLabel = (t.attributes.name.en ?? Object.values(t.attributes.name)[0]);
-                                  return (
-                                    <View key={t.id} style={[styles.heroTagPill, isLightTheme && { backgroundColor: colors.cardBackground, borderWidth: 0 }]}>
-                                      <Text style={[styles.heroTagText, isLightTheme && { color: colors.text }]} numberOfLines={1}>
-                                        {tagLabel}
+                                {/* Meta Line: Rating, Follows, Author */}
+                                <View style={styles.trendingMetaRow}>
+                                  {currentHeroRating != null && (
+                                    <View style={styles.trendingMetaBadge}>
+                                      <Ionicons name="star" size={12} color={colors.accent} />
+                                      <Text style={[styles.trendingRatingText, isLightTheme && { color: colors.text }]}>
+                                        {currentHeroRating.toFixed(1)}
                                       </Text>
                                     </View>
-                                  );
-                                })}
+                                  )}
+
+                                  {currentHeroFollows != null && (
+                                    <View style={styles.trendingMetaBadge}>
+                                      <Ionicons name="bookmark-outline" size={12} color={isLightTheme ? colors.textSecondary : '#94A3B8'} />
+                                      <Text style={[styles.trendingMetaText, isLightTheme && { color: colors.text }]}>
+                                        {formatCompactNumber(currentHeroFollows)} follows
+                                      </Text>
+                                    </View>
+                                  )}
+
+                                  {currentHeroAuthor ? (
+                                    <Text style={[styles.heroAuthorText, isLightTheme && { color: colors.text }]} numberOfLines={1}>
+                                      by {currentHeroAuthor}
+                                    </Text>
+                                  ) : null}
+                                </View>
+
+                                {/* Flat Genre Chips */}
+                                <View style={styles.heroTagRow}>
+                                  {currentHeroTags.map((t) => {
+                                    const tagLabel = (t.attributes.name.en ?? Object.values(t.attributes.name)[0]);
+                                    return (
+                                      <View key={t.id} style={[styles.heroTagPill, isLightTheme && { backgroundColor: colors.cardBackground, borderWidth: 0 }]}>
+                                        <Text style={[styles.heroTagText, isLightTheme && { color: colors.text }]} numberOfLines={1}>
+                                          {tagLabel}
+                                        </Text>
+                                      </View>
+                                    );
+                                  })}
+                                </View>
+
+                                {/* Synopsis Preview */}
+                                <Text
+                                  style={[
+                                    styles.heroSynopsisText,
+                                    Platform.OS === 'web' && styles.webHeroSynopsisText,
+                                    isLightTheme && { color: colors.text },
+                                  ]}
+                                  numberOfLines={Platform.OS === 'web' ? 3 : 2}
+                                >
+                                  {currentHeroDesc}
+                                </Text>
+
                               </View>
-
-                              {/* Synopsis Preview */}
-                              <Text
-                                style={[
-                                  styles.heroSynopsisText,
-                                  Platform.OS === 'web' && styles.webHeroSynopsisText,
-                                  isLightTheme && { color: colors.text },
-                                ]}
-                                numberOfLines={Platform.OS === 'web' ? 3 : 2}
-                              >
-                                {currentHeroDesc}
-                              </Text>
-
                             </View>
                           </View>
-                        </View>
-                      </Animated.View>
-                    )}
-                  </View>
+                        </Animated.View>
+                      )}
+                    </View>
                   )}
 
                   {Platform.OS !== 'web' && activeSeeAllSection === null ? (
-                    <View style={{ paddingTop: Spacing.sm }}>
+                    <View style={{ paddingTop: Spacing.xs }}>
                       {/* 1. Top Rated Manga Carousel */}
                       <View style={styles.carouselSection}>
                         <View style={styles.carouselHeaderRow}>
@@ -2906,7 +3007,7 @@ const styles = StyleSheet.create({
   heroSection: {
     paddingHorizontal: Platform.OS === 'web' ? 0 : Spacing.md,
     paddingTop: Platform.OS === 'web' ? 0 : Spacing.xs,
-    marginBottom: Spacing['2xl'],
+    marginBottom: 18,
   },
   heroSectionTitle: {
     fontSize: Typography.sizes.title3,
@@ -2914,6 +3015,9 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   /* Mobile Featured Banner (Poster Card with Bottom-Left Overlay) */
+  mobileHeroCardWrap: {
+    width: '100%',
+  },
   mobileHeroCard: {
     width: '100%',
     height: 380,

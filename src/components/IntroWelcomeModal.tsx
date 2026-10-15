@@ -150,7 +150,7 @@ export function IntroWelcomeModal({ forceVisible = false, onDismiss }: IntroWelc
       {/* 1. Fullscreen Diagonal Manga Collage Background */}
       <View style={StyleSheet.absoluteFill}>
         <Image
-          source={require('../../assets/images/intro_bg.jpg')}
+          source={require('../../assets/images/intro_bg_zfold.jpg')}
           style={styles.backgroundImage}
           contentFit="cover"
           priority="high"

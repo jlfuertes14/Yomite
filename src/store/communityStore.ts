@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { ForumThread, ForumComment } from '../api/community';
+import { uploadCommunityImages } from '../services/communityMediaService';
 
 /**
  * Insert a row carrying the new avatar/attachment columns, retrying with the
@@ -52,6 +53,11 @@ export const useCommunityStore = create<CommunityState>()(
           throw new Error('You must be signed in to create a discussion topic.');
         }
 
+        // Upload local images to Supabase Storage to get permanent public HTTPS URLs
+        const uploadedImages = imageUrls && imageUrls.length > 0
+          ? await uploadCommunityImages(imageUrls, userId)
+          : undefined;
+
         const nowIso = new Date().toISOString();
         const newThread: ForumThread = {
           id: `custom_${Date.now()}`,
@@ -63,24 +69,12 @@ export const useCommunityStore = create<CommunityState>()(
           body: body.trim(),
           author_avatar_url: authorAvatarUrl || null,
           authorAvatarUrl: authorAvatarUrl || undefined,
-          repliesCount: 1,
+          repliesCount: 0,
           created_at: nowIso,
           createdAt: nowIso,
           lastReplyAt: nowIso,
-          image_urls: imageUrls && imageUrls.length > 0 ? imageUrls : null,
-          imageUrls: imageUrls && imageUrls.length > 0 ? imageUrls : undefined,
-        };
-
-        const initialReply: ForumComment = {
-          id: `reply_${Date.now()}`,
-          userId,
-          user_id: userId,
-          username: author.trim() || 'Anonymous Reader',
-          avatarUrl: authorAvatarUrl || undefined,
-          postedAt: nowIso,
-          body: body.trim(),
-          likes: 1,
-          imageUrls: imageUrls && imageUrls.length > 0 ? [...imageUrls] : undefined,
+          image_urls: uploadedImages && uploadedImages.length > 0 ? uploadedImages : null,
+          imageUrls: uploadedImages && uploadedImages.length > 0 ? uploadedImages : undefined,
         };
 
         // Sync to Supabase community_threads with verified session user_id
@@ -112,7 +106,7 @@ export const useCommunityStore = create<CommunityState>()(
           userThreads: [newThread, ...state.userThreads],
           threadReplies: {
             ...state.threadReplies,
-            [newThread.id]: [initialReply],
+            [newThread.id]: [],
           },
         }));
 
@@ -144,6 +138,11 @@ export const useCommunityStore = create<CommunityState>()(
           throw new Error('You must be signed in to post a reply.');
         }
 
+        // Upload local images to Supabase Storage to get permanent public HTTPS URLs
+        const uploadedImages = imageUrls && imageUrls.length > 0
+          ? await uploadCommunityImages(imageUrls, userId)
+          : undefined;
+
         const replyObj: ForumComment = {
           id: `reply_${Date.now()}`,
           userId,
@@ -153,7 +152,7 @@ export const useCommunityStore = create<CommunityState>()(
           postedAt: new Date().toISOString(),
           body: body.trim(),
           likes: 1,
-          imageUrls: imageUrls && imageUrls.length > 0 ? [...imageUrls] : undefined,
+          imageUrls: uploadedImages && uploadedImages.length > 0 ? [...uploadedImages] : undefined,
           replyTo: replyTo?.trim() ? replyTo.trim() : undefined,
         };
 

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { parse } from 'node-html-parser';
 import { CacheManager } from '../utils/cacheManager';
 import { getMangaDexApiBase } from './mangadex';
 import { supabase } from '../lib/supabase';
@@ -45,54 +46,361 @@ export interface AnimeNewsItem {
   images?: string[];
   trailerUrl?: string;
   trailerUrls?: string[];
-  source: 'Anime News Network';
+  source: 'Anime News Network' | 'Anime Corner';
 }
 
 export interface AnimeNewsArticle extends AnimeNewsItem {
   content: string[];
 }
 
+export function getNewsSourceFavicon(source?: string | null): string {
+  if (source === 'Anime Corner') {
+    return 'https://static.animecorner.me/2023/02/icon-180x180-1.png';
+  }
+  return 'https://www.google.com/s2/favicons?domain=animenewsnetwork.com&sz=128';
+}
+
 const ANIME_NEWS_API_BASE = 'https://yomite-parsers.onrender.com';
 
 /**
- * Fetch the latest Anime News Network headlines for the read-only Community news tab.
- * The feed is cached so the mobile client does not request every time the tab opens.
+ * Direct fallback parser for Anime Corner's public RSS feed
+ */
+async function fetchAnimeCornerDirect(): Promise<AnimeNewsItem[]> {
+  try {
+    const res = await axios.get('https://animecorner.me/feed/', { timeout: 12000 });
+    const root = parse(res.data);
+    const items = root.querySelectorAll('item');
+    return items.map((item, idx) => {
+      const title = item.querySelector('title')?.text?.trim() || 'Anime Corner update';
+      const link = item.querySelector('link')?.text?.trim() || item.querySelector('guid')?.text?.trim() || '';
+      const pubDate = item.querySelector('pubDate')?.text?.trim() || new Date().toISOString();
+      const desc = item.querySelector('description')?.text?.replace(/<!\[CDATA\[|\]\]>/g, '').trim() || '';
+      return {
+        id: link || `ac-${idx}`,
+        title,
+        summary: desc || 'Read the latest update from Anime Corner.',
+        publishedAt: new Date(pubDate).toISOString(),
+        url: link,
+        source: 'Anime Corner' as const,
+      };
+    }).filter((i) => i.url);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Fetch aggregated anime news from Anime News Network and Anime Corner.
+ * Results are sorted chronologically by publishedAt timestamp (newest first).
  */
 export async function getAnimeNews(bypassCache = false): Promise<AnimeNewsItem[]> {
-  const cacheKey = 'community_anime_news_v1';
+  const cacheKey = 'community_anime_news_v4';
   if (!bypassCache) {
     const cached = await CacheManager.get<AnimeNewsItem[]>(cacheKey);
     if (cached) return cached;
   }
 
+  const itemsMap = new Map<string, AnimeNewsItem>();
+
+  // 1. Fetch aggregated news from Yomite Parser service
   try {
     const response = await axios.get<{ items?: AnimeNewsItem[] }>(`${ANIME_NEWS_API_BASE}/api/news`, {
       timeout: 30000,
     });
-    const items = response.data?.items || [];
-    await CacheManager.set(cacheKey, items, 15 * 60 * 1000);
-    return items;
+    const remoteItems = response.data?.items || [];
+    for (const item of remoteItems) {
+      if (item.url) itemsMap.set(item.url, item);
+    }
   } catch (err) {
-    console.warn('Failed to fetch Anime News Network from Yomite parser:', err);
+    console.warn('Failed to fetch anime news from Yomite parser:', err);
   }
 
-  return [];
+  // 2. Client-side direct fetch for Anime Corner to guarantee instant updates
+  try {
+    const acItems = await fetchAnimeCornerDirect();
+    for (const item of acItems) {
+      if (item.url && !itemsMap.has(item.url)) {
+        itemsMap.set(item.url, item);
+      }
+    }
+  } catch {}
+
+  const merged = Array.from(itemsMap.values());
+
+  // 3. Arrange all news based on posting timestamp (newest first)
+  merged.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+
+  if (merged.length > 0) {
+    await CacheManager.set(cacheKey, merged, 15 * 60 * 1000);
+  }
+
+  return merged;
+}
+
+function getClientYoutubeEmbedUrl(value?: string | null): string | undefined {
+  if (!value) return undefined;
+  try {
+    const raw = String(value).trim();
+    if (/^[a-zA-Z0-9_-]{11}$/.test(raw)) {
+      const embedUrl = new URL(`https://www.youtube.com/embed/${raw}`);
+      embedUrl.searchParams.set('origin', 'https://yomite.vercel.app');
+      embedUrl.searchParams.set('enablejsapi', '1');
+      return embedUrl.toString();
+    }
+    const url = new URL(raw, 'https://animecorner.me');
+    let videoId: string | null | undefined;
+    if (url.searchParams.get('yt_embed')) {
+      videoId = url.searchParams.get('yt_embed');
+    } else if (url.hostname === 'youtu.be') {
+      videoId = url.pathname.replace(/^\/+/, '').split('/')[0];
+    } else if (url.hostname.includes('youtube.com')) {
+      videoId = url.searchParams.get('v')
+        || url.pathname.match(/\/embed\/([^/?]+)/)?.[1]
+        || url.pathname.match(/\/shorts\/([^/?]+)/)?.[1];
+    }
+    if (!videoId) return undefined;
+    const embedUrl = new URL(`https://www.youtube.com/embed/${videoId}`);
+    embedUrl.searchParams.set('origin', 'https://yomite.vercel.app');
+    embedUrl.searchParams.set('enablejsapi', '1');
+    return embedUrl.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function getOriginalWordPressUrl(url?: string | null): string {
+  if (!url) return '';
+  // Remove WordPress resize dimension suffix e.g. -1024x576.jpg -> .jpg
+  return url.replace(/-\d+x\d+(\.[a-zA-Z0-9]+)(\?.*)?$/, '$1');
+}
+
+function normalizeImageKey(url?: string | null): string {
+  if (!url) return '';
+  const clean = getOriginalWordPressUrl(url).split('?')[0];
+  const filename = clean.split('/').pop() || clean;
+  return filename.toLowerCase();
+}
+
+function parseHighestResFromSrcset(srcset?: string | null): string | null {
+  if (!srcset) return null;
+  const parts = srcset.split(',').map((part) => {
+    const [u, w] = part.trim().split(/\s+/);
+    const width = parseInt(w?.replace(/\D/g, '') || '0', 10);
+    return { url: u, width };
+  }).filter((p) => p.url && !p.url.startsWith('data:'));
+  if (parts.length === 0) return null;
+  parts.sort((a, b) => b.width - a.width);
+  return parts[0].url;
+}
+
+function toClientAbsoluteUrl(value?: string | null, baseUrl?: string): string | undefined {
+  if (!value) return undefined;
+  try {
+    let clean = String(value).trim();
+    if (clean.startsWith('//')) clean = 'https:' + clean;
+    if (clean.includes('animenewsnetwork.com/thumbnails/max300x600/')) {
+      clean = clean.replace('thumbnails/max300x600/', 'thumbnails/max600x600/');
+    }
+    return new URL(clean, baseUrl || 'https://www.animenewsnetwork.com').toString();
+  } catch {
+    return undefined;
+  }
 }
 
 export async function getAnimeNewsArticle(url: string): Promise<AnimeNewsArticle | null> {
-  const cacheKey = `community_anime_news_article_${encodeURIComponent(url)}`;
+  const cacheKey = `community_anime_news_article_v7_${encodeURIComponent(url)}`;
   const cached = await CacheManager.get<AnimeNewsArticle>(cacheKey);
   if (cached) return cached;
 
+  // 1. Try remote parser service
   try {
     const response = await axios.get<AnimeNewsArticle>(`${ANIME_NEWS_API_BASE}/api/news/article`, {
       params: { url },
       timeout: 30000,
     });
-    await CacheManager.set(cacheKey, response.data, 60 * 60 * 1000);
-    return response.data;
+    if (response.data && response.data.title) {
+      await CacheManager.set(cacheKey, response.data, 60 * 60 * 1000);
+      return response.data;
+    }
+  } catch {}
+
+  // 2. Direct client fallback for Anime Corner or ANN if parser is spinning up
+  try {
+    const res = await axios.get(url, {
+      timeout: 15000,
+      headers: {
+        'User-Agent': 'Yomite/1.0',
+      },
+    });
+    const root = parse(res.data);
+    const ogImage = root.querySelector('meta[property="og:image"]')?.getAttribute('content');
+    const isAc = url.includes('animecorner.me');
+
+    // 1. Trailers & PV
+    const trailerUrls: string[] = [];
+    root.querySelectorAll('iframe, a, div[data-video-id], div[data-youtube-id]').forEach((el) => {
+      const candidate = el.getAttribute('src')
+        || el.getAttribute('data-src')
+        || el.getAttribute('data-lazy-src')
+        || el.getAttribute('href')
+        || el.getAttribute('data-video-id')
+        || el.getAttribute('data-youtube-id');
+      const embed = getClientYoutubeEmbedUrl(candidate);
+      if (embed && !trailerUrls.includes(embed)) {
+        trailerUrls.push(embed);
+      }
+    });
+
+    // 2. High-res Visuals & Key Art
+    const targetScope = isAc
+      ? (root.querySelector('.entry-content') || root.querySelector('.ac-single-entry') || root.querySelector('article'))
+      : (root.querySelector('#content-zone .meat') || root.querySelector('.meat') || root.querySelector('article'));
+
+    const rawOgImage =
+      root.querySelector('meta[property="og:image"]')?.getAttribute('content') ||
+      root.querySelector('meta[name="twitter:image"]')?.getAttribute('content') ||
+      root.querySelector('link[rel="image_src"]')?.getAttribute('href') ||
+      ogImage ||
+      '';
+    const cleanOgImage = rawOgImage ? getOriginalWordPressUrl(toClientAbsoluteUrl(rawOgImage, url)) : '';
+
+    const rawBodyImages: string[] = [];
+    const seenKeys = new Set<string>();
+
+    if (targetScope) {
+      targetScope.querySelectorAll('img').forEach((img) => {
+        const cls = img.getAttribute('class') || '';
+        const src = img.getAttribute('src') || '';
+        const parentCls = img.parentNode?.getAttribute('class') || '';
+        const grandParentCls = img.parentNode?.parentNode?.getAttribute('class') || '';
+
+        if (
+          cls.includes('avatar') ||
+          cls.includes('author') ||
+          cls.includes('wp-smiley') ||
+          parentCls.includes('author') ||
+          parentCls.includes('avatar') ||
+          parentCls.includes('penci-post-related') ||
+          grandParentCls.includes('penci-post-related') ||
+          src.includes('150x150') ||
+          src.includes('gravatar') ||
+          src.includes('/system/') ||
+          src.includes('icon-') ||
+          src.includes('favicon')
+        ) {
+          return;
+        }
+
+        const srcsetBest = parseHighestResFromSrcset(img.getAttribute('srcset') || img.getAttribute('data-srcset'));
+        const candidate =
+          srcsetBest ||
+          img.getAttribute('data-src') ||
+          img.getAttribute('data-lazy-src') ||
+          src;
+
+        if (candidate && !candidate.startsWith('data:') && !candidate.includes('150x150') && !candidate.includes('gravatar')) {
+          const absUrl = toClientAbsoluteUrl(candidate, url);
+          if (absUrl) {
+            const originalUrl = getOriginalWordPressUrl(absUrl);
+            const key = normalizeImageKey(originalUrl);
+            if (!seenKeys.has(key)) {
+              seenKeys.add(key);
+              rawBodyImages.push(originalUrl);
+            }
+          }
+        }
+      });
+    }
+
+    const primaryCover = cleanOgImage || rawBodyImages[0] || ogImage || '';
+    const coverKey = normalizeImageKey(primaryCover);
+
+    const nonCoverBodyImages = rawBodyImages.filter((img) => normalizeImageKey(img) !== coverKey);
+    const visuals = nonCoverBodyImages.length > 0
+      ? nonCoverBodyImages
+      : (rawBodyImages.length > 1 ? rawBodyImages : []);
+
+    // 3. Clean content blocks (Intro, Paragraphs, Lists, Quotes)
+    const content: string[] = [];
+    const introEl = root.querySelector('.intro');
+    const introText = introEl ? introEl.text.replace(/\s+/g, ' ').trim() : '';
+
+    if (targetScope) {
+      targetScope.querySelectorAll('p, ul, blockquote').forEach((el) => {
+        const parentClass = el.parentNode?.getAttribute('class') || '';
+        if (
+          parentClass.includes('author') ||
+          parentClass.includes('comment') ||
+          parentClass.includes('panel') ||
+          parentClass.includes('ezoic') ||
+          parentClass.includes('ezmob') ||
+          parentClass.includes('social')
+        ) {
+          return;
+        }
+
+        const tagName = el.tagName?.toUpperCase();
+        if (tagName === 'UL') {
+          el.querySelectorAll('li').forEach((li) => {
+            const item = li.text.replace(/\s+/g, ' ').trim();
+            if (item.length > 3) content.push(`• ${item}`);
+          });
+        } else if (tagName === 'BLOCKQUOTE') {
+          const quote = el.text.replace(/\s+/g, ' ').trim();
+          if (quote.length > 15) content.push(`“${quote}”`);
+        } else {
+          const text = el.text.replace(/\s+/g, ' ').trim();
+          if (
+            text.length > 20 &&
+            !text.startsWith('Disclosure:') &&
+            !text.includes('discuss this in the forum') &&
+            !text.includes('bookmark/share with')
+          ) {
+            content.push(text);
+          }
+        }
+      });
+    }
+
+    // Clean title
+    let ogTitle = root.querySelector('meta[property="og:title"]')?.getAttribute('content')?.trim() || '';
+    if (!ogTitle) {
+      const pageHeader = root.querySelector('#page_header');
+      if (pageHeader) {
+        pageHeader.querySelector('.sub-title')?.remove();
+        ogTitle = pageHeader.text.replace(/\s+/g, ' ').trim();
+      } else {
+        ogTitle = root.querySelector('title')?.text?.replace(/\s+/g, ' ').trim() || '';
+      }
+    }
+
+    let ogDesc = root.querySelector('meta[property="og:description"]')?.getAttribute('content')?.trim() || '';
+    if (!ogDesc && introText) {
+      ogDesc = introText;
+    }
+
+    const publishedAt = root.querySelector('meta[property="article:published_time"]')?.getAttribute('content')
+      || root.querySelector('time')?.getAttribute('datetime')
+      || new Date().toISOString();
+
+    const articleData: AnimeNewsArticle = {
+      id: url,
+      title: ogTitle,
+      summary: ogDesc,
+      imageUrl: primaryCover,
+      images: visuals,
+      trailerUrl: trailerUrls[0],
+      trailerUrls,
+      publishedAt,
+      url,
+      source: isAc ? 'Anime Corner' : 'Anime News Network',
+      content: content.slice(0, 100),
+    };
+
+    await CacheManager.set(cacheKey, articleData, 60 * 60 * 1000);
+    return articleData;
   } catch (err) {
-    console.warn('Failed to fetch Anime News Network article from Yomite parser:', err);
+    console.warn('Failed to fetch article directly:', err);
     return null;
   }
 }
@@ -108,7 +416,7 @@ export async function mergeNewsCoversIntoFeedCache(
   >
 ): Promise<void> {
   try {
-    const cached = await CacheManager.get<AnimeNewsItem[]>('community_anime_news_v1');
+    const cached = await CacheManager.get<AnimeNewsItem[]>('community_anime_news_v4');
     if (!cached) return;
     const byUrl = new Map(updates.map((u) => [u.url, u]));
     const merged = cached.map((item) => {
@@ -123,7 +431,7 @@ export async function mergeNewsCoversIntoFeedCache(
         trailerUrls: item.trailerUrls || u.trailerUrls,
       };
     });
-    await CacheManager.set('community_anime_news_v1', merged, 15 * 60 * 1000);
+    await CacheManager.set('community_anime_news_v4', merged, 15 * 60 * 1000);
   } catch {
     // Cache is best-effort only
   }

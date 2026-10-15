@@ -454,8 +454,9 @@ export function resolveSourceWebsiteUrl(
   return `https://${sourceId}.com`;
 }
 
-// Enable LayoutAnimation on Android for the grid collapse
-if (Platform.OS === 'android' && (UIManager as any)?.setLayoutAnimationEnabledExperimental) {
+// Enable LayoutAnimation on Android for legacy architecture (no-op in New Architecture / Fabric)
+const isFabric = Boolean((global as any)?.nativeFabricUIManager || (global as any)?._IS_FABRIC);
+if (Platform.OS === 'android' && !isFabric && (UIManager as any)?.setLayoutAnimationEnabledExperimental) {
   (UIManager as any).setLayoutAnimationEnabledExperimental(true);
 }
 
