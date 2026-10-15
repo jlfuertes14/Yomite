@@ -397,10 +397,10 @@ export default function HistoryScreen() {
     (entry: HistoryEntry) => {
       setConfirmModalConfig({
         visible: true,
-        title: 'Delete History Item',
-        message: `Are you sure you want to remove "${entry.title}" from your reading history?`,
+        title: 'Remove from History?',
+        message: 'Remove this chapter from your reading history?',
         iconName: 'trash-outline',
-        confirmText: 'Delete Item',
+        confirmText: 'Remove',
         onConfirm: () => {
           removeEntry(entry.chapterId);
           setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
@@ -412,12 +412,13 @@ export default function HistoryScreen() {
 
   const handleDeleteSelected = useCallback(() => {
     if (selectedIds.size === 0) return;
+    const count = selectedIds.size;
     setConfirmModalConfig({
       visible: true,
-      title: 'Delete Selected Items',
-      message: `Are you sure you want to delete ${selectedIds.size} selected reading history ${selectedIds.size === 1 ? 'item' : 'items'}?`,
+      title: 'Delete Selected?',
+      message: `Remove ${count} selected ${count === 1 ? 'item' : 'items'} from your reading history?`,
       iconName: 'trash-outline',
-      confirmText: `Delete (${selectedIds.size})`,
+      confirmText: `Delete (${count})`,
       onConfirm: () => {
         removeEntries(Array.from(selectedIds));
         setSelectedIds(new Set());
@@ -430,8 +431,8 @@ export default function HistoryScreen() {
   const handleClearAll = useCallback(() => {
     setConfirmModalConfig({
       visible: true,
-      title: 'Clear Reading History',
-      message: 'Are you sure you want to clear your entire reading history? This action cannot be undone.',
+      title: 'Clear History?',
+      message: 'Remove all reading history? This action cannot be undone.',
       iconName: 'trash-outline',
       confirmText: 'Clear All',
       onConfirm: () => {
@@ -986,10 +987,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 18,
     backgroundColor: '#18181C',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
-    elevation: 12,
+    borderWidth: 0,
+    elevation: 0,
   },
   floatingBarText: {
     fontSize: 13,

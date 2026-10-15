@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, Pressable, Platform, StyleSheet } from 'react-native';
+import { View, Text, Pressable, Platform, StyleSheet, Animated, Easing } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
@@ -33,6 +33,99 @@ const YomiteDarkTheme = {
     text: Colors.dark.text,
   },
 };
+
+function AuthSuccessToast({
+  message,
+  onDismiss,
+}: {
+  message: string;
+  onDismiss: () => void;
+}) {
+  const translateY = useRef(new Animated.Value(-16)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+  const isClosingRef = useRef(false);
+
+  const handleDismiss = () => {
+    if (isClosingRef.current) return;
+    isClosingRef.current = true;
+    Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: 160,
+        easing: Easing.bezier(0.23, 1, 0.32, 1),
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+      Animated.timing(translateY, {
+        toValue: -12,
+        duration: 160,
+        easing: Easing.bezier(0.23, 1, 0.32, 1),
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+    ]).start(() => {
+      onDismiss();
+    });
+  };
+
+  useEffect(() => {
+    isClosingRef.current = false;
+    translateY.setValue(-16);
+    opacity.setValue(0);
+
+    Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.bezier(0.23, 1, 0.32, 1),
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+      Animated.timing(translateY, {
+        toValue: 0,
+        duration: 240,
+        easing: Easing.bezier(0.23, 1, 0.32, 1),
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+    ]).start();
+
+    const timer = setTimeout(() => {
+      handleDismiss();
+    }, 3800);
+
+    return () => clearTimeout(timer);
+  }, [message]);
+
+  // Strip any emoji characters to guarantee clean typography
+  const cleanMessage = message.replace(/[^\p{L}\p{N}\p{P}\p{Z}\n]/gu, '').trim();
+
+  return (
+    <View style={styles.toastOverlay} pointerEvents="box-none">
+      <Animated.View
+        style={[
+          styles.toastContainer,
+          {
+            opacity,
+            transform: [{ translateY }],
+          },
+        ]}
+      >
+        <Ionicons name="checkmark-circle" size={17} color="#10B981" />
+        <Text style={styles.toastText}>{cleanMessage}</Text>
+        <Pressable
+          onPress={handleDismiss}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss message"
+          style={({ pressed, hovered }: any) => [
+            styles.toastCloseBtn,
+            (pressed || hovered) && { opacity: 0.6 },
+            Platform.OS === 'web' && { cursor: 'pointer' as any },
+          ]}
+        >
+          <Ionicons name="close" size={15} color="#A1A1AA" />
+        </Pressable>
+      </Animated.View>
+    </View>
+  );
+}
 
 export default function RootLayout() {
   useDocumentTitle();
@@ -110,15 +203,6 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
-    if (authSuccessMessage) {
-      const timer = setTimeout(() => {
-        clearAuthSuccessMessage();
-      }, 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [authSuccessMessage, clearAuthSuccessMessage]);
-
-  useEffect(() => {
     if (fontsLoaded) {
       SplashScreen.hideAsync();
     }
@@ -138,15 +222,10 @@ export default function RootLayout() {
           }
         >
           {authSuccessMessage && (
-            <View style={styles.toastOverlay}>
-              <View style={styles.toastContainer}>
-                <Ionicons name="checkmark-circle" size={20} color="#10B981" />
-                <Text style={styles.toastText}>{authSuccessMessage}</Text>
-                <Pressable onPress={clearAuthSuccessMessage} hitSlop={8} style={({ pressed }) => [{ opacity: pressed ? 0.6 : 1 }]}>
-                  <Ionicons name="close" size={16} color="#A1A1AA" />
-                </Pressable>
-              </View>
-            </View>
+            <AuthSuccessToast
+              message={authSuccessMessage}
+              onDismiss={clearAuthSuccessMessage}
+            />
           )}
           <Stack
             screenOptions={{
@@ -261,19 +340,24 @@ const styles = StyleSheet.create({
   toastContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(24, 24, 27, 0.94)',
-    borderColor: 'rgba(16, 185, 129, 0.4)',
-    borderWidth: 1,
-    borderRadius: 24,
+    backgroundColor: '#18181B',
+    borderWidth: 0,
+    borderRadius: 14,
     paddingVertical: 10,
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
     gap: 10,
-    boxShadow: '0 8px 30px rgba(0, 0, 0, 0.5)',
-    elevation: 10,
+    elevation: 0,
+    shadowOpacity: 0,
+    shadowRadius: 0,
   },
   toastText: {
-    color: '#FFFFFF',
-    fontSize: 14,
+    color: '#FAFAFA',
+    fontSize: 13.5,
     fontWeight: '600',
+    letterSpacing: -0.2,
+  },
+  toastCloseBtn: {
+    padding: 2,
+    marginLeft: 2,
   },
 });

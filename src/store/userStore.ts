@@ -150,7 +150,7 @@ export const useUserStore = create<UserState>((set, get) => ({
                 isLoading: false,
                 authSuccessMessage:
                   authType === 'signup' || authType === 'email'
-                    ? '🎉 Email confirmed! Welcome to Yomite.'
+                    ? 'Email confirmed. Welcome to Yomite.'
                     : 'Signed in successfully.',
               });
               if (data.user?.id) syncUserDataWithCloud(data.user.id);
@@ -170,7 +170,7 @@ export const useUserStore = create<UserState>((set, get) => ({
                 isLoading: false,
                 authSuccessMessage:
                   authType === 'signup' || authType === 'email'
-                    ? '🎉 Email confirmed! Welcome to Yomite.'
+                    ? 'Email confirmed. Welcome to Yomite.'
                     : 'Signed in successfully.',
               });
               if (data.user?.id) syncUserDataWithCloud(data.user.id);
@@ -211,7 +211,7 @@ export const useUserStore = create<UserState>((set, get) => ({
                   session: data.session,
                   user: data.user,
                   isLoading: false,
-                  authSuccessMessage: '🎉 Signed in with Google!',
+                  authSuccessMessage: 'Signed in with Google',
                 });
                 if (data.user?.id) syncUserDataWithCloud(data.user.id);
               }
@@ -345,7 +345,7 @@ export const useUserStore = create<UserState>((set, get) => ({
           set({
             session: data.session,
             user: data.user,
-            authSuccessMessage: '🎉 Signed in with Google!',
+            authSuccessMessage: 'Signed in with Google',
           });
           if (data.user?.id) syncUserDataWithCloud(data.user.id);
         }
@@ -396,7 +396,7 @@ export const useUserStore = create<UserState>((set, get) => ({
               set({
                 session: sessionData.session,
                 user: sessionData.user,
-                authSuccessMessage: '🎉 Signed in with Google!',
+                authSuccessMessage: 'Signed in with Google',
               });
               if (sessionData.user?.id) syncUserDataWithCloud(sessionData.user.id);
             }

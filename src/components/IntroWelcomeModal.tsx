@@ -18,6 +18,8 @@ import {
   Animated,
   Easing,
   Platform,
+  Dimensions,
+  useWindowDimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -42,52 +44,63 @@ export function IntroWelcomeModal({ forceVisible = false, onDismiss }: IntroWelc
 
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const screenHeight = windowHeight > 0 ? windowHeight : Dimensions.get('window').height;
 
   // Always render in Expo Go environment for easy developer verification
   const isExpo = isExpoGo();
   const [visible, setVisible] = useState<boolean>(forceVisible || isExpo);
   const [pressedCta, setPressedCta] = useState(false);
 
-  // Animations
-  const opacityAnim = useRef(new Animated.Value(forceVisible || isExpo ? 1 : 0)).current;
-  const slideAnim = useRef(new Animated.Value(0)).current;
+  // Animations: curtain-up bottom-to-top mobile sheet motion
+  const opacityAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(screenHeight)).current;
   const isClosingRef = useRef(false);
 
-  // Check persistent status on cold start
+  const startEntranceAnimation = useCallback(() => {
+    slideAnim.setValue(screenHeight);
+    opacityAnim.setValue(0);
+
+    Animated.parallel([
+      Animated.timing(opacityAnim, {
+        toValue: 1,
+        duration: 450,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 650,
+        easing: Easing.bezier(0.16, 1, 0.3, 1), // Graceful decelerating mobile sheet entrance
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+    ]).start();
+  }, [screenHeight, slideAnim, opacityAnim]);
+
+  // Check persistent status on cold start & trigger bottom-to-top sheet entrance
   useEffect(() => {
+    let isMounted = true;
+
     if (forceVisible || isExpo) {
       setVisible(true);
-      opacityAnim.setValue(1);
-      slideAnim.setValue(0);
+      startEntranceAnimation();
       return;
     }
 
-    let isMounted = true;
-    AsyncStorage.getItem(INTRO_COMPLETED_STORAGE_KEY).then((value) => {
-      if (!isMounted) return;
-      if (value !== 'true') {
-        setVisible(true);
-        Animated.parallel([
-          Animated.timing(opacityAnim, {
-            toValue: 1,
-            duration: 400,
-            easing: Easing.bezier(0.23, 1, 0.32, 1),
-            useNativeDriver: Platform.OS !== 'web',
-          }),
-          Animated.timing(slideAnim, {
-            toValue: 0,
-            duration: 450,
-            easing: Easing.bezier(0.23, 1, 0.32, 1),
-            useNativeDriver: Platform.OS !== 'web',
-          }),
-        ]).start();
-      }
-    }).catch(() => {});
+    AsyncStorage.getItem(INTRO_COMPLETED_STORAGE_KEY)
+      .then((value) => {
+        if (!isMounted) return;
+        if (value !== 'true') {
+          setVisible(true);
+          startEntranceAnimation();
+        }
+      })
+      .catch(() => {});
 
     return () => {
       isMounted = false;
     };
-  }, [forceVisible, isExpo, opacityAnim, slideAnim]);
+  }, [forceVisible, isExpo, startEntranceAnimation]);
 
   const handleComplete = useCallback(async () => {
     if (isClosingRef.current) return;
@@ -100,17 +113,18 @@ export function IntroWelcomeModal({ forceVisible = false, onDismiss }: IntroWelc
       }
     } catch {}
 
+    // Smooth curtain-up dismissal: gracefully lifts the curtain up off-screen (-screenHeight) revealing the app
     Animated.parallel([
-      Animated.timing(opacityAnim, {
-        toValue: 0,
-        duration: 250,
-        easing: Easing.bezier(0.23, 1, 0.32, 1),
+      Animated.timing(slideAnim, {
+        toValue: -screenHeight,
+        duration: 680,
+        easing: Easing.inOut(Easing.cubic), // Smooth, natural stage curtain lift
         useNativeDriver: Platform.OS !== 'web',
       }),
-      Animated.timing(slideAnim, {
-        toValue: -20,
-        duration: 250,
-        easing: Easing.bezier(0.23, 1, 0.32, 1),
+      Animated.timing(opacityAnim, {
+        toValue: 0,
+        duration: 650,
+        easing: Easing.in(Easing.quad), // Stays visible during the lift, only fading near the top
         useNativeDriver: Platform.OS !== 'web',
       }),
     ]).start(() => {
@@ -118,7 +132,7 @@ export function IntroWelcomeModal({ forceVisible = false, onDismiss }: IntroWelc
       isClosingRef.current = false;
       onDismiss?.();
     });
-  }, [opacityAnim, slideAnim, onDismiss, isExpo]);
+  }, [screenHeight, slideAnim, opacityAnim, onDismiss, isExpo]);
 
   if (!visible) return null;
 
