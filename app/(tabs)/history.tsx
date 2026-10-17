@@ -29,6 +29,7 @@ import { DEFAULT_USER_AGENT } from '../../src/sources/network/httpClient';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
 import { downloadChapter, removeDownloadedChapter } from '../../src/services/downloadService';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
+import { Skeleton } from '../../src/components/Skeleton';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 import type { HistoryEntry } from '../../src/types';
 import { triggerHaptic } from '../../src/utils/haptics';
@@ -201,6 +202,12 @@ function HistoryRowItem({
 
         {/* Manga Cover Thumbnail */}
         <View style={styles.coverThumbnail}>
+          <Skeleton
+            width="100%"
+            height="100%"
+            borderRadius={8}
+            style={StyleSheet.absoluteFill as any}
+          />
           {coverUrl ? (
             <BridgedImage
               source={{ uri: coverUrl, headers: coverHeaders }}
@@ -208,9 +215,7 @@ function HistoryRowItem({
               contentFit="cover"
               transition={200}
             />
-          ) : (
-            <Ionicons name="book-outline" size={20} color={colors.textMuted} />
-          )}
+          ) : null}
         </View>
 
         {/* Metadata & Progress Bar */}

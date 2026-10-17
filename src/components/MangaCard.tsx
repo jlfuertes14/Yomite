@@ -14,6 +14,7 @@ import { Colors, Radius, Spacing, Typography } from '../../constants/Colors';
 import { useThemeColors } from '../hooks/useThemeColor';
 import { AnimatedCard } from './AnimatedCard';
 import { BridgedImage } from './BridgedImage';
+import { Skeleton } from './Skeleton';
 
 export const CARD_GAP = 10;
 
@@ -91,6 +92,7 @@ function MangaCardComponent({
           },
         ]}
       >
+        <Skeleton width="100%" height="100%" style={StyleSheet.absoluteFill as any} />
         {coverUrl ? (
           <BridgedImage
             source={{ uri: coverUrl }}

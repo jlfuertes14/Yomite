@@ -22,7 +22,8 @@ import {
   Text,
   TextInput,
   useWindowDimensions,
-  View
+  View,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Radius, Spacing, Typography } from '../../constants/Colors';
@@ -53,9 +54,11 @@ import { useColorScheme } from '../../src/hooks/useColorScheme';
 import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { syncUserDataWithCloud } from '../../src/services/cloudSync';
+import { useUIStore } from '../../src/store/uiStore';
 import { getUserAvatarUrl, getUserDisplayName, getUserHandle, useUserStore } from '../../src/store/userStore';
 import type { Manga, SearchFilters } from '../../src/types';
 import { BannerCacheManager } from '../../src/utils/bannerCache';
+import { triggerHaptic } from '../../src/utils/haptics';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 
 type VectorIcon = React.ComponentProps<typeof Ionicons>['name'];
@@ -96,6 +99,20 @@ const getMangaCover = (manga: Manga, size: '256' | '512' | 'original' = '512'): 
   const fileName = extractCoverFileName(manga);
   if (!fileName) return null;
   return getCoverUrl(manga.id, fileName, size);
+};
+
+const getCoverSource = (uri: string | null) => {
+  if (!uri) return undefined;
+  if (uri.startsWith('http://') || uri.startsWith('https://')) {
+    return {
+      uri,
+      headers: {
+        'User-Agent': 'Yomite/1.0 (https://github.com/jlfuertes14/Yomite)',
+        Referer: 'https://mangadex.org',
+      },
+    };
+  }
+  return { uri };
 };
 
 interface WebHeaderProps {
@@ -738,6 +755,20 @@ export default function DiscoverScreen() {
 
   // Responsive Layout Constants
   const sidebarWidth = isDesktop ? 260 : 0;
+  const isFeedMobile = windowWidth < 600;
+  const feedAvailableWidth = isDesktop ? windowWidth - sidebarWidth : windowWidth;
+  const feedHorizontalPadding = isFeedMobile ? 24 : 32;
+  const feedColumns = isDesktop || feedAvailableWidth >= 900 ? 9 : isFeedMobile ? 3 : 6;
+  const feedTotalGap = (feedColumns - 1) * CARD_GAP;
+  const feedNativeWidth = Math.floor((feedAvailableWidth - feedHorizontalPadding - feedTotalGap - 2) / feedColumns);
+  const feedCardWidth = Platform.OS === 'web'
+    ? (isDesktop || windowWidth >= 900
+        ? ('calc((100% - 80px) / 9)' as any)
+        : isFeedMobile
+        ? ('calc((100% - 20px) / 3)' as any)
+        : ('calc((100% - 50px) / 6)' as any))
+    : feedNativeWidth;
+  const feedCardHeight = typeof feedCardWidth === 'number' ? Math.floor(feedCardWidth * 1.44) : 160;
 
   // Data states
   const [popular, setPopular] = useState<Manga[]>([]);
@@ -814,10 +845,110 @@ export default function DiscoverScreen() {
   const searchInputRef = useRef<TextInput>(null);
   const searchBarWidthAnim = useRef(new Animated.Value(260)).current;
 
+  const isSeeAllChromeHiddenRef = useRef(false);
+  const seeAllHeaderTranslateY = useRef(new Animated.Value(0)).current;
+  const seeAllScrollStopTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const setTabBarVisible = useUIStore((s) => s.setTabBarVisible);
+
+  const seeAllHeaderOpacity = seeAllHeaderTranslateY.interpolate({
+    inputRange: [-60, 0],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+
+  const hideSeeAllChrome = useCallback(() => {
+    if (!isSeeAllChromeHiddenRef.current) {
+      isSeeAllChromeHiddenRef.current = true;
+      setTabBarVisible(false);
+      Animated.timing(seeAllHeaderTranslateY, {
+        toValue: -140,
+        duration: 220,
+        easing: Easing.bezier(0.23, 1, 0.32, 1),
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
+    }
+  }, [setTabBarVisible, seeAllHeaderTranslateY]);
+
+  const showSeeAllChrome = useCallback(() => {
+    if (isSeeAllChromeHiddenRef.current) {
+      isSeeAllChromeHiddenRef.current = false;
+      setTabBarVisible(true);
+      Animated.timing(seeAllHeaderTranslateY, {
+        toValue: 0,
+        duration: 240,
+        easing: Easing.bezier(0.23, 1, 0.32, 1),
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
+    }
+  }, [setTabBarVisible, seeAllHeaderTranslateY]);
+
+  const handleScrollBeginDrag = useCallback(() => {
+    if (activeSeeAllSection !== null) {
+      if (seeAllScrollStopTimerRef.current) {
+        clearTimeout(seeAllScrollStopTimerRef.current);
+        seeAllScrollStopTimerRef.current = null;
+      }
+      hideSeeAllChrome();
+    }
+  }, [activeSeeAllSection, hideSeeAllChrome]);
+
   const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const y = event.nativeEvent.contentOffset.y;
     setIsScrolled(y > 50);
-  }, []);
+
+    if (activeSeeAllSection !== null) {
+      if (y <= 10) {
+        if (seeAllScrollStopTimerRef.current) {
+          clearTimeout(seeAllScrollStopTimerRef.current);
+          seeAllScrollStopTimerRef.current = null;
+        }
+        showSeeAllChrome();
+        return;
+      }
+
+      hideSeeAllChrome();
+
+      if (seeAllScrollStopTimerRef.current) {
+        clearTimeout(seeAllScrollStopTimerRef.current);
+      }
+      seeAllScrollStopTimerRef.current = setTimeout(() => {
+        showSeeAllChrome();
+      }, 350);
+    }
+  }, [activeSeeAllSection, hideSeeAllChrome, showSeeAllChrome]);
+
+  const handleScrollEndDrag = useCallback(() => {
+    if (activeSeeAllSection !== null) {
+      if (seeAllScrollStopTimerRef.current) clearTimeout(seeAllScrollStopTimerRef.current);
+      seeAllScrollStopTimerRef.current = setTimeout(() => {
+        showSeeAllChrome();
+      }, 350);
+    }
+  }, [activeSeeAllSection, showSeeAllChrome]);
+
+  const handleMomentumScrollEnd = useCallback(() => {
+    if (activeSeeAllSection !== null) {
+      if (seeAllScrollStopTimerRef.current) {
+        clearTimeout(seeAllScrollStopTimerRef.current);
+        seeAllScrollStopTimerRef.current = null;
+      }
+      showSeeAllChrome();
+    }
+  }, [activeSeeAllSection, showSeeAllChrome]);
+
+  useEffect(() => {
+    if (activeSeeAllSection === null) {
+      showSeeAllChrome();
+    }
+  }, [activeSeeAllSection, showSeeAllChrome]);
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        showSeeAllChrome();
+      };
+    }, [showSeeAllChrome])
+  );
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -934,7 +1065,12 @@ export default function DiscoverScreen() {
   const handleOpenSeeAll = useCallback(async (section: 'top_rated' | 'most_popular' | 'recently_added' | 'latest') => {
     setActiveSeeAllSection(section);
     setCurrentPage(1);
-    mainScrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    showSeeAllChrome();
+    if (seeAllScrollStopTimerRef.current) {
+      clearTimeout(seeAllScrollStopTimerRef.current);
+      seeAllScrollStopTimerRef.current = null;
+    }
+    mainScrollViewRef.current?.scrollTo({ y: 0, animated: false });
 
     let title = 'Top Rated Manga';
     if (section === 'most_popular') title = 'Most Popular';
@@ -962,7 +1098,7 @@ export default function DiscoverScreen() {
     } finally {
       setIsLoadingFeed(false);
     }
-  }, []);
+  }, [showSeeAllChrome]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -1001,7 +1137,6 @@ export default function DiscoverScreen() {
   // Hero carousel active index
   const [heroIndex, setHeroIndex] = useState(0);
   const [cachedHeroBanners, setCachedHeroBanners] = useState<Record<string, string>>({});
-  const [screenFocusKey, setScreenFocusKey] = useState(0);
 
   const fetchData = useCallback(async () => {
     try {
@@ -1034,14 +1169,8 @@ export default function DiscoverScreen() {
           url: getMangaCover(m, '512'),
         }));
         const heroCoverUrls = heroItems.map((h) => h.url).filter(Boolean) as string[];
-        const heroPlaceholderUrls = pop
-          .slice(0, POPULAR_TOP_LIMIT)
-          .map((m) => getMangaCover(m, '256'))
-          .filter(Boolean) as string[];
-
-        const allPrefetchUrls = [...heroCoverUrls, ...heroPlaceholderUrls];
-        if (allPrefetchUrls.length > 0) {
-          Image.prefetch(allPrefetchUrls, 'memory-disk');
+        if (heroCoverUrls.length > 0) {
+          Image.prefetch(heroCoverUrls, 'memory-disk');
         }
         BannerCacheManager.prefetchHeroBanners(heroItems).then((resolved) => {
           if (Object.keys(resolved).length > 0) {
@@ -1069,13 +1198,8 @@ export default function DiscoverScreen() {
           .slice(0, POPULAR_TOP_LIMIT)
           .map((m) => getMangaCover(m, '512'))
           .filter(Boolean) as string[];
-        const heroPlaceholderUrls = pop
-          .slice(0, POPULAR_TOP_LIMIT)
-          .map((m) => getMangaCover(m, '256'))
-          .filter(Boolean) as string[];
-        const allPrefetchUrls = [...heroCoverUrls, ...heroPlaceholderUrls];
-        if (allPrefetchUrls.length > 0) {
-          Image.prefetch(allPrefetchUrls, 'memory-disk');
+        if (heroCoverUrls.length > 0) {
+          Image.prefetch(heroCoverUrls, 'memory-disk');
         }
 
         setFeedManga(feedResult.data);
@@ -1104,7 +1228,6 @@ export default function DiscoverScreen() {
   useFocusEffect(
     useCallback(() => {
       setIsScreenFocused(true);
-      setScreenFocusKey((k) => k + 1);
       return () => {
         setIsScreenFocused(false);
       };
@@ -1138,9 +1261,46 @@ export default function DiscoverScreen() {
     activeFilters !== null ||
     (Platform.OS !== 'web' && searchQuery.trim().length > 0);
 
+  // Android Hardware Back Button & Edge-Swipe Navigation Handler
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        if (activeSeeAllSection !== null) {
+          triggerHaptic();
+          showSeeAllChrome();
+          setActiveSeeAllSection(null);
+          return true;
+        }
+        if (isShowingSearch || activeNavId === 'search_results') {
+          triggerHaptic();
+          handleResetToDiscover();
+          return true;
+        }
+        if (activeNavId === 'popular') {
+          triggerHaptic();
+          handleResetToDiscover();
+          return true;
+        }
+        return false;
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+
+      return () => {
+        subscription.remove();
+      };
+    }, [activeSeeAllSection, isShowingSearch, activeNavId, showSeeAllChrome, handleResetToDiscover])
+  );
+
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     setCurrentPage(1);
+
+    // Completely flush hero banner cache & native image RAM cache on Discover pull-to-refresh
+    try {
+      await BannerCacheManager.clearCache();
+      setCachedHeroBanners({});
+    } catch {}
 
     if (Platform.OS !== 'web' && !activeSeeAllSection && !isShowingSearch) {
       try {
@@ -1332,6 +1492,8 @@ export default function DiscoverScreen() {
         } else {
           window.scrollTo({ top: 380, behavior: 'smooth' });
         }
+      } else {
+        mainScrollViewRef.current?.scrollTo({ y: 0, animated: true });
       }
 
       if (searchResults.length > 0 || activeFilters || searchQuery.trim()) {
@@ -1484,7 +1646,7 @@ export default function DiscoverScreen() {
     ? (cachedHeroBanners[currentHeroManga.id] || BannerCacheManager.getCachedUri(currentHeroManga.id))
     : null;
   const currentHeroCover = localCachedHeroUri || (currentHeroManga ? getMangaCover(currentHeroManga, '512') : null);
-  const currentHeroPlaceholder = currentHeroManga ? getMangaCover(currentHeroManga, '256') : null;
+  const currentHeroPlaceholder = currentHeroManga ? getMangaCover(currentHeroManga, '512') : null;
   const currentHeroTitle = currentHeroManga ? getMangaTitle(currentHeroManga) : '';
   const currentHeroAuthor = currentHeroManga ? extractAuthorName(currentHeroManga) : '';
   const currentHeroDesc = currentHeroManga
@@ -1612,20 +1774,38 @@ export default function DiscoverScreen() {
 
           {/* Top Header (Mobile Native Only) */}
           {Platform.OS !== 'web' && (
-            <View style={styles.header}>
-              <View style={styles.headerLeft}>
+            activeSeeAllSection !== null ? (
+              <Animated.View
+                style={[
+                  styles.stickySeeAllHeader,
+                  {
+                    backgroundColor: colors.background,
+                    borderBottomColor: colors.border,
+                    transform: [{ translateY: seeAllHeaderTranslateY }],
+                    opacity: seeAllHeaderOpacity,
+                  },
+                ]}
+              >
                 <Pressable
-                  onPress={handleResetToDiscover}
-                  style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}
+                  onPress={() => {
+                    triggerHaptic();
+                    setActiveSeeAllSection(null);
+                  }}
+                  style={({ pressed }) => [styles.seeAllBackBtn, pressed && { opacity: 0.6 }]}
                   hitSlop={8}
                   accessibilityRole="button"
-                  accessibilityLabel="Discover home"
+                  accessibilityLabel="Back to Discover"
                 >
-                  <Text style={[styles.appTitle, { color: colors.text }]}>Discover</Text>
+                  <Ionicons name="chevron-back" size={24} color={colors.accent} />
                 </Pressable>
-              </View>
-
-              <View style={styles.headerRight}>
+                <View style={styles.seeAllTitleWrap}>
+                  <Text style={[styles.sectionTitle, { color: colors.text }]} numberOfLines={1}>
+                    {activeFeedTitle}
+                  </Text>
+                  <Text style={[styles.sectionItemCount, { color: colors.textMuted }]}>
+                    ({totalMangaCount.toLocaleString()} titles)
+                  </Text>
+                </View>
                 <Pressable
                   onPress={() => setAdvancedSearchVisible(true)}
                   style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1, padding: 6 }]}
@@ -1635,8 +1815,34 @@ export default function DiscoverScreen() {
                 >
                   <Ionicons name="search-outline" size={22} color={colors.text} />
                 </Pressable>
+              </Animated.View>
+            ) : (
+              <View style={styles.header}>
+                <View style={styles.headerLeft}>
+                  <Pressable
+                    onPress={handleResetToDiscover}
+                    style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Discover home"
+                  >
+                    <Text style={[styles.appTitle, { color: colors.text }]}>Discover</Text>
+                  </Pressable>
+                </View>
+
+                <View style={styles.headerRight}>
+                  <Pressable
+                    onPress={() => setAdvancedSearchVisible(true)}
+                    style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1, padding: 6 }]}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Search titles"
+                  >
+                    <Ionicons name="search-outline" size={22} color={colors.text} />
+                  </Pressable>
+                </View>
               </View>
-            </View>
+            )
           )}
 
           {/* Compact Offline Notification Banner when device is offline */}
@@ -1649,7 +1855,14 @@ export default function DiscoverScreen() {
               ref={mainScrollViewRef}
               showsVerticalScrollIndicator={false}
               onScroll={handleScroll}
+              onScrollBeginDrag={handleScrollBeginDrag}
+              onScrollEndDrag={handleScrollEndDrag}
+              onMomentumScrollEnd={handleMomentumScrollEnd}
               scrollEventThrottle={16}
+              contentContainerStyle={[
+                activeSeeAllSection !== null && Platform.OS !== 'web' && { paddingTop: 54 },
+                { paddingBottom: activeSeeAllSection !== null ? 70 : (Platform.OS === 'web' ? 32 : 76) },
+              ]}
               refreshControl={
                 <RefreshControl
                   refreshing={refreshing}
@@ -1672,17 +1885,21 @@ export default function DiscoverScreen() {
                       )}
                     </View>
                   </View>
-                  {isSearching ? (
+                  {(isSearching || isChangingPage) ? (
                     <View style={styles.mangaGrid}>
                       {Array.from({ length: 9 }).map((_, i) => (
                         <View
                           key={i}
                           style={{
-                            width: Platform.OS === 'web' ? ('calc((100% - 80px) / 9)' as any) : 110,
+                            width: Platform.OS === 'web' ? ('calc((100% - 80px) / 9)' as any) : feedCardWidth,
                             marginBottom: 12,
                           }}
                         >
-                          <Skeleton width="100%" height={160} borderRadius={Radius.md} />
+                          <Skeleton width="100%" height={feedCardHeight} borderRadius={Radius.md} />
+                          <View style={{ marginTop: 6, gap: 4 }}>
+                            <Skeleton width="85%" height={12} borderRadius={Radius.xs} />
+                            <Skeleton width="50%" height={10} borderRadius={Radius.xs} />
+                          </View>
                         </View>
                       ))}
                     </View>
@@ -1719,12 +1936,12 @@ export default function DiscoverScreen() {
                       {searchResults.length > 0 && totalMangaCount > PAGE_SIZE && (
                         <View style={styles.paginationRow}>
                           <Pressable
-                            disabled={currentPage <= 1 || isSearching}
+                            disabled={currentPage <= 1 || isSearching || isChangingPage}
                             onPress={() => handlePageChange(currentPage - 1)}
                             style={({ pressed }) => [
                               styles.pageBtn,
                               { backgroundColor: colors.surfaceElevated },
-                              (currentPage <= 1 || isSearching) && { opacity: 0.3 },
+                              (currentPage <= 1 || isSearching || isChangingPage) && { opacity: 0.3 },
                               pressed && { opacity: 0.7 },
                             ]}
                             accessibilityRole="button"
@@ -1741,12 +1958,12 @@ export default function DiscoverScreen() {
                           </View>
 
                           <Pressable
-                            disabled={currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isSearching}
+                            disabled={currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isSearching || isChangingPage}
                             onPress={() => handlePageChange(currentPage + 1)}
                             style={({ pressed }) => [
                               styles.pageBtn,
                               { backgroundColor: colors.surfaceElevated },
-                              (currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isSearching) && { opacity: 0.3 },
+                              (currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isSearching || isChangingPage) && { opacity: 0.3 },
                               pressed && { opacity: 0.7 },
                             ]}
                             accessibilityRole="button"
@@ -2005,7 +2222,7 @@ export default function DiscoverScreen() {
                                 if (total > 0) ratingCount = formatCompactNumber(total);
                               }
                               const coverUri = cachedHeroBanners[heroManga.id] || BannerCacheManager.getCachedUri(heroManga.id) || getMangaCover(heroManga, '512');
-                              const placeholderUri = getMangaCover(heroManga, '256');
+                              const placeholderUri = getMangaCover(heroManga, '512');
                               const mangaTitle = getMangaTitle(heroManga);
                               const authorName = extractAuthorName(heroManga);
                               const tags = heroManga.attributes.tags?.slice(0, 3) ?? [];
@@ -2032,15 +2249,13 @@ export default function DiscoverScreen() {
                                     {/* 1. Full-Bleed High-Res Background Image */}
                                     {coverUri ? (
                                       <Image
-                                        key={`hero_banner_${heroManga.id}_${idx}_${screenFocusKey}`}
-                                        source={{ uri: coverUri }}
-                                        placeholder={placeholderUri ? { uri: placeholderUri } : undefined}
-                                        placeholderContentFit="cover"
+                                        source={getCoverSource(coverUri)}
                                         style={styles.mobileHeroImage}
                                         contentFit="cover"
                                         contentPosition="top"
                                         priority={idx === 0 || idx === loopHeroCards.length - 1 ? 'high' : 'normal'}
                                         cachePolicy="memory-disk"
+                                        recyclingKey={coverUri || undefined}
                                         transition={150}
                                       />
                                     ) : (
@@ -2125,7 +2340,7 @@ export default function DiscoverScreen() {
                           {/* Cinematic Ambient Backdrop Cover (Soft Blurred & Feathered into Background) */}
                           {currentHeroCover && (
                             <Image
-                              source={{ uri: currentHeroCover }}
+                              source={getCoverSource(currentHeroCover)}
                               style={[styles.heroBackdrop, isLightTheme && { opacity: 0.5 }]}
                               contentFit="cover"
                               blurRadius={Platform.OS === 'web' ? 24 : 18}
@@ -2215,7 +2430,7 @@ export default function DiscoverScreen() {
                               >
                                 {currentHeroCover ? (
                                   <Image
-                                    source={{ uri: currentHeroCover }}
+                                    source={getCoverSource(currentHeroCover)}
                                     style={styles.trendingCoverImage}
                                     contentFit="cover"
                                     transition={200}
@@ -2585,31 +2800,17 @@ export default function DiscoverScreen() {
                             </Pressable>
                           </View>
                         </View>
-                      ) : (
-                        <View style={styles.seeAllHeaderRow}>
-                          <Pressable
-                            onPress={() => setActiveSeeAllSection(null)}
-                            style={({ pressed }) => [styles.seeAllBackBtn, pressed && { opacity: 0.6 }]}
-                            hitSlop={8}
-                            accessibilityRole="button"
-                            accessibilityLabel="Back to Discover"
-                          >
-                            <Ionicons name="chevron-back" size={22} color={colors.accent} />
-                          </Pressable>
-                          <View style={styles.seeAllTitleWrap}>
-                            <Text style={[styles.sectionTitle, { color: colors.text }]}>{activeFeedTitle}</Text>
-                            <Text style={[styles.sectionItemCount, { color: colors.textMuted }]}>
-                              ({totalMangaCount.toLocaleString()} titles)
-                            </Text>
-                          </View>
-                        </View>
-                      )}
+                      ) : null}
 
                       {/* ─── Dynamic Feed (Latest Updates / Recently Added) ─── */}
                       <View
                         nativeID="feed-section"
                         {...(Platform.OS === 'web' ? { id: 'feed-section' } as any : {})}
-                        style={[styles.section, Platform.OS === 'web' && styles.webCenteredContent]}
+                        style={[
+                          styles.section,
+                          activeSeeAllSection !== null && { marginBottom: 0 },
+                          Platform.OS === 'web' && styles.webCenteredContent,
+                        ]}
                       >
                         {Platform.OS === 'web' && (
                           <View style={styles.sectionHeader}>
@@ -2624,22 +2825,26 @@ export default function DiscoverScreen() {
                           </View>
                         )}
 
-                        {isLoadingFeed ? (
+                        {(isLoadingFeed || isChangingPage) ? (
                           <View style={styles.mangaGrid}>
-                            {Array.from({ length: 27 }).map((_, i) => (
+                            {Array.from({ length: Platform.OS === 'web' ? 27 : 18 }).map((_, i) => (
                               <View
                                 key={i}
                                 style={{
-                                  width: Platform.OS === 'web' ? ('calc((100% - 80px) / 9)' as any) : 110,
+                                  width: Platform.OS === 'web' ? ('calc((100% - 80px) / 9)' as any) : feedCardWidth,
                                   marginBottom: 12,
                                 }}
                               >
-                                <Skeleton width="100%" height={160} borderRadius={Radius.md} />
+                                <Skeleton width="100%" height={feedCardHeight} borderRadius={Radius.md} />
+                                <View style={{ marginTop: 6, gap: 4 }}>
+                                  <Skeleton width="85%" height={12} borderRadius={Radius.xs} />
+                                  <Skeleton width="50%" height={10} borderRadius={Radius.xs} />
+                                </View>
                               </View>
                             ))}
                           </View>
                         ) : (
-                          <View style={[styles.mangaGrid, isChangingPage && { opacity: 0.45 }]}>
+                          <View style={styles.mangaGrid}>
                             {feedManga.map((manga, idx) => {
                               const stat = mangaStatsMap[manga.id];
                               const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
@@ -2664,12 +2869,12 @@ export default function DiscoverScreen() {
                         {feedManga.length > 0 && totalMangaCount > PAGE_SIZE && (
                           <View style={styles.paginationRow}>
                             <Pressable
-                              disabled={currentPage <= 1 || isLoadingFeed}
+                              disabled={currentPage <= 1 || isLoadingFeed || isChangingPage}
                               onPress={() => handlePageChange(currentPage - 1)}
                               style={({ pressed }) => [
                                 styles.pageBtn,
                                 { backgroundColor: colors.surfaceElevated },
-                                (currentPage <= 1 || isLoadingFeed) && { opacity: 0.3 },
+                                (currentPage <= 1 || isLoadingFeed || isChangingPage) && { opacity: 0.3 },
                                 pressed && { opacity: 0.7 },
                               ]}
                               accessibilityRole="button"
@@ -2686,12 +2891,12 @@ export default function DiscoverScreen() {
                             </View>
 
                             <Pressable
-                              disabled={currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isLoadingFeed}
+                              disabled={currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isLoadingFeed || isChangingPage}
                               onPress={() => handlePageChange(currentPage + 1)}
                               style={({ pressed }) => [
                                 styles.pageBtn,
                                 { backgroundColor: colors.surfaceElevated },
-                                (currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isLoadingFeed) && { opacity: 0.3 },
+                                (currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isLoadingFeed || isChangingPage) && { opacity: 0.3 },
                                 pressed && { opacity: 0.7 },
                               ]}
                               accessibilityRole="button"
@@ -2707,8 +2912,6 @@ export default function DiscoverScreen() {
                   )}
                 </>
               )}
-
-              <View style={{ height: 60 }} />
             </ScrollView>
           )}
         </View>
@@ -2914,6 +3117,7 @@ const styles = StyleSheet.create({
   /* Main Content Column */
   mainContentColumn: {
     flex: 1,
+    overflow: Platform.OS !== 'web' ? 'hidden' : 'visible',
   },
   header: {
     position: 'relative',
@@ -2923,6 +3127,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingTop: Spacing.sm,
     paddingBottom: Spacing.sm,
+  },
+  stickySeeAllHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 15,
+    height: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 4,
   },
   headerLeft: {
     flexDirection: 'row',
@@ -3882,8 +4099,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: Spacing.lg,
-    marginBottom: Spacing.md,
+    marginTop: Spacing.md,
+    marginBottom: Spacing.xs,
     marginHorizontal: Spacing.md,
     gap: Spacing.sm,
   },

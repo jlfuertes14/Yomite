@@ -555,8 +555,31 @@ export async function getCommunityThreads(): Promise<ForumThread[]> {
 
     if (error || !data) return [];
 
+    // Tally real reply counts for every thread
+    const threadIds = data.map((row: any) => String(row.id));
+    const replyCountMap: Record<string, number> = {};
+    if (threadIds.length > 0) {
+      try {
+        const { data: replyRows } = await supabase
+          .from('thread_replies')
+          .select('thread_id')
+          .in('thread_id', threadIds);
+
+        if (replyRows) {
+          for (const row of replyRows) {
+            const tid = String((row as any).thread_id);
+            if (tid) {
+              replyCountMap[tid] = (replyCountMap[tid] || 0) + 1;
+            }
+          }
+        }
+      } catch {
+        // Fallback gracefully
+      }
+    }
+
     return data.map((row: any) => ({
-      id: row.id,
+      id: String(row.id),
       user_id: row.user_id || undefined,
       userId: row.user_id || undefined,
       title: row.title,
@@ -569,7 +592,7 @@ export async function getCommunityThreads(): Promise<ForumThread[]> {
       imageUrls: row.image_urls || undefined,
       created_at: row.created_at,
       createdAt: row.created_at || new Date().toISOString(),
-      repliesCount: 0,
+      repliesCount: replyCountMap[String(row.id)] || 0,
       lastReplyAt: row.created_at || new Date().toISOString(),
     }));
   } catch {

@@ -1,12 +1,27 @@
-import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
+import { Image } from 'expo-image';
+import { Platform } from 'react-native';
 
-const BANNER_CACHE_SUBDIR = 'hero_banners/';
+const BANNER_CACHE_SUBDIR = 'hero_banners_v512/';
+const LEGACY_BANNER_CACHE_SUBDIR = 'hero_banners/';
+const PURGE_FLAG_KEY = '@yomite_banner_cache_purged_v512_clean';
+
+const MANGA_REQUEST_HEADERS = {
+  'User-Agent': 'Yomite/1.2.6',
+  Referer: 'https://mangadex.org',
+};
 
 function getBannerCacheDir(): string {
   if (Platform.OS === 'web') return '';
   const baseDir = (FileSystem as any).cacheDirectory || (FileSystem as any).documentDirectory || '';
   return `${baseDir}${BANNER_CACHE_SUBDIR}`;
+}
+
+function getLegacyBannerCacheDir(): string {
+  if (Platform.OS === 'web') return '';
+  const baseDir = (FileSystem as any).cacheDirectory || (FileSystem as any).documentDirectory || '';
+  return `${baseDir}${LEGACY_BANNER_CACHE_SUBDIR}`;
 }
 
 let isDirCreated = false;
@@ -15,16 +30,44 @@ async function ensureDirExists(): Promise<string> {
   if (Platform.OS === 'web') return '';
   const dir = getBannerCacheDir();
   if (!dir) return '';
-  if (!isDirCreated) {
-    try {
+
+  try {
+    // 1. Check if one-time legacy 256 cache purge was performed
+    const isPurged = await AsyncStorage.getItem(PURGE_FLAG_KEY).catch(() => null);
+    if (!isPurged) {
+      // Clear native expo-image memory & disk caches so no stale 256 thumbnails linger
+      await Image.clearMemoryCache().catch(() => { });
+      await Image.clearDiskCache().catch(() => { });
+
+      // Delete legacy directory
+      const legacyDir = getLegacyBannerCacheDir();
+      if (legacyDir) {
+        const legacyInfo = await FileSystem.getInfoAsync(legacyDir).catch(() => null);
+        if (legacyInfo?.exists) {
+          await FileSystem.deleteAsync(legacyDir, { idempotent: true }).catch(() => { });
+        }
+      }
+
+      // Clean current directory to guarantee no low-res 256 files remain
+      const dirInfo = await FileSystem.getInfoAsync(dir).catch(() => null);
+      if (dirInfo?.exists) {
+        await FileSystem.deleteAsync(dir, { idempotent: true }).catch(() => { });
+      }
+
+      memoryBannerMap.clear();
+      await AsyncStorage.setItem(PURGE_FLAG_KEY, 'true').catch(() => { });
+      isDirCreated = false;
+    }
+
+    if (!isDirCreated) {
       const info = await FileSystem.getInfoAsync(dir);
       if (!info.exists) {
         await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
       }
       isDirCreated = true;
-    } catch {
-      // Ignore if directory creation fails or already exists
     }
+  } catch {
+    // Ignore if directory creation fails or already exists
   }
   return dir;
 }
@@ -58,21 +101,33 @@ export const BannerCacheManager = {
       const dir = await ensureDirExists();
       if (!dir) return remoteUrl;
 
-      const localFilePath = `${dir}${mangaId}.jpg`;
+      const localFilePath = `${dir}${mangaId}_512.jpg`;
       const fileInfo = await FileSystem.getInfoAsync(localFilePath);
 
-      if (fileInfo.exists && (fileInfo as any).size > 1000) {
+      // Verify file exists and has healthy size (> 10KB for 512 image; 400 error was 45 bytes)
+      if (fileInfo.exists && (fileInfo as any).size > 10000) {
         memoryBannerMap.set(mangaId, localFilePath);
         return localFilePath;
       }
 
-      // Download file to local persistent storage
-      const downloadRes = await FileSystem.downloadAsync(remoteUrl, localFilePath);
-      if (downloadRes.status === 200) {
-        memoryBannerMap.set(mangaId, downloadRes.uri);
-        return downloadRes.uri;
+      // If file exists but is corrupted/truncated, delete it
+      if (fileInfo.exists) {
+        await FileSystem.deleteAsync(localFilePath, { idempotent: true }).catch(() => { });
       }
-    } catch (e) {
+
+      // Download file to local persistent storage with User-Agent header
+      const downloadRes = await FileSystem.downloadAsync(remoteUrl, localFilePath, {
+        headers: MANGA_REQUEST_HEADERS,
+      });
+
+      if (downloadRes.status === 200) {
+        const dlInfo = await FileSystem.getInfoAsync(downloadRes.uri);
+        if (dlInfo.exists && (dlInfo as any).size > 10000) {
+          memoryBannerMap.set(mangaId, downloadRes.uri);
+          return downloadRes.uri;
+        }
+      }
+    } catch {
       // On any download or filesystem error, fall back to remoteUrl
     }
 
@@ -101,4 +156,31 @@ export const BannerCacheManager = {
     await Promise.allSettled(promises);
     return resolved;
   },
+
+  /**
+   * Wipes all cached hero banners on disk, clears in-memory map,
+   * and clears expo-image memory and disk caches.
+   */
+  async clearCache(): Promise<void> {
+    memoryBannerMap.clear();
+    try {
+      await Image.clearMemoryCache();
+      await Image.clearDiskCache();
+    } catch { }
+
+    if (Platform.OS === 'web') return;
+
+    try {
+      const dir = getBannerCacheDir();
+      if (dir) {
+        await FileSystem.deleteAsync(dir, { idempotent: true });
+      }
+      const legacyDir = getLegacyBannerCacheDir();
+      if (legacyDir) {
+        await FileSystem.deleteAsync(legacyDir, { idempotent: true });
+      }
+      isDirCreated = false;
+    } catch { }
+  },
 };
+

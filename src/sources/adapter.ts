@@ -299,3 +299,100 @@ export function getSourceDisplayName(idOrUrl?: string | null): string {
 
   return 'External';
 }
+
+/**
+ * Universal Similar / Recommended Manga Fetcher
+ * Dispatches to MangaDex tag search or the corresponding Kotatsu extension catalog
+ */
+export async function getUniversalSimilarManga(
+  mangaId: string,
+  currentManga: Manga
+): Promise<Manga[]> {
+  const cacheKey = `similar_manga_${mangaId}`;
+  const cached = await CacheManager.get<Manga[]>(cacheKey);
+  if (cached && cached.length > 0) {
+    return cached;
+  }
+
+  let results: Manga[] = [];
+
+  if (!isExternalSource(mangaId)) {
+    const cleanId = mangaId.replace(/^mangadex:/, '');
+    const tagIds = (currentManga.attributes?.tags || [])
+      .map((t) => t.id)
+      .filter((id) => /^[0-9a-f]{8}-[0-9a-f]{4}/i.test(id))
+      .slice(0, 4);
+
+    if (tagIds.length > 0) {
+      try {
+        const { searchManga } = await import('../api/mangadex');
+        const searchRes = await searchManga(
+          {
+            includedTags: tagIds,
+            sort: 'followedCount',
+            order: 'desc',
+          },
+          12
+        );
+        results = (searchRes.data || []).filter((m) => m.id !== cleanId && m.id !== mangaId);
+      } catch (e) {
+        console.warn('MangaDex tag search for similar failed:', e);
+      }
+    }
+
+    if (results.length === 0) {
+      const { getPopularManga } = await import('../api/mangadex');
+      const popular = await getPopularManga(12);
+      results = (popular || []).filter((m) => m.id !== cleanId && m.id !== mangaId);
+    }
+  } else {
+    const resolved = SourceManager.resolveSource(mangaId);
+    if (resolved) {
+      const parser = resolved.parser;
+      const genreTags = (currentManga.attributes?.tags || [])
+        .map((t) => t.attributes?.name?.en)
+        .filter(Boolean) as string[];
+
+      let sourceItems: SourceManga[] = [];
+
+      // 1. Try querying extension with primary genre if available
+      if (genreTags.length > 0) {
+        try {
+          const tagFiltered = await parser.getList({
+            tags: [genreTags[0]],
+            order: 'popular',
+            page: 1,
+          });
+          sourceItems = (tagFiltered || []).filter(
+            (item) => item.id !== mangaId && item.url !== resolved.rawId
+          );
+        } catch (e) {
+          console.warn(`Tag search on extension ${parser.metadata.name} failed:`, e);
+        }
+      }
+
+      // 2. Fallback to extension's popular / featured catalog
+      if (!sourceItems || sourceItems.length === 0) {
+        try {
+          const popularItems = await parser.getList({
+            order: 'popular',
+            page: 1,
+          });
+          sourceItems = (popularItems || []).filter(
+            (item) => item.id !== mangaId && item.url !== resolved.rawId
+          );
+        } catch (e) {
+          console.warn(`Popular search on extension ${parser.metadata.name} failed:`, e);
+        }
+      }
+
+      results = (sourceItems || []).slice(0, 9).map((sm) => sourceMangaToAppManga(sm));
+    }
+  }
+
+  const finalResults = results.slice(0, 9);
+  if (finalResults.length > 0) {
+    await CacheManager.set(cacheKey, finalResults, 30 * 60 * 1000); // 30 min TTL
+  }
+  return finalResults;
+}

@@ -1797,6 +1797,10 @@ export default function DiscoverScreen() {
                             }}
                           >
                             <Skeleton width="100%" height={160} borderRadius={Radius.md} />
+                            <View style={{ marginTop: 6, gap: 4 }}>
+                              <Skeleton width="85%" height={12} borderRadius={Radius.xs} />
+                              <Skeleton width="50%" height={10} borderRadius={Radius.xs} />
+                            </View>
                           </View>
                         ))}
                       </View>

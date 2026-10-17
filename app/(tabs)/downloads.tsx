@@ -11,11 +11,12 @@ import {
   LayoutAnimation,
   Animated,
   Easing,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useDownloadStore, DownloadedChapter } from '../../src/store/downloadStore';
 import {
   removeDownloadedChapter,
@@ -26,6 +27,7 @@ import {
   pickAndroidStorageDirectory,
 } from '../../src/services/downloadService';
 import { Spacing, Radius, Typography } from '../../constants/Colors';
+import { useColorScheme } from '../../src/hooks/useColorScheme';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
 import { AnimatedCard } from '../../src/components/AnimatedCard';
@@ -47,10 +49,30 @@ interface MangaDownloadGroup {
 export default function DownloadsScreen() {
   const router = useRouter();
   const colors = useThemeColors();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const { from } = useLocalSearchParams<{ from?: string }>();
+  const [entrySource, setEntrySource] = useState<'library' | 'more'>(() => {
+    return from === 'library' ? 'library' : 'more';
+  });
+
+  useEffect(() => {
+    if (from === 'library' || from === 'more') {
+      setEntrySource(from);
+    }
+  }, [from]);
+
+  const handleNavigateBack = useCallback(() => {
+    if (entrySource === 'library') {
+      router.replace('/(tabs)/library');
+    } else {
+      router.replace('/(tabs)/more');
+    }
+  }, [entrySource, router]);
+
   const [drawerVisible, setDrawerVisible] = useState(false);
   const { chapters, downloadDirectory, setCustomStorageDirectory } = useDownloadStore();
 
-  const [activeTab, setActiveTab] = useState<'all' | 'completed' | 'in_progress'>('all');
   const [showFolderModal, setShowFolderModal] = useState(false);
   const [folderRendered, setFolderRendered] = useState(false);
   const [customPathInput, setCustomPathInput] = useState('');
@@ -90,31 +112,11 @@ export default function DownloadsScreen() {
     );
   }, [chapters]);
 
-  const totalDownloadingCount = useMemo(() => {
-    return chapterList.filter(
-      (c) => c.status === 'downloading' || c.status === 'pending' || c.status === 'paused'
-    ).length;
-  }, [chapterList]);
-
-  const filteredChapters = useMemo(() => {
-    return chapterList.filter((item) => {
-      if (activeTab === 'completed') return item.status === 'completed';
-      if (activeTab === 'in_progress')
-        return (
-          item.status === 'downloading' ||
-          item.status === 'pending' ||
-          item.status === 'paused' ||
-          item.status === 'error'
-        );
-      return true;
-    });
-  }, [chapterList, activeTab]);
-
-  // Group chapters by Manga
+  // Group chapters by Manga with Mihon / Kotatsu priority: active downloads first
   const groupedManga: MangaDownloadGroup[] = useMemo(() => {
     const map = new Map<string, MangaDownloadGroup>();
 
-    filteredChapters.forEach((ch) => {
+    chapterList.forEach((ch) => {
       if (!map.has(ch.mangaId)) {
         map.set(ch.mangaId, {
           mangaId: ch.mangaId,
@@ -134,14 +136,19 @@ export default function DownloadsScreen() {
       group.totalSizeBytes += ch.sizeBytes || 0;
     });
 
-    return Array.from(map.values());
-  }, [filteredChapters]);
+    return Array.from(map.values()).sort((a, b) => {
+      // Manga with active downloads appear at the top (Mihon/Kotatsu queue priority)
+      if (a.downloadingCount > 0 && b.downloadingCount === 0) return -1;
+      if (b.downloadingCount > 0 && a.downloadingCount === 0) return 1;
+      return 0;
+    });
+  }, [chapterList]);
 
   const activeDirectory = getDisplayDownloadDirectory();
   const isSelecting = selectedChapterIds.size > 0;
   const allVisibleSelected =
-    filteredChapters.length > 0 &&
-    filteredChapters.every((item) => selectedChapterIds.has(item.chapterId));
+    chapterList.length > 0 &&
+    chapterList.every((item) => selectedChapterIds.has(item.chapterId));
 
   const animateInFolder = useCallback(() => {
     folderFadeAnim.setValue(0);
@@ -237,14 +244,28 @@ export default function DownloadsScreen() {
     });
   };
 
+  const handleToggleMangaSelection = (group: MangaDownloadGroup) => {
+    triggerHaptic();
+    setSelectedChapterIds((current) => {
+      const next = new Set(current);
+      const allSelected = group.chapters.length > 0 && group.chapters.every((ch) => next.has(ch.chapterId));
+      if (allSelected) {
+        group.chapters.forEach((ch) => next.delete(ch.chapterId));
+      } else {
+        group.chapters.forEach((ch) => next.add(ch.chapterId));
+      }
+      return next;
+    });
+  };
+
   const toggleSelectAllVisible = () => {
     triggerHaptic();
     setSelectedChapterIds((current) => {
       const next = new Set(current);
-      if (filteredChapters.every((item) => next.has(item.chapterId))) {
-        filteredChapters.forEach((item) => next.delete(item.chapterId));
+      if (chapterList.every((item) => next.has(item.chapterId))) {
+        chapterList.forEach((item) => next.delete(item.chapterId));
       } else {
-        filteredChapters.forEach((item) => next.add(item.chapterId));
+        chapterList.forEach((item) => next.add(item.chapterId));
       }
       return next;
     });
@@ -254,6 +275,41 @@ export default function DownloadsScreen() {
     triggerHaptic();
     setSelectedChapterIds(new Set());
   };
+
+  // Seamless Android Back Navigation: return to More hub instead of Discover
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        if (confirmModalConfig.visible) {
+          setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
+          return true;
+        }
+        if (showFolderModal) {
+          handleDismissFolderModal();
+          return true;
+        }
+        if (selectedChapterIds.size > 0) {
+          clearSelection();
+          return true;
+        }
+        if (drawerVisible) {
+          setDrawerVisible(false);
+          return true;
+        }
+        handleNavigateBack();
+        return true;
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => subscription.remove();
+    }, [
+      confirmModalConfig.visible,
+      showFolderModal,
+      selectedChapterIds.size,
+      drawerVisible,
+      handleNavigateBack,
+    ])
+  );
 
   const handlePickFolder = async () => {
     triggerHaptic();
@@ -390,6 +446,8 @@ export default function DownloadsScreen() {
 
   const renderMangaGroup = ({ item: group, index }: { item: MangaDownloadGroup; index: number }) => {
     const isExpanded = expandedMangaIds.has(group.mangaId) || group.downloadingCount > 0;
+    const isGroupSelected = group.chapters.length > 0 && group.chapters.every((ch) => selectedChapterIds.has(ch.chapterId));
+    const isGroupPartiallySelected = !isGroupSelected && group.chapters.some((ch) => selectedChapterIds.has(ch.chapterId));
 
     return (
       <View
@@ -402,11 +460,31 @@ export default function DownloadsScreen() {
       >
         {/* Accordion Header Row */}
         <Pressable
-          onPress={() => toggleMangaExpand(group.mangaId)}
-          style={styles.groupHeader}
+          onPress={() => {
+            if (isSelecting) {
+              handleToggleMangaSelection(group);
+            } else {
+              toggleMangaExpand(group.mangaId);
+            }
+          }}
+          onLongPress={() => handleToggleMangaSelection(group)}
+          style={[
+            styles.groupHeader,
+            isGroupSelected && { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.025)' },
+          ]}
           accessibilityRole="button"
           accessibilityLabel={`Toggle chapters for ${group.mangaTitle}`}
         >
+          {isSelecting && (
+            <View style={styles.selectionCheck}>
+              <Ionicons
+                name={isGroupSelected ? 'checkmark-circle' : isGroupPartiallySelected ? 'remove-circle' : 'ellipse-outline'}
+                size={22}
+                color={isGroupSelected || isGroupPartiallySelected ? colors.accent : colors.textMuted}
+              />
+            </View>
+          )}
+
           <View style={[styles.coverContainer, { backgroundColor: colors.surfaceElevated }]}>
             {group.coverUrl ? (
               <Image source={{ uri: group.coverUrl }} style={styles.coverImage} contentFit="cover" transition={150} />
@@ -436,23 +514,29 @@ export default function DownloadsScreen() {
 
           {/* Action Buttons & Dropdown Chevron */}
           <View style={styles.groupHeaderActions}>
-            <Pressable
-              onPress={() => handleDeleteMangaGroup(group)}
-              hitSlop={8}
-              style={styles.iconBtn}
-              accessibilityRole="button"
-              accessibilityLabel={`Delete all chapters of ${group.mangaTitle}`}
-            >
-              <Ionicons name="trash-outline" size={17} color={colors.textMuted} />
-            </Pressable>
+            {!isSelecting && (
+              <Pressable
+                onPress={() => handleDeleteMangaGroup(group)}
+                hitSlop={8}
+                style={styles.iconBtn}
+                accessibilityRole="button"
+                accessibilityLabel={`Delete all chapters of ${group.mangaTitle}`}
+              >
+                <Ionicons name="trash-outline" size={17} color={colors.textMuted} />
+              </Pressable>
+            )}
 
-            <View style={[styles.chevronBtn, { backgroundColor: colors.surfaceElevated }]}>
+            <Pressable
+              onPress={() => toggleMangaExpand(group.mangaId)}
+              hitSlop={8}
+              style={[styles.chevronBtn, { backgroundColor: colors.surfaceElevated }]}
+            >
               <Ionicons
                 name={isExpanded ? 'chevron-up' : 'chevron-down'}
                 size={15}
                 color={colors.textSecondary}
               />
-            </View>
+            </Pressable>
           </View>
         </Pressable>
 
@@ -468,26 +552,31 @@ export default function DownloadsScreen() {
               const isSelected = selectedChapterIds.has(ch.chapterId);
 
               return (
-                <View
+                <Pressable
                   key={ch.chapterId}
-                  style={[
+                  onPress={() => {
+                    if (isSelecting) {
+                      toggleChapterSelection(ch.chapterId);
+                    }
+                  }}
+                  onLongPress={() => {
+                    toggleChapterSelection(ch.chapterId);
+                  }}
+                  style={({ pressed }) => [
                     styles.subChapterItem,
                     { borderBottomColor: colors.border },
-                    isSelected && { backgroundColor: colors.surfaceElevated },
+                    isSelected && { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.035)' },
+                    pressed && { opacity: 0.8 },
                   ]}
                 >
                   {isSelecting && (
-                    <Pressable
-                      onPress={() => toggleChapterSelection(ch.chapterId)}
-                      hitSlop={8}
-                      style={styles.selectionCheck}
-                    >
+                    <View style={styles.selectionCheck}>
                       <Ionicons
                         name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
                         size={19}
-                        color={isSelected ? colors.text : colors.textMuted}
+                        color={isSelected ? colors.accent : colors.textMuted}
                       />
-                    </Pressable>
+                    </View>
                   )}
 
                   <View style={styles.subChapterInfo}>
@@ -559,11 +648,13 @@ export default function DownloadsScreen() {
                       </Pressable>
                     )}
 
-                    <Pressable onPress={() => handleDeleteItem(ch)} style={styles.iconBtn}>
-                      <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
-                    </Pressable>
+                    {!isSelecting && (
+                      <Pressable onPress={() => handleDeleteItem(ch)} style={styles.iconBtn}>
+                        <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
+                      </Pressable>
+                    )}
                   </View>
-                </View>
+                </Pressable>
               );
             })}
           </View>
@@ -578,72 +669,74 @@ export default function DownloadsScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       <View style={[{ flex: 1, width: '100%' }, Platform.OS === 'web' && styles.webCenteredContent]}>
-        {/* Top Header Row matching modern design system */}
+        {/* Top Header Row — Standard Header or Selection Mode Bar */}
         <View style={styles.header}>
-          <View style={styles.headerTitleRow}>
-            {Platform.OS === 'web' && (
-              <Pressable
-                onPress={() => setDrawerVisible(true)}
-                style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1 }]}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel="Open Navigation Menu"
-              >
-                <Ionicons name="menu" size={24} color={colors.text} />
-              </Pressable>
-            )}
-            <Text style={[styles.headerTitle, { color: colors.text }]}>
-              {isSelecting ? `${selectedChapterIds.size} Selected` : 'Downloads'}
-            </Text>
-          </View>
+          {isSelecting ? (
+            <View style={styles.selectionBarRow}>
+              {/* Left: Close [X] button + Number of selected items text */}
+              <View style={styles.selectionLeftGroup}>
+                <Pressable
+                  onPress={clearSelection}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear selection"
+                  style={({ pressed }) => [
+                    styles.plainIconButton,
+                    { opacity: pressed ? 0.6 : 1, marginRight: 8 },
+                  ]}
+                >
+                  <Ionicons name="close" size={24} color={colors.text} />
+                </Pressable>
+                <Text style={[styles.selectionCountText, { color: colors.text }]}>
+                  {selectedChapterIds.size} selected
+                </Text>
+              </View>
 
-          <View style={styles.headerActions}>
-            {isSelecting ? (
-              <>
-                <Pressable
-                  onPress={toggleSelectAllVisible}
-                  style={[styles.headerActionPill, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
-                >
-                  <Ionicons
-                    name={allVisibleSelected ? 'remove-circle-outline' : 'checkmark-done-outline'}
-                    size={15}
-                    color={colors.textSecondary}
-                  />
-                  <Text style={[styles.headerActionPillText, { color: colors.text }]}>
-                    {allVisibleSelected ? 'Clear' : 'All'}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={handleDeleteSelected}
-                  style={[styles.headerActionPill, { backgroundColor: '#EF444415', borderColor: colors.border }]}
-                >
-                  <Ionicons name="trash-outline" size={15} color="#EF4444" />
-                  <Text style={[styles.headerActionPillText, { color: '#EF4444' }]}>Delete</Text>
-                </Pressable>
-                <Pressable onPress={clearSelection} hitSlop={8} style={styles.iconBtn}>
-                  <Ionicons name="close" size={20} color={colors.textMuted} />
-                </Pressable>
-              </>
-            ) : (
-              <View style={styles.headerRightBox}>
-                {filteredChapters.length > 0 && (
+              {/* Spacer */}
+              <View style={{ flex: 1 }} />
+
+              {/* Rightmost: Trash / Delete icon button */}
+              <Pressable
+                onPress={handleDeleteSelected}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel={`Delete ${selectedChapterIds.size} selected items`}
+                style={({ pressed }) => [
+                  styles.plainIconButton,
+                  { opacity: pressed ? 0.6 : 1 },
+                ]}
+              >
+                <Ionicons name="trash-outline" size={22} color="#EF4444" />
+              </Pressable>
+            </View>
+          ) : (
+            <>
+              <View style={styles.headerTitleRow}>
+                {Platform.OS === 'web' ? (
                   <Pressable
-                    onPress={toggleSelectAllVisible}
-                    style={({ pressed }) => [
-                      styles.storagePillBtn,
-                      {
-                        backgroundColor: colors.surfaceElevated,
-                        borderColor: colors.border,
-                        opacity: pressed ? 0.75 : 1,
-                      },
-                    ]}
+                    onPress={() => setDrawerVisible(true)}
+                    style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1 }]}
+                    hitSlop={8}
                     accessibilityRole="button"
-                    accessibilityLabel="Select chapters"
+                    accessibilityLabel="Open Navigation Menu"
                   >
-                    <Ionicons name="checkmark-circle-outline" size={13} color={colors.textSecondary} />
-                    <Text style={[styles.storagePillText, { color: colors.text }]}>Select</Text>
+                    <Ionicons name="menu" size={24} color={colors.text} />
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    onPress={handleNavigateBack}
+                    style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1, marginRight: 8 }]}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={entrySource === 'library' ? 'Back to Library' : 'Back to More'}
+                  >
+                    <Ionicons name="arrow-back" size={24} color={colors.text} />
                   </Pressable>
                 )}
+                <Text style={[styles.headerTitle, { color: colors.text }]}>Downloads</Text>
+              </View>
+
+              <View style={styles.headerActions}>
                 {/* Storage Button matching HTML Prototype */}
                 <Pressable
                   onPress={openFolderModal}
@@ -662,56 +755,8 @@ export default function DownloadsScreen() {
                   <Text style={[styles.storagePillText, { color: colors.text }]}>Storage</Text>
                 </Pressable>
               </View>
-            )}
-          </View>
-        </View>
-
-        {/* Filter Navigation Tabs (Segmented Control matching HTML Prototype) */}
-        <View style={styles.tabsRow}>
-          {[
-            { id: 'all', label: 'All', hasDot: false },
-            { id: 'completed', label: 'Completed', hasDot: false },
-            { id: 'in_progress', label: 'Downloading', hasDot: totalDownloadingCount > 0 },
-          ].map((tab) => {
-            const isSelected = activeTab === tab.id;
-            return (
-              <Pressable
-                key={tab.id}
-                onPress={() => {
-                  triggerHaptic();
-                  setActiveTab(tab.id as any);
-                }}
-                style={({ pressed }) => [
-                  styles.tabPill,
-                  isSelected
-                    ? [styles.tabPillActive, { backgroundColor: colors.accent }]
-                    : [styles.tabPillInactive, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }],
-                  { transform: [{ scale: pressed ? 0.96 : 1 }] },
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel={`Filter by ${tab.label}`}
-              >
-                <Text
-                  style={[
-                    styles.tabPillText,
-                    isSelected
-                      ? [styles.tabPillTextActive, { color: colors.accentForeground }]
-                      : [styles.tabPillTextInactive, { color: colors.textSecondary }],
-                  ]}
-                >
-                  {tab.label}
-                </Text>
-                {tab.hasDot && (
-                  <View
-                    style={[
-                      styles.tabPillDot,
-                      { backgroundColor: isSelected ? colors.accentForeground : colors.accent },
-                    ]}
-                  />
-                )}
-              </Pressable>
-            );
-          })}
+            </>
+          )}
         </View>
 
         {/* Grouped Manga Downloads List or Rich Empty State */}
@@ -731,13 +776,9 @@ export default function DownloadsScreen() {
               />
 
               {/* Title & Description */}
-              <Text style={[styles.emptyTitle, { color: colors.text }]}>No Downloads Found</Text>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>No Downloads</Text>
               <Text style={[styles.emptySub, { color: colors.textMuted }]}>
-                {activeTab === 'completed'
-                  ? 'You have no completed chapter downloads.'
-                  : activeTab === 'in_progress'
-                  ? 'No active chapter downloads in progress.'
-                  : 'Downloaded chapters will appear here grouped by manga title.'}
+                Downloaded chapters will appear here for offline reading.
               </Text>
 
               {/* Primary Explore CTA */}
@@ -959,7 +1000,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.md,
-    paddingBottom: Spacing.xs,
+    paddingBottom: Spacing.sm,
   },
   headerTitleRow: {
     flexDirection: 'row',
@@ -973,6 +1014,23 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '800',
     letterSpacing: -0.5,
+  },
+  selectionBarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    justifyContent: 'space-between',
+    minHeight: 38,
+  },
+  selectionLeftGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  selectionCountText: {
+    fontSize: 20,
+    fontWeight: '700',
+    letterSpacing: -0.3,
   },
   headerActions: {
     flexDirection: 'row',
@@ -996,61 +1054,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-  headerActionPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: Radius.full,
-    borderWidth: 0,
-    marginRight: 6,
-  },
-  headerActionPillText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
   iconBtn: {
     padding: 6,
   },
 
-  /* Segmented Filter Navigation */
-  tabsRow: {
-    flexDirection: 'row',
-    paddingHorizontal: Spacing.lg,
-    marginTop: Spacing.sm,
-    marginBottom: Spacing.md,
-    gap: 8,
-  },
-  tabPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 15,
-    paddingVertical: 7,
-    borderRadius: Radius.full,
-  },
-  tabPillActive: {},
-  tabPillInactive: {
-    borderWidth: 0,
-  },
-  tabPillText: {
-    fontSize: 12.5,
-  },
-  tabPillTextActive: {
-    fontWeight: '700',
-  },
-  tabPillTextInactive: {
-    fontWeight: '500',
-  },
-  tabPillDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-
   listContainer: {
     paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.xs,
     paddingBottom: 100,
   },
 

@@ -6,6 +6,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { LibraryEntry, LibraryCategory } from '../types';
+import { parseChapterNumber, calculateUnreadCount } from '../utils/chapter';
 
 export type LibraryDisplayMode = 'grid' | 'details' | 'compact';
 
@@ -36,16 +37,30 @@ export const useLibraryStore = create<LibraryState>()(
       setGridColumns: (gridColumns) => set({ gridColumns }),
 
       addToLibrary: (entry) =>
-        set((state) => ({
-          entries: {
-            ...state.entries,
-            [entry.mangaId]: {
-              ...entry,
-              addedAt: Date.now(),
-              updatedAt: Date.now(),
+        set((state) => {
+          const isCompleted = entry.category === 'completed';
+          let unread = entry.unreadCount;
+          if (isCompleted) {
+            unread = 0;
+          } else if (unread === undefined && entry.totalChapters > 0) {
+            unread = calculateUnreadCount(
+              entry.totalChapters,
+              parseChapterNumber(entry.lastReadChapterId),
+              false
+            );
+          }
+          return {
+            entries: {
+              ...state.entries,
+              [entry.mangaId]: {
+                ...entry,
+                unreadCount: unread ?? 0,
+                addedAt: Date.now(),
+                updatedAt: Date.now(),
+              },
             },
-          },
-        })),
+          };
+        }),
 
       removeFromLibrary: (mangaId) =>
         set((state) => {
@@ -57,10 +72,16 @@ export const useLibraryStore = create<LibraryState>()(
         set((state) => {
           const existing = state.entries[mangaId];
           if (!existing) return state;
+          const isCompleted = category === 'completed';
           return {
             entries: {
               ...state.entries,
-              [mangaId]: { ...existing, category, updatedAt: Date.now() },
+              [mangaId]: {
+                ...existing,
+                category,
+                unreadCount: isCompleted ? 0 : existing.unreadCount,
+                updatedAt: Date.now(),
+              },
             },
           };
         }),
@@ -69,6 +90,18 @@ export const useLibraryStore = create<LibraryState>()(
         set((state) => {
           const existing = state.entries[mangaId];
           if (!existing) return state;
+          const isCompleted = existing.category === 'completed';
+
+          let computedUnread = unreadCount;
+          if (isCompleted) {
+            computedUnread = 0;
+          } else if (computedUnread === undefined && existing.totalChapters > 0) {
+            const chNum = parseChapterNumber(chapterId);
+            if (chNum !== null && chNum > 0) {
+              computedUnread = calculateUnreadCount(existing.totalChapters, chNum, false);
+            }
+          }
+
           return {
             entries: {
               ...state.entries,
@@ -76,7 +109,7 @@ export const useLibraryStore = create<LibraryState>()(
                 ...existing,
                 lastReadChapterId: chapterId,
                 lastReadPage: page,
-                unreadCount: unreadCount !== undefined ? unreadCount : existing.unreadCount,
+                unreadCount: computedUnread !== undefined ? computedUnread : existing.unreadCount,
                 updatedAt: Date.now(),
               },
             },
@@ -99,13 +132,14 @@ export const useLibraryStore = create<LibraryState>()(
         set((state) => {
           const existing = state.entries[mangaId];
           if (!existing) return state;
+          const isCompleted = existing.category === 'completed';
           return {
             entries: {
               ...state.entries,
               [mangaId]: {
                 ...existing,
                 totalChapters,
-                unreadCount,
+                unreadCount: isCompleted ? 0 : unreadCount,
                 updatedAt: Date.now(),
               },
             },

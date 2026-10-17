@@ -427,12 +427,19 @@ export default function ProfileScreen() {
                   <Pressable
                     onPress={handlePickAvatar}
                     disabled={isUploadingImage}
-                    style={[styles.cameraBadge, { backgroundColor: colors.accent }]}
+                    style={[
+                      styles.cameraBadge,
+                      {
+                        backgroundColor: colors.accent,
+                        borderColor: colors.background,
+                        borderWidth: 1.5,
+                      },
+                    ]}
                     hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel="Upload photo"
                   >
-                    <Ionicons name="camera" size={12} color="#FFFFFF" />
+                    <Ionicons name="camera" size={12} color={colors.accentForeground} />
                   </Pressable>
                 </View>
 
@@ -622,7 +629,7 @@ export default function ProfileScreen() {
                           ]}
                         >
                           {item.hasRead ? (
-                            <Ionicons name="flame" size={16} color="#FFFFFF" />
+                            <Ionicons name="flame" size={16} color={colors.accentForeground} />
                           ) : item.isToday ? (
                             <View style={[styles.todayCenterDot, { backgroundColor: colors.accent }]} />
                           ) : item.isPast ? (
@@ -787,8 +794,10 @@ export default function ProfileScreen() {
                   Platform.OS === 'web' && { cursor: 'pointer' as any },
                 ]}
               >
-                <Ionicons name="log-in-outline" size={18} color="#FFFFFF" />
-                <Text style={styles.guestSignInBtnText}>Sign In / Create Account</Text>
+                <Ionicons name="log-in-outline" size={18} color={colors.accentForeground} />
+                <Text style={[styles.guestSignInBtnText, { color: colors.accentForeground }]}>
+                  Sign In / Create Account
+                </Text>
               </Pressable>
             </View>
           )}

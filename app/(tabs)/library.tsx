@@ -26,10 +26,13 @@ import { useLibraryStore, LibraryDisplayMode } from '../../src/store/libraryStor
 import { useHistoryStore } from '../../src/store/historyStore';
 import { useDownloadStore } from '../../src/store/downloadStore';
 import { getMangaChapters, getMangaDetails, getMangaDescription } from '../../src/api/mangadex';
-import { getUniversalMangaDetails, isExternalSource } from '../../src/sources/adapter';
+import { getUniversalMangaDetails, getUniversalMangaChapters, isExternalSource } from '../../src/sources/adapter';
+import { parseChapterNumber, calculateReadPercent } from '../../src/utils/chapter';
+import { areTitlesSameManga } from '../../src/utils/mangaTitleNormalizer';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
 import { LibraryCategoryModal } from '../../src/components/LibraryCategoryModal';
 import { ListOptionsModal, SortOption } from '../../src/components/ListOptionsModal';
+import { Skeleton } from '../../src/components/Skeleton';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 import { triggerHaptic } from '../../src/utils/haptics';
 import type { LibraryEntry, LibraryCategory, HistoryEntry } from '../../src/types';
@@ -91,25 +94,73 @@ function formatTimeAgo(timestamp?: number): string {
 }
 
 function getCardMetadata(entry: LibraryEntry, historyEntry?: HistoryEntry) {
+  const isCompleted = entry.category === 'completed';
   let percent = 0;
-  if (entry.category === 'completed') {
+  let effectiveUnread = 0;
+
+  if (isCompleted) {
     percent = 100;
-  } else if (entry.totalChapters > 0 && entry.unreadCount !== undefined) {
-    const read = Math.max(0, entry.totalChapters - entry.unreadCount);
-    percent = Math.min(100, Math.max(read > 0 ? 8 : 0, Math.round((read / entry.totalChapters) * 100)));
-  } else if (historyEntry && historyEntry.totalPages > 0) {
-    percent = Math.min(
-      100,
-      Math.max(8, Math.round(((historyEntry.pageIndex + 1) / historyEntry.totalPages) * 100))
-    );
-  } else if (entry.lastReadChapterId) {
-    percent = 35;
+    effectiveUnread = 0;
+  } else {
+    // 1. Determine read chapter count from history and library entry
+    let readCount = 0;
+
+    // Check history entry chapter number
+    const historyChNum =
+      parseChapterNumber(historyEntry?.chapterTitle) ??
+      parseChapterNumber(historyEntry?.chapterId);
+
+    if (historyChNum !== null && historyChNum > 0) {
+      readCount = Math.floor(historyChNum);
+    } else if (entry.lastReadChapterId) {
+      const entryChNum = parseChapterNumber(entry.lastReadChapterId);
+      if (entryChNum !== null && entryChNum > 0) {
+        readCount = Math.floor(entryChNum);
+      }
+    }
+
+    // Also check entry.unreadCount if it was explicitly updated to be less than totalChapters
+    if (
+      entry.totalChapters > 0 &&
+      entry.unreadCount !== undefined &&
+      entry.unreadCount < entry.totalChapters
+    ) {
+      const readFromStore = entry.totalChapters - entry.unreadCount;
+      if (readFromStore > readCount) {
+        readCount = readFromStore;
+      }
+    }
+
+    if (entry.totalChapters > 0) {
+      readCount = Math.min(entry.totalChapters, Math.max(0, readCount));
+      effectiveUnread = Math.max(0, entry.totalChapters - readCount);
+
+      if (readCount > 0) {
+        percent = calculateReadPercent(entry.totalChapters, readCount, false);
+      } else {
+        percent = 0;
+      }
+    } else if (historyEntry && historyEntry.totalPages > 0) {
+      percent = Math.min(
+        100,
+        Math.max(8, Math.round(((historyEntry.pageIndex + 1) / historyEntry.totalPages) * 100))
+      );
+      effectiveUnread = 0;
+    } else if (entry.lastReadChapterId || historyEntry) {
+      percent = 15;
+      effectiveUnread = 0;
+    } else if (entry.unreadCount !== undefined) {
+      effectiveUnread = entry.unreadCount;
+    }
   }
 
   let chapterMeta = '';
   if (historyEntry?.chapterTitle) {
     const match = historyEntry.chapterTitle.match(/(?:chapter|ch\.?)\s*([\d.]+)/i);
     chapterMeta = match ? `Ch. ${match[1]}` : historyEntry.chapterTitle.slice(0, 16);
+  } else if (entry.lastReadChapterId) {
+    const chNum = parseChapterNumber(entry.lastReadChapterId);
+    chapterMeta = chNum !== null ? `Ch. ${chNum}` : `Ch. ${entry.totalChapters || 1}`;
   } else if (entry.totalChapters > 0) {
     chapterMeta = `Ch. ${entry.totalChapters}`;
   } else {
@@ -118,9 +169,9 @@ function getCardMetadata(entry: LibraryEntry, historyEntry?: HistoryEntry) {
 
   const timeLabel = formatTimeAgo(historyEntry?.timestamp || entry.updatedAt || entry.addedAt);
   const subtitle = `${chapterMeta} • ${timeLabel}`;
-  const hasUnread = Boolean(entry.unreadCount && entry.unreadCount > 0);
+  const hasUnread = !isCompleted && effectiveUnread > 0;
 
-  return { progressPercent: percent, chapterMeta, timeLabel, subtitle, hasUnread };
+  return { progressPercent: percent, effectiveUnread, chapterMeta, timeLabel, subtitle, hasUnread };
 }
 
 interface LibraryCardProps {
@@ -140,7 +191,7 @@ function LibraryGridCard({
 }: LibraryCardProps & { cardWidth: number }) {
   const colors = useThemeColors();
   const [hovered, setHovered] = useState(false);
-  const { progressPercent, subtitle, hasUnread } = useMemo(
+  const { progressPercent, effectiveUnread, subtitle, hasUnread } = useMemo(
     () => getCardMetadata(entry, historyEntry),
     [entry, historyEntry]
   );
@@ -168,7 +219,7 @@ function LibraryGridCard({
         },
       ]}
       accessibilityRole="button"
-      accessibilityLabel={`${entry.title}, ${subtitle}${hasUnread ? `, ${entry.unreadCount} unread chapters` : ''}`}
+      accessibilityLabel={`${entry.title}, ${subtitle}${hasUnread ? `, ${effectiveUnread} unread chapters` : ''}`}
     >
       <View
         style={[
@@ -180,6 +231,12 @@ function LibraryGridCard({
           },
         ]}
       >
+        <Skeleton
+          width="100%"
+          height="100%"
+          borderRadius={16}
+          style={StyleSheet.absoluteFill as any}
+        />
         {entry.coverUrl ? (
           <Image
             source={{ uri: entry.coverUrl }}
@@ -188,20 +245,16 @@ function LibraryGridCard({
               hovered && Platform.OS === 'web' ? { transform: [{ scale: 1.04 }] } : null,
             ]}
             contentFit="cover"
-            transition={250}
+            transition={200}
             recyclingKey={entry.mangaId}
           />
-        ) : (
-          <View style={[styles.coverPlaceholder, { backgroundColor: colors.surfaceElevated }]}>
-            <Ionicons name="book-outline" size={32} color={colors.textMuted} />
-          </View>
-        )}
+        ) : null}
 
         {/* Unread Amber Pill Badge */}
         {hasUnread && (
           <View style={[styles.unreadBadge, { backgroundColor: colors.accent }]}>
             <Text style={[styles.unreadBadgeText, { color: colors.accentForeground }]}>
-              {entry.unreadCount! > 99 ? '99+' : entry.unreadCount}
+              {effectiveUnread > 99 ? '99+' : effectiveUnread}
             </Text>
           </View>
         )}
@@ -257,7 +310,7 @@ function LibraryDetailsCard({
 }: LibraryCardProps) {
   const colors = useThemeColors();
   const [hovered, setHovered] = useState(false);
-  const { progressPercent, chapterMeta, timeLabel, hasUnread } = useMemo(
+  const { progressPercent, effectiveUnread, chapterMeta, timeLabel, hasUnread } = useMemo(
     () => getCardMetadata(entry, historyEntry),
     [entry, historyEntry]
   );
@@ -322,43 +375,31 @@ function LibraryDetailsCard({
         },
       ]}
       accessibilityRole="button"
-      accessibilityLabel={`${entry.title}, ${chapterMeta}, ${timeLabel}${hasUnread ? `, ${entry.unreadCount} unread chapters` : ''}`}
+      accessibilityLabel={`${entry.title}, ${chapterMeta}, ${timeLabel}${hasUnread ? `, ${effectiveUnread} unread chapters` : ''}`}
     >
       {/* Left side: Manga Cover */}
       <View style={[styles.detailsCoverWrapper, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}>
+        <Skeleton
+          width="100%"
+          height="100%"
+          borderRadius={12}
+          style={StyleSheet.absoluteFill as any}
+        />
         {entry.coverUrl ? (
           <Image
             source={{ uri: entry.coverUrl }}
             style={styles.coverImage}
             contentFit="cover"
-            transition={250}
+            transition={200}
             recyclingKey={entry.mangaId}
           />
-        ) : (
-          <View style={[styles.coverPlaceholder, { backgroundColor: colors.surfaceElevated }]}>
-            <Ionicons name="book-outline" size={24} color={colors.textMuted} />
-          </View>
-        )}
+        ) : null}
 
         {/* Top-Right Unread Badge */}
         {hasUnread && (
           <View style={[styles.unreadBadgeMini, { backgroundColor: colors.accent }]}>
             <Text style={[styles.unreadBadgeTextMini, { color: colors.accentForeground }]}>
-              {entry.unreadCount! > 99 ? '99+' : entry.unreadCount}
-            </Text>
-          </View>
-        )}
-
-        {/* Bottom-Right Percentage Badge */}
-        {progressPercent > 0 && (
-          <View style={styles.percentBadgeMini}>
-            <Text
-              style={[
-                styles.percentTextMini,
-                progressPercent === 100 && { color: '#10B981' },
-              ]}
-            >
-              {progressPercent}%
+              {effectiveUnread > 99 ? '99+' : effectiveUnread}
             </Text>
           </View>
         )}
@@ -406,7 +447,7 @@ function LibraryDetailsCard({
               ]}
             >
               <Text style={[styles.detailsUnreadText, { color: colors.accent }]}>
-                {entry.unreadCount} unread
+                {effectiveUnread} unread
               </Text>
             </View>
           )}
@@ -442,7 +483,7 @@ function LibraryCompactCard({
 }: LibraryCardProps) {
   const colors = useThemeColors();
   const [hovered, setHovered] = useState(false);
-  const { progressPercent, chapterMeta, timeLabel, hasUnread } = useMemo(
+  const { progressPercent, effectiveUnread, chapterMeta, timeLabel, hasUnread } = useMemo(
     () => getCardMetadata(entry, historyEntry),
     [entry, historyEntry]
   );
@@ -505,10 +546,16 @@ function LibraryCompactCard({
         },
       ]}
       accessibilityRole="button"
-      accessibilityLabel={`${entry.title}, ${chapterMeta}, ${timeLabel}`}
+      accessibilityLabel={`${entry.title}, ${chapterMeta}, ${timeLabel}${hasUnread ? `, ${effectiveUnread} unread chapters` : ''}`}
     >
       {/* Left: Mini Cover Thumbnail */}
       <View style={[styles.compactCoverWrapper, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}>
+        <Skeleton
+          width="100%"
+          height="100%"
+          borderRadius={8}
+          style={StyleSheet.absoluteFill as any}
+        />
         {entry.coverUrl ? (
           <Image
             source={{ uri: entry.coverUrl }}
@@ -517,11 +564,7 @@ function LibraryCompactCard({
             transition={200}
             recyclingKey={entry.mangaId}
           />
-        ) : (
-          <View style={[styles.coverPlaceholder, { backgroundColor: colors.surfaceElevated }]}>
-            <Ionicons name="book-outline" size={16} color={colors.textMuted} />
-          </View>
-        )}
+        ) : null}
       </View>
 
       {/* Middle: Title & Subtitle & Description */}
@@ -568,7 +611,7 @@ function LibraryCompactCard({
         {hasUnread && (
           <View style={[styles.compactUnreadBadge, { backgroundColor: colors.accent }]}>
             <Text style={[styles.compactUnreadText, { color: colors.accentForeground }]}>
-              {entry.unreadCount! > 99 ? '99+' : entry.unreadCount}
+              {effectiveUnread > 99 ? '99+' : effectiveUnread}
             </Text>
           </View>
         )}
@@ -633,6 +676,13 @@ export default function LibraryScreen() {
     return ids;
   }, [downloadedChapters]);
 
+  // Active in-progress/pending downloads count
+  const activeDownloadCount = useMemo(() => {
+    return Object.values(downloadedChapters).filter(
+      (ch) => ch.status === 'downloading' || ch.status === 'pending'
+    ).length;
+  }, [downloadedChapters]);
+
   const navigateToManga = useCallback(
     (mangaId: string) => {
       router.push(`/manga/${mangaId}` as any);
@@ -648,25 +698,57 @@ export default function LibraryScreen() {
   // Auto-reconcile unread counts when returning to the Library tab
   useFocusEffect(
     useCallback(() => {
-      const allEntries = Object.values(useLibraryStore.getState().entries);
+      const libStore = useLibraryStore.getState();
+      const allEntries = Object.values(libStore.entries);
       const hist = useHistoryStore.getState().entries;
-      const hMap = new Map<string, string>();
+      const hMap = new Map<string, HistoryEntry>();
       hist.forEach((h) => {
-        if (h.mangaId && h.chapterId) {
-          hMap.set(h.mangaId, h.chapterId);
+        if (h.mangaId && !hMap.has(h.mangaId)) {
+          hMap.set(h.mangaId, h);
         }
       });
 
       allEntries.forEach((item) => {
-        const lastRead = hMap.get(item.mangaId);
-        if (lastRead && lastRead !== item.lastReadChapterId) {
-          useLibraryStore.getState().updateReadProgress(item.mangaId, lastRead, 0);
+        const isCompleted = item.category === 'completed';
+        if (isCompleted) {
+          if (item.unreadCount !== 0) {
+            libStore.updateUnreadCount(item.mangaId, 0);
+          }
+          return;
+        }
+
+        const hEntry =
+          hMap.get(item.mangaId) ||
+          hist.find((h) => areTitlesSameManga(h.title, item.title));
+
+        if (hEntry) {
+          const chNum =
+            parseChapterNumber(hEntry.chapterTitle) ??
+            parseChapterNumber(hEntry.chapterId);
+
+          let unread = item.unreadCount;
+          if (item.totalChapters > 0 && chNum !== null && chNum > 0) {
+            const readCount = Math.min(item.totalChapters, Math.floor(chNum));
+            unread = Math.max(0, item.totalChapters - readCount);
+          }
+
+          if (
+            (hEntry.chapterId && hEntry.chapterId !== item.lastReadChapterId) ||
+            (unread !== undefined && unread !== item.unreadCount)
+          ) {
+            libStore.updateReadProgress(
+              item.mangaId,
+              hEntry.chapterId || item.lastReadChapterId || '',
+              hEntry.pageIndex || 0,
+              unread
+            );
+          }
         }
       });
     }, [])
   );
 
-  // Pull to refresh: Fetch latest chapters from MangaDex and update unread badges
+  // Pull to refresh: Fetch latest chapters from MangaDex or Universal Sources and update unread badges
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -676,17 +758,43 @@ export default function LibraryScreen() {
       await Promise.allSettled(
         allEntries.map(async (entry) => {
           try {
-            const feed = await getMangaChapters(entry.mangaId, 'en', 100, 0, 'desc');
-            const chs = feed.data || [];
+            const isExt = isExternalSource(entry.mangaId);
+            const chs = isExt
+              ? await getUniversalMangaChapters(entry.mangaId)
+              : (await getMangaChapters(entry.mangaId, 'en', 100, 0, 'desc')).data || [];
+
             if (chs.length > 0) {
-              const progress = historyStore.getMangaProgress(entry.mangaId);
-              let unread = chs.length;
-              if (progress?.chapterId) {
-                const idx = chs.findIndex((c) => c.id === progress.chapterId);
-                if (idx >= 0) {
-                  unread = idx;
+              const isCompleted = entry.category === 'completed';
+              let unread = isCompleted ? 0 : chs.length;
+
+              if (!isCompleted) {
+                const progress = historyStore.getMangaProgress(entry.mangaId, entry.title);
+                if (progress?.chapterId || progress?.chapterTitle) {
+                  const idx = chs.findIndex((c) => c.id === progress.chapterId);
+                  if (idx >= 0) {
+                    unread = idx;
+                  } else {
+                    const pNum =
+                      parseChapterNumber(progress.chapterTitle) ??
+                      parseChapterNumber(progress.chapterId);
+                    if (pNum !== null && pNum > 0) {
+                      unread = chs.filter((c) => {
+                        const cNum = parseFloat(c.attributes.chapter || '0');
+                        return !isNaN(cNum) && cNum > pNum;
+                      }).length;
+                    }
+                  }
+                }
+
+                const readMap = historyStore.readChapterIds;
+                if (readMap && Object.keys(readMap).length > 0) {
+                  const readInThisManga = chs.filter((c) => historyStore.isChapterRead(c.id)).length;
+                  if (readInThisManga > 0) {
+                    unread = Math.min(unread, Math.max(0, chs.length - readInThisManga));
+                  }
                 }
               }
+
               useLibraryStore
                 .getState()
                 .updateChapterCounts(entry.mangaId, chs.length, Math.max(0, unread));
@@ -803,11 +911,6 @@ export default function LibraryScreen() {
 
           {/* Action Buttons: Search Toggle & 3 Dots Options */}
           <View style={styles.headerActions}>
-            {refreshing && (
-              <View style={styles.syncingPill}>
-                <Text style={[styles.syncingText, { color: colors.accent }]}>Updating…</Text>
-              </View>
-            )}
 
             {/* Search Toggle Button */}
             <Pressable
@@ -830,6 +933,41 @@ export default function LibraryScreen() {
                 size={20}
                 color={isSearchOpen ? colors.text : colors.textMuted}
               />
+            </Pressable>
+
+            {/* Downloads Shortcut Button */}
+            <Pressable
+              onPress={() => {
+                triggerHaptic();
+                router.push({
+                  pathname: '/(tabs)/downloads',
+                  params: { from: 'library' },
+                } as any);
+              }}
+              style={({ pressed }) => [
+                styles.actionButton,
+                { opacity: pressed ? 0.7 : 1 },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={
+                activeDownloadCount > 0
+                  ? `Downloads, ${activeDownloadCount} chapter${activeDownloadCount > 1 ? 's' : ''} downloading`
+                  : 'Downloads and offline storage'
+              }
+              hitSlop={8}
+            >
+              <Ionicons
+                name={activeDownloadCount > 0 ? 'download' : 'download-outline'}
+                size={20}
+                color={activeDownloadCount > 0 ? colors.accent : colors.textMuted}
+              />
+              {activeDownloadCount > 0 && (
+                <View style={[styles.downloadBadge, { backgroundColor: colors.accent }]}>
+                  <Text style={[styles.downloadBadgeText, { color: colors.accentForeground || '#FFFFFF' }]}>
+                    {activeDownloadCount > 99 ? '99+' : activeDownloadCount}
+                  </Text>
+                </View>
+              )}
             </Pressable>
 
             {/* 3 Dots Menu Button (Contains View Mode, Sort, Filter, Refresh) */}
@@ -1021,7 +1159,10 @@ export default function LibraryScreen() {
                   <LibraryGridCard
                     key={entry.mangaId}
                     entry={entry}
-                    historyEntry={historyMap.get(entry.mangaId)}
+                    historyEntry={
+                      historyMap.get(entry.mangaId) ||
+                      historyEntries.find((h) => areTitlesSameManga(h.title, entry.title))
+                    }
                     cardWidth={cardWidth}
                     onPress={navigateToManga}
                     onLongPress={handleCardLongPress}
@@ -1037,7 +1178,10 @@ export default function LibraryScreen() {
                   <LibraryDetailsCard
                     key={entry.mangaId}
                     entry={entry}
-                    historyEntry={historyMap.get(entry.mangaId)}
+                    historyEntry={
+                      historyMap.get(entry.mangaId) ||
+                      historyEntries.find((h) => areTitlesSameManga(h.title, entry.title))
+                    }
                     onPress={navigateToManga}
                     onLongPress={handleCardLongPress}
                   />
@@ -1052,7 +1196,10 @@ export default function LibraryScreen() {
                   <LibraryCompactCard
                     key={entry.mangaId}
                     entry={entry}
-                    historyEntry={historyMap.get(entry.mangaId)}
+                    historyEntry={
+                      historyMap.get(entry.mangaId) ||
+                      historyEntries.find((h) => areTitlesSameManga(h.title, entry.title))
+                    }
                     onPress={navigateToManga}
                     onLongPress={handleCardLongPress}
                   />
@@ -1164,15 +1311,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
-  syncingPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    marginRight: 4,
-  },
-  syncingText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
   actionButton: {
     width: 36,
     height: 36,
@@ -1181,6 +1319,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'transparent',
     borderWidth: 0,
+    position: 'relative',
+  },
+  downloadBadge: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  downloadBadgeText: {
+    fontSize: 9.5,
+    fontWeight: '700',
   },
 
   /* Collapsible Search Bar */
@@ -1536,21 +1690,6 @@ const styles = StyleSheet.create({
   unreadBadgeTextMini: {
     fontSize: 10,
     fontWeight: '900',
-  },
-  percentBadgeMini: {
-    position: 'absolute',
-    bottom: 5,
-    right: 5,
-    backgroundColor: 'rgba(9, 10, 15, 0.85)',
-    paddingHorizontal: 5,
-    paddingVertical: 1.5,
-    borderRadius: 5,
-    borderWidth: 0,
-  },
-  percentTextMini: {
-    color: '#F3F4F6',
-    fontSize: 9.5,
-    fontWeight: '700',
   },
 
   /* Mode 3: Compact Mode Styles (Tile Mode) */

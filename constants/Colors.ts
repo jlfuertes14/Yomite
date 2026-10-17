@@ -108,6 +108,7 @@ function characterPalette(
   text: string,
   textSecondary: string,
   border: string,
+  textMuted: string,
 ): ThemePalette {
   return {
     accent,
@@ -118,7 +119,7 @@ function characterPalette(
     surfaceElevated,
     text,
     textSecondary,
-    textMuted: border,
+    textMuted,
     border,
     borderSubtle: surfaceElevated,
     tint: text,
@@ -135,39 +136,39 @@ function characterPalette(
 /** Kotatsu's character palettes, distilled from its Material 3 resource themes. */
 export const CharacterThemePalettes: Record<CharacterThemeId, { light: ThemePalette; dark: ThemePalette }> = {
   miku: {
-    light: characterPalette('#00696D', '#F5FAFA', '#F5FAFA', '#EAEFEE', '#171D1D', '#3D4949', '#6D797A'),
-    dark: characterPalette('#6FDDE2', '#0F1415', '#0F1415', '#1B2121', '#DEE3E3', '#BCC9C9', '#3D4949'),
+    light: characterPalette('#00696D', '#F5FAFA', '#F5FAFA', '#EAEFEE', '#171D1D', '#3D4949', '#6D797A', '#536061'),
+    dark: characterPalette('#6FDDE2', '#0F1415', '#0F1415', '#1B2121', '#DEE3E3', '#BCC9C9', '#3D4949', '#869899'),
   },
   asuka: {
-    light: characterPalette('#904A40', '#FFF8F6', '#FFF8F6', '#F9EDEA', '#271815', '#53433F', '#89736E'),
-    dark: characterPalette('#FFB4A8', '#1A1110', '#1A1110', '#271D1C', '#F1DEDC', '#D8C2BE', '#534341'),
+    light: characterPalette('#904A40', '#FFF8F6', '#FFF8F6', '#F9EDEA', '#271815', '#53433F', '#89736E', '#6E5A55'),
+    dark: characterPalette('#FFB4A8', '#1A1110', '#1A1110', '#271D1C', '#F1DEDC', '#D8C2BE', '#534341', '#A38E8A'),
   },
   mion: {
-    light: characterPalette('#3B693A', '#F8FBF1', '#F8FBF1', '#EBF0E5', '#191D17', '#424940', '#72796E'),
-    dark: characterPalette('#A1D39A', '#10140F', '#10140F', '#1D211B', '#E0E4DB', '#C2C9BD', '#424940'),
+    light: characterPalette('#3B693A', '#F8FBF1', '#F8FBF1', '#EBF0E5', '#191D17', '#424940', '#72796E', '#586054'),
+    dark: characterPalette('#A1D39A', '#10140F', '#10140F', '#1D211B', '#E0E4DB', '#C2C9BD', '#424940', '#8D9788'),
   },
   rikka: {
-    light: characterPalette('#68548D', '#FEF7FF', '#FEF7FF', '#F2ECF3', '#1D1B20', '#49454E', '#7D7981'),
-    dark: characterPalette('#D3BBFD', '#151218', '#151218', '#211F24', '#E7E0E8', '#CBC4CF', '#49454E'),
+    light: characterPalette('#68548D', '#FEF7FF', '#FEF7FF', '#F2ECF3', '#1D1B20', '#49454E', '#7D7981', '#625D66'),
+    dark: characterPalette('#D3BBFD', '#151218', '#151218', '#211F24', '#E7E0E8', '#CBC4CF', '#49454E', '#98909E'),
   },
   sakura: {
-    light: characterPalette('#8C4A60', '#FFF8F8', '#FFF8F8', '#F9ECEE', '#21191B', '#514347', '#857377'),
-    dark: characterPalette('#FFB1C8', '#191113', '#191113', '#261D20', '#EFDFE1', '#D5C2C6', '#514347'),
+    light: characterPalette('#8C4A60', '#FFF8F8', '#FFF8F8', '#F9ECEE', '#21191B', '#514347', '#857377', '#6A585C'),
+    dark: characterPalette('#FFB1C8', '#191113', '#191113', '#261D20', '#EFDFE1', '#D5C2C6', '#514347', '#A08D92'),
   },
   mamimi: {
-    light: characterPalette('#465D91', '#FAF8FF', '#FAF8FF', '#EEEDF4', '#1A1B20', '#44464F', '#747780'),
-    dark: characterPalette('#AFC6FF', '#121318', '#121318', '#1E1F25', '#E2E2E9', '#C5C6D0', '#44464F'),
+    light: characterPalette('#465D91', '#FAF8FF', '#FAF8FF', '#EEEDF4', '#1A1B20', '#44464F', '#747780', '#5A5D67'),
+    dark: characterPalette('#AFC6FF', '#121318', '#121318', '#1E1F25', '#E2E2E9', '#C5C6D0', '#44464F', '#8F92A0'),
   },
   kanade: {
-    light: characterPalette('#474755', '#FCF8FA', '#FCF8FA', '#F0EDEF', '#1C1B1C', '#47464C', '#77747B'),
-    dark: characterPalette('#FFFFFF', '#141314', '#141314', '#282829', '#FFFFFF', '#DEDBE2', '#47464C'),
+    light: characterPalette('#474755', '#FCF8FA', '#FCF8FA', '#F0EDEF', '#1C1B1C', '#47464C', '#77747B', '#5E5B63'),
+    dark: characterPalette('#FFFFFF', '#141314', '#141314', '#282829', '#FFFFFF', '#DEDBE2', '#47464C', '#9C99A2'),
   },
 };
 
 /** Kotatsu-style dynamic blue palette used by the Dynamic scheme. */
 export const DynamicThemePalettes: { light: ThemePalette; dark: ThemePalette } = {
-  light: characterPalette('#0059C8', '#F8F9FF', '#F8F9FF', '#E9EEFA', '#191B22', '#44474F', '#747780'),
-  dark: characterPalette('#ABC7FF', '#10141C', '#10141C', '#1D2432', '#E0E2EC', '#C2C6D4', '#444955'),
+  light: characterPalette('#0059C8', '#F8F9FF', '#F8F9FF', '#E9EEFA', '#191B22', '#44474F', '#747780', '#5A5E69'),
+  dark: characterPalette('#ABC7FF', '#10141C', '#10141C', '#1D2432', '#E0E2EC', '#C2C6D4', '#444955', '#8E94A4'),
 };
 
 export const ReaderThemes = {

@@ -28,6 +28,7 @@ import { useHistoryStore } from '../../src/store/historyStore';
 import { useLibraryStore } from '../../src/store/libraryStore';
 import { useDownloadStore } from '../../src/store/downloadStore';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
+import { parseChapterNumber } from '../../src/utils/chapter';
 import {
   getChapterPages,
   getMangaChapters,
@@ -1218,36 +1219,6 @@ export default function ReaderScreen() {
     return chapterList;
   }, [chapterList, selectedScanlator, getChapterScanlator, isMangaDot]);
 
-  // Save progress to history & update library unread badge
-  useEffect(() => {
-    if (pages.length > 0 && chapterId && (mode !== 'webtoon' || activeWebtoonChapterId === chapterId)) {
-      const activeMangaId = mangaId ?? chapterId!;
-      addHistoryEntry({
-        mangaId: activeMangaId,
-        chapterId: chapterId!,
-        title: mangaTitle,
-        chapterTitle: chapterTitle,
-        coverUrl: coverUrl,
-        pageIndex: currentPage,
-        totalPages: pages.length,
-        scrollOffset: mode === 'webtoon' ? webtoonScrollOffsetRef.current : 0,
-      });
-
-      // If manga is bookmarked in the library, update read progress & unread count
-      const libStore = useLibraryStore.getState();
-      if (libStore.isInLibrary(activeMangaId)) {
-        let unread: number | undefined;
-        if (effectiveChapterList && effectiveChapterList.length > 0) {
-          const idx = effectiveChapterList.findIndex((c) => c.id === chapterId);
-          if (idx >= 0) {
-            unread = Math.max(0, idx);
-          }
-        }
-        libStore.updateReadProgress(activeMangaId, chapterId!, currentPage, unread);
-      }
-    }
-  }, [activeWebtoonChapterId, chapterId, currentPage, mode, pages.length, mangaTitle, chapterTitle, coverUrl, effectiveChapterList]);
-
   // Chapter Switching (strictly aware of chosen scanlation group)
   const currentChapterIdx = effectiveChapterList.findIndex((c) => c.id === chapterId);
   const currentChapter = currentChapterIdx >= 0
@@ -1258,7 +1229,7 @@ export default function ReaderScreen() {
       });
   const currentChapterNumber = currentChapter?.attributes.chapter
     ? Number(currentChapter.attributes.chapter)
-    : getChapterNumberFromId(chapterId || '');
+    : (getChapterNumberFromId(chapterId || '') ?? parseChapterNumber(chapterTitle));
 
   const nextChapterId = currentChapterNumber !== null
     ? effectiveChapterList
@@ -1276,6 +1247,85 @@ export default function ReaderScreen() {
 
   const hasNextChapter = !!nextChapterId;
   const hasPrevChapter = !!prevChapterId;
+
+  // Save progress to history & update library unread badge
+  useEffect(() => {
+    if (pages.length > 0 && chapterId && (mode !== 'webtoon' || activeWebtoonChapterId === chapterId)) {
+      const activeMangaId = mangaId || resolvedMangaId || chapterId!;
+      addHistoryEntry({
+        mangaId: activeMangaId,
+        chapterId: chapterId!,
+        title: mangaTitle,
+        chapterTitle: chapterTitle,
+        coverUrl: coverUrl,
+        pageIndex: currentPage,
+        totalPages: pages.length,
+        scrollOffset: mode === 'webtoon' ? webtoonScrollOffsetRef.current : 0,
+      });
+
+      // If manga is bookmarked in the library, update read progress & unread count
+      const libStore = useLibraryStore.getState();
+      const targetEntry =
+        libStore.entries[activeMangaId] ||
+        (resolvedMangaId ? libStore.entries[resolvedMangaId] : undefined) ||
+        (mangaTitle
+          ? Object.values(libStore.entries).find(
+              (e) => e.title.toLowerCase() === mangaTitle.toLowerCase()
+            )
+          : undefined);
+
+      if (targetEntry) {
+        let unread: number | undefined;
+
+        if (targetEntry.category === 'completed') {
+          unread = 0;
+        } else if (effectiveChapterList && effectiveChapterList.length > 0) {
+          if (currentChapterNumber !== null && !isNaN(currentChapterNumber)) {
+            const unreadChapters = effectiveChapterList.filter((c) => {
+              const num = parseFloat(c.attributes.chapter || '');
+              return !isNaN(num) && num > currentChapterNumber;
+            });
+            unread = unreadChapters.length;
+          } else {
+            const idx = effectiveChapterList.findIndex((c) => c.id === chapterId);
+            if (idx >= 0) {
+              const firstNum = parseFloat(effectiveChapterList[0]?.attributes?.chapter || '0');
+              const lastNum = parseFloat(
+                effectiveChapterList[effectiveChapterList.length - 1]?.attributes?.chapter || '0'
+              );
+              const isDesc = firstNum >= lastNum;
+              unread = isDesc ? idx : effectiveChapterList.length - 1 - idx;
+            }
+          }
+        }
+
+        // Fallback: If chapter list is not loaded yet, compute from targetEntry.totalChapters & currentChapterNumber
+        if (unread === undefined && targetEntry.totalChapters > 0) {
+          const chNum =
+            currentChapterNumber ?? parseChapterNumber(chapterTitle) ?? parseChapterNumber(chapterId);
+          if (chNum !== null && chNum > 0) {
+            const readCount = Math.min(targetEntry.totalChapters, Math.floor(chNum));
+            unread = Math.max(0, targetEntry.totalChapters - readCount);
+          }
+        }
+
+        libStore.updateReadProgress(targetEntry.mangaId, chapterId!, currentPage, unread);
+      }
+    }
+  }, [
+    activeWebtoonChapterId,
+    chapterId,
+    currentPage,
+    mode,
+    pages.length,
+    mangaTitle,
+    chapterTitle,
+    coverUrl,
+    effectiveChapterList,
+    mangaId,
+    resolvedMangaId,
+    currentChapterNumber,
+  ]);
 
   // Keep the next chapter unloaded until the reader reaches the current chapter's
   // boundary. This mirrors Kotatsu's lazy adjacent-chapter loading behavior.

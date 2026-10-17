@@ -8,6 +8,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  BackHandler,
   Platform,
   Pressable,
   ScrollView,
@@ -21,7 +22,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Radius, ReaderThemes, Spacing, Typography } from '../../constants/Colors';
 import { AnimatedPressable } from '../../src/components/AnimatedPressable';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
-import { YomiteMascotIcon } from '../../src/components/YomiteMascotIcon';
 import { useColorScheme } from '../../src/hooks/useColorScheme';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
 import {
@@ -111,6 +111,9 @@ export default function SettingsScreen() {
   useDocumentTitle('Settings');
   const router = useRouter();
   const colors = useThemeColors();
+  const systemColorScheme = useColorScheme();
+  const isDark = systemColorScheme === 'dark';
+  const dividerColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.045)';
   const { width } = useWindowDimensions();
   const isDesktop = width >= 860;
 
@@ -120,6 +123,7 @@ export default function SettingsScreen() {
   const setAppThemeMode = useThemeStore((s) => s.setAppThemeMode);
   const setColorScheme = useThemeStore((s) => s.setColorScheme);
   const [drawerVisible, setDrawerVisible] = useState(false);
+
 
   // Global reader preferences
   const mode = useReaderStore((s) => s.mode);
@@ -184,6 +188,31 @@ export default function SettingsScreen() {
     message: '',
     onConfirm: () => { },
   });
+
+  // Seamless Android Back Navigation: return to More hub instead of Discover
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        if (confirmModalConfig.visible) {
+          setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
+          return true;
+        }
+        if (authModalVisible) {
+          setAuthModalVisible(false);
+          return true;
+        }
+        if (drawerVisible) {
+          setDrawerVisible(false);
+          return true;
+        }
+        router.replace('/(tabs)/more');
+        return true;
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => subscription.remove();
+    }, [confirmModalConfig.visible, authModalVisible, drawerVisible, router])
+  );
 
   const handleManualSync = async () => {
     if (!user?.id) return;
@@ -431,7 +460,7 @@ export default function SettingsScreen() {
                     cachePolicy="memory-disk"
                   />
                 ) : (
-                  <YomiteMascotIcon size={38} />
+                  <Ionicons name="person" size={22} color={colors.text} />
                 )}
               </View>
               <View style={styles.profileTextCol}>
@@ -570,16 +599,18 @@ export default function SettingsScreen() {
                 accessibilityLabel={`Set theme to ${item.label}`}
                 style={({ pressed, hovered }: any) => [
                   styles.flatRow,
-                  (pressed || hovered) && { backgroundColor: 'rgba(39, 39, 42, 0.25)' },
+                  (pressed || hovered) && {
+                    backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.035)',
+                  },
                   Platform.OS === 'web' && { cursor: 'pointer' as any },
                 ]}
               >
                 <View style={styles.optionLeft}>
-                  <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
+                  <View style={[styles.iconSquare, { backgroundColor: colors.surfaceElevated }]}>
                     <Ionicons
                       name={item.icon}
                       size={18}
-                      color={accentColor}
+                      color={colors.text}
                     />
                   </View>
                   <View style={styles.optionTextCol}>
@@ -593,7 +624,7 @@ export default function SettingsScreen() {
                   <Ionicons name="checkmark" size={20} color={accentColor} style={styles.rowCheckmark} />
                 )}
               </Pressable>
-              {idx < 2 && <View style={styles.hairlineDivider} />}
+              {idx < 2 && <View style={[styles.hairlineDivider, { backgroundColor: dividerColor }]} />}
             </React.Fragment>
           );
         })}
@@ -666,16 +697,18 @@ export default function SettingsScreen() {
                 accessibilityLabel={`Set reading mode to ${m.label}`}
                 style={({ pressed, hovered }: any) => [
                   styles.flatRow,
-                  (pressed || hovered) && { backgroundColor: 'rgba(39, 39, 42, 0.25)' },
+                  (pressed || hovered) && {
+                    backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.035)',
+                  },
                   Platform.OS === 'web' && { cursor: 'pointer' as any },
                 ]}
               >
                 <View style={styles.optionLeft}>
-                  <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
+                  <View style={[styles.iconSquare, { backgroundColor: colors.surfaceElevated }]}>
                     <Ionicons
                       name={m.icon}
                       size={18}
-                      color={accentColor}
+                      color={colors.text}
                     />
                   </View>
                   <Text style={[styles.optionTitle, { color: colors.text }, isSelected && { color: colors.text }]}>
@@ -686,7 +719,7 @@ export default function SettingsScreen() {
                   <Ionicons name="checkmark" size={20} color={accentColor} style={styles.rowCheckmark} />
                 )}
               </Pressable>
-              {idx < READING_MODES.length - 1 && <View style={styles.hairlineDivider} />}
+              {idx < READING_MODES.length - 1 && <View style={[styles.hairlineDivider, { backgroundColor: dividerColor }]} />}
             </React.Fragment>
           );
         })}
@@ -776,8 +809,8 @@ export default function SettingsScreen() {
       <View style={styles.flatDividedList}>
         <View style={styles.flatRow}>
           <View style={styles.optionLeft}>
-            <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
-              <Ionicons name="notifications-outline" size={18} color={accentColor} />
+            <View style={[styles.iconSquare, { backgroundColor: colors.surfaceElevated }]}>
+              <Ionicons name="notifications-outline" size={18} color={colors.text} />
             </View>
             <View style={styles.optionTextCol}>
               <Text style={[styles.optionTitle, { color: colors.text }]}>New Chapter Alerts</Text>
@@ -792,7 +825,7 @@ export default function SettingsScreen() {
 
         {notificationsEnabled && (
           <>
-            <View style={styles.hairlineDivider} />
+            <View style={[styles.hairlineDivider, { backgroundColor: dividerColor }]} />
             <View style={styles.frequencyRow}>
               <Text style={[styles.frequencyLabel, { color: colors.textSecondary }]}>Check Frequency</Text>
               <View style={styles.intervalChipsRow}>
@@ -825,7 +858,7 @@ export default function SettingsScreen() {
               </View>
             </View>
 
-            <View style={styles.hairlineDivider} />
+            <View style={[styles.hairlineDivider, { backgroundColor: dividerColor }]} />
 
             <Pressable
               onPress={handleCheckUpdatesNow}
@@ -834,13 +867,15 @@ export default function SettingsScreen() {
               accessibilityLabel="Check library updates now"
               style={({ pressed, hovered }: any) => [
                 styles.flatRow,
-                (pressed || hovered) && { backgroundColor: 'rgba(39, 39, 42, 0.25)' },
+                (pressed || hovered) && {
+                  backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.035)',
+                },
                 Platform.OS === 'web' && { cursor: 'pointer' as any },
               ]}
             >
               <View style={styles.optionLeft}>
-                <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
-                  <Ionicons name="sync-outline" size={18} color={accentColor} />
+                <View style={[styles.iconSquare, { backgroundColor: colors.surfaceElevated }]}>
+                  <Ionicons name="sync-outline" size={18} color={colors.text} />
                 </View>
                 <View style={styles.optionTextCol}>
                   <Text style={[styles.optionTitle, { color: colors.text }]}>Check Updates Now</Text>
@@ -860,7 +895,7 @@ export default function SettingsScreen() {
           </>
         )}
 
-        <View style={styles.hairlineDivider} />
+        <View style={[styles.hairlineDivider, { backgroundColor: dividerColor }]} />
 
         <Pressable
           onPress={handleTestNotification}
@@ -869,13 +904,15 @@ export default function SettingsScreen() {
           accessibilityLabel="Send test chapter notification"
           style={({ pressed, hovered }: any) => [
             styles.flatRow,
-            (pressed || hovered) && { backgroundColor: 'rgba(39, 39, 42, 0.25)' },
+            (pressed || hovered) && {
+              backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.035)',
+            },
             Platform.OS === 'web' && { cursor: 'pointer' as any },
           ]}
         >
           <View style={styles.optionLeft}>
-            <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
-              <Ionicons name="paper-plane-outline" size={18} color={accentColor} />
+            <View style={[styles.iconSquare, { backgroundColor: colors.surfaceElevated }]}>
+              <Ionicons name="paper-plane-outline" size={18} color={colors.text} />
             </View>
             <Text style={[styles.optionTitle, { color: colors.text }]}>Send Test Notification</Text>
           </View>
@@ -896,8 +933,8 @@ export default function SettingsScreen() {
       <View style={styles.flatDividedList}>
         <View style={styles.flatRow}>
           <View style={styles.optionLeft}>
-            <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
-              <Ionicons name="wifi-outline" size={18} color={accentColor} />
+            <View style={[styles.iconSquare, { backgroundColor: colors.surfaceElevated }]}>
+              <Ionicons name="wifi-outline" size={18} color={colors.text} />
             </View>
             <View style={styles.optionTextCol}>
               <Text style={[styles.optionTitle, { color: colors.text }]}>Data Saver (Compressed images)</Text>
@@ -913,12 +950,12 @@ export default function SettingsScreen() {
           />
         </View>
 
-        <View style={styles.hairlineDivider} />
+        <View style={[styles.hairlineDivider, { backgroundColor: dividerColor }]} />
 
         <View style={styles.flatRow}>
           <View style={styles.optionLeft}>
-            <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
-              <Ionicons name="stats-chart-outline" size={18} color={accentColor} />
+            <View style={[styles.iconSquare, { backgroundColor: colors.surfaceElevated }]}>
+              <Ionicons name="stats-chart-outline" size={18} color={colors.text} />
             </View>
             <Text style={[styles.optionTitle, { color: colors.text }]}>Show Page Number in Reader</Text>
           </View>
@@ -929,15 +966,15 @@ export default function SettingsScreen() {
           />
         </View>
 
-        <View style={styles.hairlineDivider} />
+        <View style={[styles.hairlineDivider, { backgroundColor: dividerColor }]} />
 
         <View style={styles.flatRow}>
           <View style={styles.optionLeft}>
-            <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
+            <View style={[styles.iconSquare, { backgroundColor: colors.surfaceElevated }]}>
               <Ionicons
                 name="phone-portrait-outline"
                 size={18}
-                color={accentColor}
+                color={colors.text}
               />
             </View>
             <View style={styles.optionTextCol}>
@@ -954,7 +991,7 @@ export default function SettingsScreen() {
           />
         </View>
 
-        <View style={styles.hairlineDivider} />
+        <View style={[styles.hairlineDivider, { backgroundColor: dividerColor }]} />
 
         <Pressable
           onPress={handleClearHistoryPrompt}
@@ -992,13 +1029,15 @@ export default function SettingsScreen() {
             accessibilityLabel="Download Yomite mobile APK"
             style={({ pressed, hovered }: any) => [
               styles.flatRow,
-              (pressed || hovered) && { backgroundColor: 'rgba(39, 39, 42, 0.25)' },
+              (pressed || hovered) && {
+                backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.035)',
+              },
               Platform.OS === 'web' && { cursor: 'pointer' as any },
             ]}
           >
             <View style={styles.optionLeft}>
-              <View style={[styles.iconSquare, { backgroundColor: colors.cardBackground }]}>
-                <Ionicons name="cloud-download-outline" size={18} color={accentColor} />
+              <View style={[styles.iconSquare, { backgroundColor: colors.surfaceElevated }]}>
+                <Ionicons name="cloud-download-outline" size={18} color={colors.text} />
               </View>
               <View style={styles.optionTextCol}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -1025,7 +1064,7 @@ export default function SettingsScreen() {
         {/* Top Header Section */}
         <View style={[styles.header, isDesktop && styles.headerDesktop]}>
           <View style={styles.headerRow}>
-            {Platform.OS === 'web' && (
+            {Platform.OS === 'web' ? (
               <Pressable
                 onPress={() => setDrawerVisible(true)}
                 style={({ pressed, hovered }: any) => [
@@ -1037,7 +1076,17 @@ export default function SettingsScreen() {
                 accessibilityLabel="Open navigation drawer"
                 hitSlop={8}
               >
-                <Ionicons name="menu" size={24} color="#FFFFFF" />
+                <Ionicons name="menu" size={24} color={colors.text} />
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={() => router.replace('/(tabs)/more')}
+                style={({ pressed }) => [styles.backButton, { opacity: pressed ? 0.6 : 1 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Back to More"
+                hitSlop={8}
+              >
+                <Ionicons name="arrow-back" size={24} color={colors.text} />
               </Pressable>
             )}
             <View>
@@ -1087,7 +1136,7 @@ export default function SettingsScreen() {
 
           {/* App Info Footer */}
           <View style={styles.footer}>
-            <Text style={[styles.footerTitle, { color: colors.textMuted }]}>Yomite Manga Reader v1.2.5</Text>
+            <Text style={[styles.footerTitle, { color: colors.textMuted }]}>Yomite Manga Reader v1.2.6</Text>
             <Text style={[styles.footerSubtitle, { color: colors.textMuted }]}>
               Powered by MangaDex API, Kotatsu and Supabase Cloud Sync
             </Text>
@@ -1148,6 +1197,12 @@ const styles = StyleSheet.create({
     padding: 8,
     borderRadius: 10,
     backgroundColor: 'rgba(39, 39, 42, 0.6)',
+  },
+  backButton: {
+    padding: 4,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   title: {
     fontSize: 30,
@@ -1344,8 +1399,7 @@ const styles = StyleSheet.create({
     minHeight: 52,
   },
   hairlineDivider: {
-    height: 1,
-    backgroundColor: 'rgba(39, 39, 42, 0.6)',
+    height: StyleSheet.hairlineWidth,
     marginHorizontal: 4,
   },
   optionLeft: {
@@ -1357,8 +1411,7 @@ const styles = StyleSheet.create({
   iconSquare: {
     width: 36,
     height: 36,
-    borderRadius: 9,
-    backgroundColor: 'rgba(39, 39, 42, 0.8)',
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },

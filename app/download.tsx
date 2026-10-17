@@ -37,7 +37,7 @@ const APP_RELEASE = {
   minIos: 'iOS 15.0+ (via Web PWA)',
   architecture: 'Universal (ARM64 & x86_64)',
   sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-  apkDownloadUrl: 'https://expo.dev/accounts/chiro14/projects/yomite/builds/2675b251-7b47-4886-9769-f669f55a9691',
+  apkDownloadUrl: 'https://expo.dev/accounts/chiro14/projects/yomite/builds/5ba472a1-0c74-4877-830b-e66c9a85fedf',
 };
 
 

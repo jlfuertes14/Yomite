@@ -10,9 +10,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as WebBrowser from 'expo-web-browser';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  BackHandler,
   FlatList,
   Image,
   Modal,
@@ -28,6 +29,7 @@ import {
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
 
 import { Radius, Spacing, Typography } from '../../constants/Colors';
@@ -54,6 +56,12 @@ import * as FileSystem from 'expo-file-system';
 import { AnimatedPressable } from '../../src/components/AnimatedPressable';
 import { AuthModal } from '../../src/components/AuthModal';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
+import {
+  AnimeNewsArticleSkeleton,
+  AnimeNewsCardSkeleton,
+  ThreadCardSkeleton,
+  ThreadReplySkeleton,
+} from '../../src/components/Skeleton';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
 import { ZoomableImage } from '../../src/components/ZoomableImage';
 import { isGifAsset, MAX_GIF_BYTES, MAX_PHOTO_BYTES } from '../../src/services/communityMediaService';
@@ -489,6 +497,7 @@ type TabType = 'for_you' | 'news' | 'theories' | 'recommendations';
 
 export default function CommunityScreen() {
   useDocumentTitle('Community');
+  const router = useRouter();
   const colors = useThemeColors();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [drawerVisible, setDrawerVisible] = useState(false);
@@ -584,6 +593,61 @@ export default function CommunityScreen() {
   });
 
   const [remoteThreads, setRemoteThreads] = useState<ForumThread[]>([]);
+
+  // Seamless Android Back Navigation: return to More hub instead of Discover
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        if (fullscreenImageUri) {
+          setFullscreenImageUri(null);
+          return true;
+        }
+        if (selectedNews) {
+          setSelectedNews(null);
+          return true;
+        }
+        if (selectedThread) {
+          setSelectedThread(null);
+          return true;
+        }
+        if (showCreateModal) {
+          setShowCreateModal(false);
+          return true;
+        }
+        if (authModalVisible) {
+          setAuthModalVisible(false);
+          return true;
+        }
+        if (confirmModalConfig.visible) {
+          setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
+          return true;
+        }
+        if (searchOpen) {
+          setSearchOpen(false);
+          return true;
+        }
+        if (drawerVisible) {
+          setDrawerVisible(false);
+          return true;
+        }
+        router.replace('/(tabs)/more');
+        return true;
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => subscription.remove();
+    }, [
+      fullscreenImageUri,
+      selectedNews,
+      selectedThread,
+      showCreateModal,
+      authModalVisible,
+      confirmModalConfig.visible,
+      searchOpen,
+      drawerVisible,
+      router,
+    ])
+  );
 
   useEffect(() => {
     loadFeed();
@@ -753,7 +817,15 @@ export default function CommunityScreen() {
     }
     for (const t of remoteThreads) {
       if (!threadMap.has(t.id)) {
-        threadMap.set(t.id, t);
+        const replies = threadReplies[t.id];
+        const validReplies = replies
+          ? replies.filter((r) => !(r.username === t.author && r.body.trim() === t.body.trim()))
+          : undefined;
+        const accurateRepliesCount = validReplies !== undefined ? Math.max(validReplies.length, t.repliesCount || 0) : (t.repliesCount || 0);
+        threadMap.set(t.id, {
+          ...t,
+          repliesCount: accurateRepliesCount,
+        });
       }
     }
     return Array.from(threadMap.values());
@@ -804,6 +876,9 @@ export default function CommunityScreen() {
     setReplies(fetchedReplies);
     ensureDbAvatars([thread.author, ...fetchedReplies.map((r) => r.username)]);
     setSelectedThread((prev) => (prev ? { ...prev, repliesCount: fetchedReplies.length } : null));
+    setRemoteThreads((prev) =>
+      prev.map((t) => (t.id === thread.id ? { ...t, repliesCount: fetchedReplies.length } : t))
+    );
     setIsRepliesLoading(false);
   };
 
@@ -866,6 +941,9 @@ export default function CommunityScreen() {
         ...selectedThread,
         repliesCount: selectedThread.repliesCount + 1,
       });
+      setRemoteThreads((prev) =>
+        prev.map((t) => (t.id === selectedThread.id ? { ...t, repliesCount: (t.repliesCount || 0) + 1 } : t))
+      );
       triggerHaptic();
     } catch (err: any) {
       setConfirmModalConfig({
@@ -926,6 +1004,9 @@ export default function CommunityScreen() {
         deleteReply(selectedThread.id, replyId);
         setReplies((prev) => prev.filter((r) => r.id !== replyId));
         setSelectedThread((prev) => (prev ? { ...prev, repliesCount: Math.max(0, prev.repliesCount - 1) } : null));
+        setRemoteThreads((prev) =>
+          prev.map((t) => (t.id === selectedThread.id ? { ...t, repliesCount: Math.max(0, (t.repliesCount || 1) - 1) } : t))
+        );
       },
     });
   };
@@ -1043,6 +1124,27 @@ export default function CommunityScreen() {
         {/* Top Header Bar */}
         <View style={[styles.threadsHeader, { borderBottomColor: colors.border }]}>
           <View style={styles.headerTitleWrap}>
+            {isWeb ? (
+              <Pressable
+                onPress={() => setDrawerVisible(true)}
+                style={styles.headerIconBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Open Navigation Menu"
+                hitSlop={8}
+              >
+                <Ionicons name="menu" size={24} color={colors.text} />
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={() => router.replace('/(tabs)/more')}
+                style={[styles.headerIconBtn, { marginRight: 2 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Back to More"
+                hitSlop={8}
+              >
+                <Ionicons name="arrow-back" size={24} color={colors.text} />
+              </Pressable>
+            )}
             <Text style={[styles.headerBrandTitle, { color: colors.text }]}>Community</Text>
           </View>
 
@@ -1194,12 +1296,26 @@ export default function CommunityScreen() {
 
         {/* Feed Content */}
         {isLoading ? (
-          <View style={styles.centerLoading}>
-            <ActivityIndicator size="large" color={colors.accent} />
-            <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-              Loading community feed…
-            </Text>
-          </View>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.feedListContainer}
+          >
+            {activeTab === 'news' ? (
+              <>
+                <AnimeNewsCardSkeleton />
+                <AnimeNewsCardSkeleton />
+                <AnimeNewsCardSkeleton />
+                <AnimeNewsCardSkeleton />
+              </>
+            ) : (
+              <>
+                <ThreadCardSkeleton />
+                <ThreadCardSkeleton withImage />
+                <ThreadCardSkeleton />
+                <ThreadCardSkeleton />
+              </>
+            )}
+          </ScrollView>
         ) : activeTab === 'news' ? (
           /* Anime News ANN Feed in Threads Stream Aesthetic */
           <FlatList
@@ -1650,11 +1766,10 @@ export default function CommunityScreen() {
               {/* Replies Section with Continuous Connector */}
               <View style={styles.repliesStream}>
                 {isRepliesLoading ? (
-                  <View style={styles.centerLoading}>
-                    <ActivityIndicator size="small" color={colors.accent} />
-                    <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-                      Loading replies…
-                    </Text>
+                  <View style={{ paddingVertical: 4 }}>
+                    <ThreadReplySkeleton />
+                    <ThreadReplySkeleton />
+                    <ThreadReplySkeleton />
                   </View>
                 ) : replies.length === 0 ? (
                   <View style={styles.emptyRepliesWrap}>
@@ -2173,10 +2288,7 @@ export default function CommunityScreen() {
                 )}
 
                 {isNewsArticleLoading ? (
-                  <View style={styles.newsLoadingBlock}>
-                    <ActivityIndicator size="small" color={colors.accent} />
-                    <Text style={[styles.loadingText, { color: colors.textMuted }]}>Loading article text…</Text>
-                  </View>
+                  <AnimeNewsArticleSkeleton />
                 ) : (
                   articleParagraphs.map((paragraph, index) => (
                     <FormattedNewsParagraph

@@ -6,7 +6,6 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Animated,
   AppState,
   BackHandler,
@@ -15,6 +14,8 @@ import {
   LayoutAnimation,
   Linking,
   Modal,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Platform,
   Pressable,
   ScrollView,
@@ -37,11 +38,11 @@ import {
   searchManga,
 } from '../../src/api/mangadex';
 import { BridgedImage } from '../../src/components/BridgedImage';
-import { ConfirmationModal } from '../../src/components/ConfirmationModal';
 import { GridColumnsIcon } from '../../src/components/GridColumnsIcon';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
-import { useThemeColors } from '../../src/hooks/useThemeColor';
+import { Skeleton } from '../../src/components/Skeleton';
 import { useColorScheme } from '../../src/hooks/useColorScheme';
+import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { CloudFlareCookieManager } from '../../src/sources/network/cloudflare';
 import { DEFAULT_USER_AGENT } from '../../src/sources/network/httpClient';
 import { webViewBridge } from '../../src/sources/network/webViewBridge';
@@ -1096,6 +1097,94 @@ export default function ExtensionsScreen() {
     outputRange: ['0deg', '90deg'],
   });
 
+  // Source catalog curtain header animation
+  const catalogHeaderAnim = useRef(new Animated.Value(0)).current;
+  const isCatalogChromeHiddenRef = useRef(false);
+  const catalogScrollStopTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [catalogHeaderHeight, setCatalogHeaderHeight] = useState(135);
+
+  const catalogHeaderOpacity = catalogHeaderAnim.interpolate({
+    inputRange: [-70, 0],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+
+  const hideCatalogHeader = useCallback(() => {
+    if (!isCatalogChromeHiddenRef.current) {
+      isCatalogChromeHiddenRef.current = true;
+      Animated.timing(catalogHeaderAnim, {
+        toValue: -(catalogHeaderHeight + 60),
+        duration: 220,
+        easing: Easing.bezier(0.23, 1, 0.32, 1),
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
+    }
+  }, [catalogHeaderHeight, catalogHeaderAnim]);
+
+  const showCatalogHeader = useCallback(() => {
+    if (isCatalogChromeHiddenRef.current) {
+      isCatalogChromeHiddenRef.current = false;
+      Animated.timing(catalogHeaderAnim, {
+        toValue: 0,
+        duration: 240,
+        easing: Easing.bezier(0.23, 1, 0.32, 1),
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
+    }
+  }, [catalogHeaderAnim]);
+
+  const handleCatalogScrollBeginDrag = useCallback(() => {
+    if (catalogScrollStopTimerRef.current) {
+      clearTimeout(catalogScrollStopTimerRef.current);
+      catalogScrollStopTimerRef.current = null;
+    }
+    hideCatalogHeader();
+  }, [hideCatalogHeader]);
+
+  const handleCatalogScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const y = event.nativeEvent.contentOffset.y;
+    if (y <= 10) {
+      if (catalogScrollStopTimerRef.current) {
+        clearTimeout(catalogScrollStopTimerRef.current);
+        catalogScrollStopTimerRef.current = null;
+      }
+      showCatalogHeader();
+      return;
+    }
+
+    hideCatalogHeader();
+
+    if (catalogScrollStopTimerRef.current) {
+      clearTimeout(catalogScrollStopTimerRef.current);
+    }
+    catalogScrollStopTimerRef.current = setTimeout(() => {
+      showCatalogHeader();
+    }, 350);
+  }, [hideCatalogHeader, showCatalogHeader]);
+
+  const handleCatalogScrollEndDrag = useCallback(() => {
+    if (catalogScrollStopTimerRef.current) clearTimeout(catalogScrollStopTimerRef.current);
+    catalogScrollStopTimerRef.current = setTimeout(() => {
+      showCatalogHeader();
+    }, 350);
+  }, [showCatalogHeader]);
+
+  const handleCatalogMomentumScrollEnd = useCallback(() => {
+    if (catalogScrollStopTimerRef.current) {
+      clearTimeout(catalogScrollStopTimerRef.current);
+      catalogScrollStopTimerRef.current = null;
+    }
+    showCatalogHeader();
+  }, [showCatalogHeader]);
+
+  useEffect(() => {
+    if (!mangaModalVisible) {
+      if (catalogScrollStopTimerRef.current) clearTimeout(catalogScrollStopTimerRef.current);
+      isCatalogChromeHiddenRef.current = false;
+      catalogHeaderAnim.setValue(0);
+    }
+  }, [mangaModalVisible, catalogHeaderAnim]);
+
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedMangaQuery(mangaSearchQuery.trim());
@@ -1988,18 +2077,28 @@ export default function ExtensionsScreen() {
                 <Pressable
                   onPress={() => {
                     triggerHaptic();
-                    setLanguagePickerVisible(true);
+                    setLanguagePickerVisible((prev) => !prev);
                   }}
                   style={[
                     styles.langDropdownChip,
-                    { backgroundColor: colors.surface, borderWidth: 0 },
+                    {
+                      backgroundColor: languagePickerVisible ? colors.surfaceElevated : colors.surface,
+                      borderWidth: 0,
+                    },
                   ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Filter catalog by language"
+                  accessibilityState={{ expanded: languagePickerVisible }}
                 >
                   <Ionicons name="language-outline" size={15} color={colors.text} />
                   <Text style={[styles.langDropdownText, { color: colors.text }]}>
                     {LANGUAGE_NAMES[catalogLanguage] || 'English'}
                   </Text>
-                  <Ionicons name="chevron-down" size={13} color={colors.textSecondary} />
+                  <Ionicons
+                    name={languagePickerVisible ? 'chevron-up' : 'chevron-down'}
+                    size={13}
+                    color={colors.textSecondary}
+                  />
                 </Pressable>
 
                 {/* Content Type Filter Chips: Manga, Hentai, Comics */}
@@ -2162,53 +2261,84 @@ export default function ExtensionsScreen() {
               }
             />
 
-            {/* Language Picker Modal for Sources Catalog */}
+            {/* Popover Dropdown for Sources Catalog Language */}
             {languagePickerVisible && (
-              <ConfirmationModal
+              <Modal
+                transparent
                 visible={languagePickerVisible}
-                title="Select Language"
-                message="Filter manga catalog by language:"
-                iconName="language-outline"
-                confirmText="Done"
-                onConfirm={() => setLanguagePickerVisible(false)}
-                onCancel={() => setLanguagePickerVisible(false)}
+                animationType="fade"
+                onRequestClose={() => setLanguagePickerVisible(false)}
               >
-                <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
-                  {POPULAR_LANGUAGES.map((lang) => {
-                    const isSelected = catalogLanguage === lang.id;
-                    return (
-                      <Pressable
-                        key={lang.id}
-                        onPress={() => {
-                          triggerHaptic();
-                          setCatalogLanguage(lang.id);
-                          setLanguagePickerVisible(false);
-                        }}
-                        style={[
-                          styles.langOptionRow,
-                          {
-                            backgroundColor: isSelected ? `${colors.accent}18` : 'transparent',
-                            borderWidth: 0,
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.langOptionText,
-                            {
-                              color: isSelected ? colors.accent : colors.text,
-                              fontWeight: isSelected ? '700' : '400',
-                            },
-                          ]}
-                        >
-                          {lang.label}
-                        </Text>
-                        {isSelected && <Ionicons name="checkmark-circle" size={18} color={colors.accent} />}
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
-              </ConfirmationModal>
+                <Pressable
+                  style={styles.popoverBackdropTransparent}
+                  onPress={() => setLanguagePickerVisible(false)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close language dropdown"
+                >
+                  <View
+                    style={[
+                      styles.langDropdownPopup,
+                      {
+                        top: (Platform.OS === 'ios' ? 104 : 96) + (isCatalogSearchOpen ? 48 : 0),
+                        left:
+                          Platform.OS === 'web' && windowWidth > 1200
+                            ? Math.max(16, (windowWidth - 1200) / 2 + 16)
+                            : 16,
+                        backgroundColor: colors.surfaceElevated || colors.surface,
+                        borderWidth: 0,
+                      },
+                    ]}
+                  >
+                    <View style={styles.dropdownHeaderLabel}>
+                      <Text style={[styles.dropdownSectionTitle, { color: colors.textMuted }]}>
+                        FILTER BY LANGUAGE
+                      </Text>
+                    </View>
+                    <ScrollView style={{ maxHeight: 280 }} showsVerticalScrollIndicator={false}>
+                      {POPULAR_LANGUAGES.map((lang) => {
+                        const isSelected = catalogLanguage === lang.id;
+                        return (
+                          <Pressable
+                            key={lang.id}
+                            onPress={() => {
+                              triggerHaptic();
+                              setCatalogLanguage(lang.id);
+                              setLanguagePickerVisible(false);
+                            }}
+                            style={({ pressed }) => [
+                              styles.sortDropdownItem,
+                              {
+                                backgroundColor: isSelected
+                                  ? `${colors.accent}18`
+                                  : pressed
+                                    ? `${colors.text}08`
+                                    : 'transparent',
+                              },
+                            ]}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Filter by ${lang.label}`}
+                          >
+                            <Text
+                              style={[
+                                styles.sortDropdownItemText,
+                                {
+                                  color: isSelected ? colors.accent : colors.text,
+                                  fontWeight: isSelected ? '700' : '500',
+                                },
+                              ]}
+                            >
+                              {lang.label}
+                            </Text>
+                            {isSelected && (
+                              <Ionicons name="checkmark" size={16} color={colors.accent} />
+                            )}
+                          </Pressable>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                </Pressable>
+              </Modal>
             )}
           </SafeAreaView>
         </Modal>
@@ -2226,201 +2356,238 @@ export default function ExtensionsScreen() {
             style={[styles.modalContainer, { backgroundColor: colors.background }]}
             edges={['top', 'bottom']}
           >
-            {/* Top Navigation Bar: Back Arrow & Right Action Icons */}
-            <View style={[styles.modalTopBar, { borderBottomColor: colors.border }]}>
-              <Pressable
-                onPress={() => {
-                  triggerHaptic();
-                  isRestoringFromDetailRef.current = false;
-                  isViewingMangaFromCatalogRef.current = false;
-                  setMangaModalVisible(false);
-                }}
-                hitSlop={12}
-                style={styles.modalBackBtn}
-                aria-label="Back"
-              >
-                <Ionicons name="arrow-back" size={24} color={colors.text} />
-              </Pressable>
-
-              <View style={styles.modalTopBarRight}>
-                <Pressable
-                  onPress={handleOpenActiveSourceWebsite}
-                  hitSlop={8}
-                  style={styles.modalActionBtn}
-                  aria-label={`Open ${activeMangaSource.name} Website in Browser`}
-                >
-                  <Ionicons name="globe-outline" size={22} color={colors.text} />
-                </Pressable>
-
+            {/* Curtain Sticky Header in Source Catalog Modal */}
+            <Animated.View
+              onLayout={(e) => {
+                const h = e.nativeEvent.layout.height;
+                if (h > 0) setCatalogHeaderHeight(h);
+              }}
+              style={[
+                styles.catalogStickyHeader,
+                {
+                  backgroundColor: colors.background,
+                  borderBottomColor: colors.border,
+                  transform: [{ translateY: catalogHeaderAnim }],
+                  opacity: catalogHeaderOpacity,
+                },
+              ]}
+            >
+              {/* Top Navigation Bar: Back Arrow & Right Action Icons */}
+              <View style={[styles.modalTopBar, { borderBottomColor: colors.border }]}>
                 <Pressable
                   onPress={() => {
                     triggerHaptic();
-                    setIsMangaSearchOpen((prev) => !prev);
+                    isRestoringFromDetailRef.current = false;
+                    isViewingMangaFromCatalogRef.current = false;
+                    setMangaModalVisible(false);
                   }}
-                  hitSlop={8}
-                  style={styles.modalActionBtn}
-                  aria-label="Toggle Search"
+                  hitSlop={12}
+                  style={styles.modalBackBtn}
+                  aria-label="Back"
                 >
-                  <Ionicons
-                    name="search-outline"
-                    size={22}
-                    color={colors.text}
-                  />
+                  <Ionicons name="arrow-back" size={24} color={colors.text} />
                 </Pressable>
 
-                <Pressable
-                  onPress={handleToggleColumnsMode}
-                  hitSlop={8}
-                  style={styles.modalActionBtn}
-                  aria-label={`Switch between 2 and 3 column layout, currently ${columnsMode} columns`}
-                >
-                  <Animated.View
-                    style={{
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      transform: [{ scale: gridIconScale }, { rotate: gridIconSpin }],
-                    }}
+                <View style={styles.modalTopBarRight}>
+                  <Pressable
+                    onPress={handleOpenActiveSourceWebsite}
+                    hitSlop={8}
+                    style={styles.modalActionBtn}
+                    aria-label={`Open ${activeMangaSource.name} Website in Browser`}
                   >
-                    <GridColumnsIcon
-                      columns={columnsMode}
+                    <Ionicons name="globe-outline" size={22} color={colors.text} />
+                  </Pressable>
+
+                  <Pressable
+                    onPress={() => {
+                      triggerHaptic();
+                      setIsMangaSearchOpen((prev) => !prev);
+                    }}
+                    hitSlop={8}
+                    style={styles.modalActionBtn}
+                    aria-label="Toggle Search"
+                  >
+                    <Ionicons
+                      name="search-outline"
                       size={22}
                       color={colors.text}
                     />
-                  </Animated.View>
-                </Pressable>
+                  </Pressable>
 
+                  <Pressable
+                    onPress={handleToggleColumnsMode}
+                    hitSlop={8}
+                    style={styles.modalActionBtn}
+                    aria-label={`Switch between 2 and 3 column layout, currently ${columnsMode} columns`}
+                  >
+                    <Animated.View
+                      style={{
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        transform: [{ scale: gridIconScale }, { rotate: gridIconSpin }],
+                      }}
+                    >
+                      <GridColumnsIcon
+                        columns={columnsMode}
+                        size={22}
+                        color={colors.text}
+                      />
+                    </Animated.View>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={() => {
+                      triggerHaptic();
+                      setSortPickerVisible(true);
+                    }}
+                    hitSlop={8}
+                    style={styles.modalActionBtn}
+                    aria-label="More Options"
+                  >
+                    <Ionicons name="ellipsis-vertical" size={22} color={colors.text} />
+                  </Pressable>
+                </View>
+              </View>
+
+              {/* In-Modal Search Bar (when expanded) */}
+              {isMangaSearchOpen && (
+                <View style={[styles.modalSearchBox, { backgroundColor: colors.surfaceElevated }]}>
+                  <Ionicons name="search" size={18} color={colors.textMuted} />
+                  <TextInput
+                    style={[styles.modalSearchInput, { color: colors.text }]}
+                    placeholder={`Search ${activeMangaSource.name}...`}
+                    placeholderTextColor={colors.textMuted}
+                    value={mangaSearchQuery}
+                    multiline={false}
+                    numberOfLines={1}
+                    onChangeText={(text) => setMangaSearchQuery(text.replace(/[\r\n]+/g, ' '))}
+                    onSubmitEditing={() => setDebouncedMangaQuery(mangaSearchQuery.trim())}
+                    returnKeyType="search"
+                    autoFocus
+                    autoCapitalize="none"
+                  />
+                  {mangaSearchQuery.length > 0 && (
+                    <Pressable
+                      onPress={() => {
+                        setMangaSearchQuery('');
+                        setDebouncedMangaQuery('');
+                      }}
+                      hitSlop={8}
+                      aria-label="Clear Search"
+                    >
+                      <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+                    </Pressable>
+                  )}
+                </View>
+              )}
+
+              {/* Title & Filter/Sort Row matching Image 2 */}
+              <View style={styles.modalTitleRow}>
+                <Text style={[styles.modalSourceTitle, { color: colors.text }]}>
+                  {activeMangaSource.name}
+                </Text>
+
+                {/* Sort Order Selector Button: e.g. "Popular ⏷" */}
                 <Pressable
                   onPress={() => {
                     triggerHaptic();
-                    setSortPickerVisible(true);
+                    setSortPickerVisible((prev) => !prev);
                   }}
-                  hitSlop={8}
-                  style={styles.modalActionBtn}
-                  aria-label="More Options"
+                  style={[
+                    styles.sortFilterBtn,
+                    {
+                      backgroundColor: sortPickerVisible ? colors.surfaceElevated : colors.surface,
+                      borderWidth: 0,
+                    },
+                  ]}
+                  aria-label="Change Sort Order"
                 >
-                  <Ionicons name="ellipsis-vertical" size={22} color={colors.text} />
+                  <Ionicons name="filter-outline" size={14} color={colors.textSecondary} />
+                  <Text style={[styles.sortFilterText, { color: colors.text }]}>
+                    {availableSorts.find((s) => s.id === selectedSort)?.label || selectedSort || 'Popular'}
+                  </Text>
+                  <Ionicons
+                    name={sortPickerVisible ? 'chevron-up' : 'chevron-down'}
+                    size={14}
+                    color={colors.textSecondary}
+                  />
                 </Pressable>
               </View>
-            </View>
 
-            {/* In-Modal Search Bar (when expanded) */}
-            {isMangaSearchOpen && (
-              <View style={[styles.modalSearchBox, { backgroundColor: colors.surfaceElevated }]}>
-                <Ionicons name="search" size={18} color={colors.textMuted} />
-                <TextInput
-                  style={[styles.modalSearchInput, { color: colors.text }]}
-                  placeholder={`Search ${activeMangaSource.name}...`}
-                  placeholderTextColor={colors.textMuted}
-                  value={mangaSearchQuery}
-                  multiline={false}
-                  numberOfLines={1}
-                  onChangeText={(text) => setMangaSearchQuery(text.replace(/[\r\n]+/g, ' '))}
-                  onSubmitEditing={() => setDebouncedMangaQuery(mangaSearchQuery.trim())}
-                  returnKeyType="search"
-                  autoFocus
-                  autoCapitalize="none"
-                />
-                {mangaSearchQuery.length > 0 && (
-                  <Pressable
-                    onPress={() => {
-                      setMangaSearchQuery('');
-                      setDebouncedMangaQuery('');
-                    }}
-                    hitSlop={8}
-                    aria-label="Clear Search"
-                  >
-                    <Ionicons name="close-circle" size={18} color={colors.textMuted} />
-                  </Pressable>
-                )}
-              </View>
-            )}
-
-            {/* Title & Filter/Sort Row matching Image 2 */}
-            <View style={styles.modalTitleRow}>
-              <Text style={[styles.modalSourceTitle, { color: colors.text }]}>
-                {activeMangaSource.name}
-              </Text>
-
-              {/* Sort Order Selector Button: e.g. "Popular ⏷" */}
-              <Pressable
-                onPress={() => {
-                  triggerHaptic();
-                  setSortPickerVisible((prev) => !prev);
-                }}
-                style={[
-                  styles.sortFilterBtn,
-                  {
-                    backgroundColor: sortPickerVisible ? colors.surfaceElevated : colors.surface,
-                    borderWidth: 0,
-                  },
-                ]}
-                aria-label="Change Sort Order"
-              >
-                <Ionicons name="filter-outline" size={14} color={colors.textSecondary} />
-                <Text style={[styles.sortFilterText, { color: colors.text }]}>
-                  {availableSorts.find((s) => s.id === selectedSort)?.label || selectedSort || 'Popular'}
-                </Text>
-                <Ionicons
-                  name={sortPickerVisible ? 'chevron-up' : 'chevron-down'}
-                  size={14}
-                  color={colors.textSecondary}
-                />
-              </Pressable>
-            </View>
-
-            {/* Dynamic Genre / Tag / Category Filter Chips fetched from Source */}
-            <View style={styles.genreChipsContainer}>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.genreChipsScroll}
-              >
-                {availableTags.map((genre) => {
-                  const isSelected = selectedGenre === genre.id;
-                  return (
-                    <Pressable
-                      key={genre.id ? `${genre.group || ''}_${genre.id}` : 'all'}
-                      onPress={() => {
-                        triggerHaptic();
-                        setSelectedGenre(isSelected ? '' : genre.id);
-                      }}
-                      style={[
-                        styles.genreChip,
-                        {
-                          backgroundColor: isSelected ? colors.surfaceElevated : colors.surface,
-                          borderWidth: 0,
-                        },
-                      ]}
-                    >
-                      <Text
+              {/* Dynamic Genre / Tag / Category Filter Chips fetched from Source */}
+              <View style={styles.genreChipsContainer}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.genreChipsScroll}
+                >
+                  {availableTags.map((genre) => {
+                    const isSelected = selectedGenre === genre.id;
+                    return (
+                      <Pressable
+                        key={genre.id ? `${genre.group || ''}_${genre.id}` : 'all'}
+                        onPress={() => {
+                          triggerHaptic();
+                          setSelectedGenre(isSelected ? '' : genre.id);
+                        }}
                         style={[
-                          styles.genreChipText,
+                          styles.genreChip,
                           {
-                            color: isSelected ? colors.text : colors.textMuted,
-                            fontWeight: isSelected ? '700' : '500',
+                            backgroundColor: isSelected ? colors.surfaceElevated : colors.surface,
+                            borderWidth: 0,
                           },
                         ]}
                       >
-                        {genre.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-                {isLoadingTags && (
-                  <View style={{ justifyContent: 'center', paddingHorizontal: 10 }}>
-                    <ActivityIndicator size="small" color={colors.accent} />
-                  </View>
-                )}
-              </ScrollView>
-            </View>
+                        <Text
+                          style={[
+                            styles.genreChipText,
+                            {
+                              color: isSelected ? colors.text : colors.textMuted,
+                              fontWeight: isSelected ? '700' : '500',
+                            },
+                          ]}
+                        >
+                          {genre.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                  {isLoadingTags && (
+                    <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', paddingHorizontal: 4 }}>
+                      <Skeleton width={52} height={28} borderRadius={8} />
+                      <Skeleton width={68} height={28} borderRadius={8} />
+                      <Skeleton width={60} height={28} borderRadius={8} />
+                    </View>
+                  )}
+                </ScrollView>
+              </View>
+            </Animated.View>
 
             {/* 3-Column Manga Grid matching Image 2 */}
             {isModalLoading ? (
-              <View style={styles.modalLoadingBox}>
-                <ActivityIndicator size="large" color={colors.accent} />
-              </View>
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={[
+                  styles.mangaGridContent,
+                  { paddingTop: catalogHeaderHeight + Spacing.xs },
+                ]}
+              >
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: modalGap }}>
+                  {Array.from({ length: columnsMode * 4 }).map((_, i) => (
+                    <View key={i} style={[styles.mangaCardItem, { width: modalCardWidth }]}>
+                      <View style={[styles.mangaCoverWrapper, { backgroundColor: colors.surfaceElevated }]}>
+                        <Skeleton width="100%" height="100%" borderRadius={8} />
+                      </View>
+                      <View style={{ marginTop: 4, gap: 4 }}>
+                        <Skeleton width="85%" height={12} borderRadius={4} />
+                        <Skeleton width="50%" height={10} borderRadius={4} />
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </ScrollView>
             ) : modalError ? (
-              <View style={[styles.modalEmptyBox, { paddingHorizontal: 24, paddingVertical: 32 }]}>
+              <View style={[styles.modalEmptyBox, { paddingTop: catalogHeaderHeight + 20, paddingHorizontal: 24, paddingVertical: 32 }]}>
                 {modalIsCloudflare ? (
                   <View style={{ alignItems: 'center', width: '100%', maxWidth: 320 }}>
                     {/* Flat Minimal Icon Badge */}
@@ -2576,7 +2743,7 @@ export default function ExtensionsScreen() {
                 )}
               </View>
             ) : modalMangas.length === 0 ? (
-              <View style={styles.modalEmptyBox}>
+              <View style={[styles.modalEmptyBox, { paddingTop: catalogHeaderHeight + 20 }]}>
                 <Ionicons name="book-outline" size={48} color={colors.textMuted} />
                 <Text style={[styles.modalEmptyTitle, { color: colors.text }]}>No Manga Found</Text>
                 <Text style={[styles.modalEmptyDesc, { color: colors.textMuted }]}>
@@ -2589,9 +2756,17 @@ export default function ExtensionsScreen() {
                 key={columnsMode}
                 numColumns={columnsMode}
                 keyExtractor={(item, index) => `${item.id}-${index}`}
-                contentContainerStyle={styles.mangaGridContent}
+                contentContainerStyle={[
+                  styles.mangaGridContent,
+                  { paddingTop: catalogHeaderHeight + Spacing.xs },
+                ]}
                 columnWrapperStyle={{ gap: modalGap }}
                 showsVerticalScrollIndicator={false}
+                onScroll={handleCatalogScroll}
+                onScrollBeginDrag={handleCatalogScrollBeginDrag}
+                onScrollEndDrag={handleCatalogScrollEndDrag}
+                onMomentumScrollEnd={handleCatalogMomentumScrollEnd}
+                scrollEventThrottle={16}
                 initialNumToRender={18}
                 maxToRenderPerBatch={18}
                 windowSize={5}
@@ -2616,6 +2791,7 @@ export default function ExtensionsScreen() {
                     >
                       {/* Cover Image Container with 2:3 Aspect Ratio */}
                       <View style={[styles.mangaCoverWrapper, { backgroundColor: colors.surfaceElevated }]}>
+                        <Skeleton width="100%" height="100%" borderRadius={8} style={StyleSheet.absoluteFill as any} />
                         {item.coverUrl ? (
                           <BridgedImage
                             source={{
@@ -2659,8 +2835,18 @@ export default function ExtensionsScreen() {
                 onEndReachedThreshold={0.5}
                 ListFooterComponent={
                   isModalLoadingMore ? (
-                    <View style={styles.modalFooterLoader}>
-                      <ActivityIndicator size="small" color={colors.accent} />
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: modalGap, paddingHorizontal: Spacing.md, paddingTop: 12, paddingBottom: 24 }}>
+                      {Array.from({ length: columnsMode }).map((_, i) => (
+                        <View key={i} style={[styles.mangaCardItem, { width: modalCardWidth }]}>
+                          <View style={[styles.mangaCoverWrapper, { backgroundColor: colors.surfaceElevated }]}>
+                            <Skeleton width="100%" height="100%" borderRadius={8} />
+                          </View>
+                          <View style={{ marginTop: 4, gap: 4 }}>
+                            <Skeleton width="85%" height={12} borderRadius={4} />
+                            <Skeleton width="50%" height={10} borderRadius={4} />
+                          </View>
+                        </View>
+                      ))}
                     </View>
                   ) : null
                 }
@@ -3414,6 +3600,15 @@ const styles = StyleSheet.create({
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   modalContainer: {
     flex: 1,
+    position: 'relative',
+  },
+  catalogStickyHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   modalTopBar: {
     flexDirection: 'row',
@@ -3691,11 +3886,27 @@ const styles = StyleSheet.create({
   },
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // Popover Dropdown for Catalog Sort Filter
+  // Popover Dropdown for Catalog Filters (Sort & Language)
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   popoverBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.25)',
+  },
+  popoverBackdropTransparent: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  langDropdownPopup: {
+    position: 'absolute',
+    width: 200,
+    borderRadius: Radius.lg,
+    borderWidth: 0,
+    paddingVertical: 6,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    elevation: 16,
   },
   sortDropdownPopup: {
     position: 'absolute',

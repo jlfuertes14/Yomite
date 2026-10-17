@@ -1,20 +1,36 @@
 /**
  * Tab Layout - Yomite navigation system with floating bottom tab bar.
+ * 5 primary tabs: Discover, Library, History, Extensions, and More.
+ * Frosted-glass blur backdrop behind the navigation pill.
  */
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Tabs } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import { LayoutChangeEvent, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useMemo } from 'react';
+import {
+  Easing,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
+  Easing as ReanimatedEasing,
   ReduceMotion,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
   withSpring,
+  withTiming,
 } from 'react-native-reanimated';
 import { Colors } from '../../constants/Colors';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
+import { useUIStore } from '../../src/store/uiStore';
+import { triggerHaptic } from '../../src/utils/haptics';
 
 type TabIcon = React.ComponentProps<typeof Ionicons>['name'];
 type NavigationBarProps = Parameters<NonNullable<React.ComponentProps<typeof Tabs>['tabBar']>>[0];
@@ -33,15 +49,47 @@ interface AnimatedTabIconProps {
   selectedColor: string;
 }
 
-const TABS: TabConfig[] = [
+/** Primary tabs shown in the bottom bar */
+const PRIMARY_TABS: TabConfig[] = [
   { name: 'index', title: 'Discover', icon: 'compass-outline', iconFocused: 'compass' },
   { name: 'library', title: 'Library', icon: 'library-outline', iconFocused: 'library' },
-  { name: 'downloads', title: 'Downloads', icon: 'download-outline', iconFocused: 'download' },
-  { name: 'extensions', title: 'Extensions', icon: 'grid-outline', iconFocused: 'grid' },
-  { name: 'community', title: 'Community', icon: 'chatbubbles-outline', iconFocused: 'chatbubbles' },
   { name: 'history', title: 'History', icon: 'time-outline', iconFocused: 'time' },
+  { name: 'extensions', title: 'Extensions', icon: 'grid-outline', iconFocused: 'grid' },
+  { name: 'more', title: 'More', icon: 'ellipsis-horizontal-outline', iconFocused: 'ellipsis-horizontal' },
+];
+
+/** Secondary screens accessible via the "More" page hub */
+const SECONDARY_SCREENS: TabConfig[] = [
+  { name: 'downloads', title: 'Downloads', icon: 'download-outline', iconFocused: 'download' },
+  { name: 'community', title: 'Community', icon: 'chatbubbles-outline', iconFocused: 'chatbubbles' },
   { name: 'settings', title: 'Settings', icon: 'settings-outline', iconFocused: 'settings' },
 ];
+
+/** Complete tab list for Tabs.Screen registration (order matters for expo-router) */
+const ALL_TABS: TabConfig[] = [
+  ...PRIMARY_TABS,
+  ...SECONDARY_SCREENS,
+];
+
+function hexToRgba(hex: string, alpha: number): string {
+  if (!hex || typeof hex !== 'string') {
+    return `rgba(5, 5, 5, ${alpha})`;
+  }
+  const cleanHex = hex.replace('#', '');
+  if (cleanHex.length === 6) {
+    const r = parseInt(cleanHex.substring(0, 2), 16);
+    const g = parseInt(cleanHex.substring(2, 4), 16);
+    const b = parseInt(cleanHex.substring(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+  if (cleanHex.length === 3) {
+    const r = parseInt(cleanHex.charAt(0) + cleanHex.charAt(0), 16);
+    const g = parseInt(cleanHex.charAt(1) + cleanHex.charAt(1), 16);
+    const b = parseInt(cleanHex.charAt(2) + cleanHex.charAt(2), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+  return `rgba(5, 5, 5, ${alpha})`;
+}
 
 function AnimatedTabIcon({ focused, tab, colors, selectedColor }: AnimatedTabIconProps) {
   const reducedMotion = useReducedMotion();
@@ -86,20 +134,6 @@ function AnimatedTabIcon({ focused, tab, colors, selectedColor }: AnimatedTabIco
         <View style={[styles.libraryMotionIcon, { transform: [{ translateY: 2 }] }]}>
           <Ionicons name="book" size={18} color={selectedColor} />
         </View>
-      ) : selectedName === 'community' && focused ? (
-        <View style={[styles.communityMotionIcon, { transform: [{ scaleX: -1 }] }]}>
-          <Ionicons
-            name="chatbubble"
-            size={21}
-            color={selectedColor}
-          />
-          <Ionicons
-            name="chatbubble-outline"
-            size={12}
-            color={selectedColor}
-            style={{ position: 'absolute', right: 1, bottom: 0, transform: [{ scaleX: -1 }] }}
-          />
-        </View>
       ) : selectedName === 'extensions' && focused ? (
         <View style={styles.extensionsMotionIcon}>
           <View style={[styles.windowTile, { backgroundColor: selectedColor }]} />
@@ -110,7 +144,7 @@ function AnimatedTabIcon({ focused, tab, colors, selectedColor }: AnimatedTabIco
       ) : (
         <Ionicons
           name={focused ? tab.iconFocused : tab.icon}
-          size={21}
+          size={22}
           color={focused ? selectedColor : colors.tabIconDefault}
         />
       )}
@@ -119,126 +153,259 @@ function AnimatedTabIcon({ focused, tab, colors, selectedColor }: AnimatedTabIco
 }
 
 /**
- * Floating Bottom Tab Bar
+ * Floating Bottom Tab Bar — frosted glass, 5 primary tabs
  */
 function FloatingTabBar({ state, descriptors, navigation }: NavigationBarProps) {
   const insets = useSafeAreaInsets();
   const colors = useThemeColors();
   const navigationAccent = colors.accent;
-  const reducedMotion = useReducedMotion();
-  const [barWidth, setBarWidth] = useState(0);
-  const indicatorX = useSharedValue(0);
-  const itemWidth = barWidth / state.routes.length;
+
+  const currentRouteName = state.routes[state.index]?.name;
+  const isSecondaryActive = SECONDARY_SCREENS.some((t) => t.name === currentRouteName);
+
+  const isDark = colors.background === Colors.dark.background ||
+    colors.background === '#0F1415' ||
+    colors.background === '#1A1110' ||
+    colors.background === '#10140F' ||
+    colors.background === '#151218' ||
+    colors.background === '#191113' ||
+    colors.background === '#121318' ||
+    colors.background === '#141314' ||
+    colors.background === '#10141C' ||
+    (colors.background ?? '').charAt(1) <= '3';
+
+  const bottomOffset = Math.max(insets.bottom, 12) + 8;
+  const bgHex = colors.background || (isDark ? '#050505' : '#FFFFFF');
+
+  const isTabBarVisible = useUIStore((s) => s.isTabBarVisible);
+  const barTranslateY = useSharedValue(0);
 
   useEffect(() => {
-    if (!itemWidth) return;
-    indicatorX.set(
-      withSpring(state.index * itemWidth, {
-        dampingRatio: 0.82,
-        duration: 300,
-        reduceMotion: reducedMotion ? ReduceMotion.Always : ReduceMotion.System,
-      }),
-    );
-  }, [indicatorX, itemWidth, reducedMotion, state.index]);
+    barTranslateY.value = withTiming(isTabBarVisible ? 0 : 120, {
+      duration: 240,
+      easing: ReanimatedEasing.bezier(0.23, 1, 0.32, 1),
+    });
+  }, [isTabBarVisible, barTranslateY]);
 
-  const indicatorStyle = useAnimatedStyle(() => ({
-    width: Math.max(0, itemWidth - 8),
-    transform: [{ translateX: indicatorX.get() + 4 }],
-  })) as any;
-
-  const onBarLayout = (event: LayoutChangeEvent) => {
-    setBarWidth(event.nativeEvent.layout.width);
-  };
+  const barAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: barTranslateY.value }],
+    opacity: barTranslateY.value > 100 ? 0 : 1,
+  }));
 
   return (
     <View
       style={[
         styles.tabBarFrame,
-        { bottom: Math.max(insets.bottom, 12) + 8, pointerEvents: 'box-none' },
+        { pointerEvents: 'box-none' },
       ]}
     >
-      <View
-        onLayout={onBarLayout}
-        style={[styles.tabBarPill, { backgroundColor: colors.surfaceElevated || colors.surface, borderWidth: 0, borderColor: 'transparent' }]}
-      >
-        <Animated.View
+      <Animated.View style={[{ width: '100%' }, barAnimatedStyle]}>
+        {/* Ambient dim/blur backdrop below and behind the floating menu app bar */}
+        <View
           pointerEvents="none"
-          style={[styles.activeIndicator, { backgroundColor: `${navigationAccent}33` }, indicatorStyle]}
+          style={[
+            styles.bottomBlurStrip,
+            { height: 60 + bottomOffset + 24 },
+          ]}
+        >
+        {Platform.OS === 'ios' && (
+          <BlurView
+            intensity={40}
+            tint={isDark ? 'dark' : 'light'}
+            style={StyleSheet.absoluteFill}
+          />
+        )}
+        <LinearGradient
+          colors={[
+            hexToRgba(bgHex, 0),
+            hexToRgba(bgHex, 0.25),
+            hexToRgba(bgHex, 0.65),
+            hexToRgba(bgHex, 0.92),
+            hexToRgba(bgHex, 0.98),
+          ]}
+          locations={[0, 0.35, 0.65, 0.88, 1]}
+          style={StyleSheet.absoluteFill}
         />
-        {state.routes.map((route, index) => {
-          const tab = TABS.find((item) => item.name === route.name);
-          if (!tab) return null;
-
-          const isFocused = state.index === index;
-          const options = descriptors[route.key].options;
-
-          const onPress = () => {
-            const event = navigation.emit({
-              type: 'tabPress',
-              target: route.key,
-              canPreventDefault: true,
-            });
-
-            if (!isFocused && !event.defaultPrevented) {
-              navigation.navigate(route.name);
-            }
-          };
-
-          const onLongPress = () => {
-            navigation.emit({ type: 'tabLongPress', target: route.key });
-          };
-
-          return (
-            <Pressable
-              key={route.key}
-              accessibilityRole="button"
-              accessibilityState={isFocused ? { selected: true } : {}}
-              accessibilityLabel={options.tabBarAccessibilityLabel}
-              testID={options.tabBarButtonTestID}
-              android_ripple={{ color: 'transparent' }}
-              onPress={onPress}
-              onLongPress={onLongPress}
-              style={({ pressed }) => [styles.tabItem, pressed && styles.tabItemPressed]}
-            >
-              <AnimatedTabIcon
-                focused={isFocused}
-                tab={tab}
-                colors={colors}
-                selectedColor={navigationAccent}
-              />
-              <Text
-                style={[
-                  styles.tabLabel,
-                  { color: isFocused ? navigationAccent : colors.tabIconDefault },
-                ]}
-                numberOfLines={1}
-              >
-                {tab.title}
-              </Text>
-            </Pressable>
-          );
-        })}
       </View>
+
+      {/* Floating Navigation Pill */}
+      <View style={[styles.floatingPillWrapper, { marginBottom: bottomOffset }]}>
+        <View
+          style={[
+            styles.pillShadowContainer,
+            {
+              shadowColor: isDark ? '#000000' : '#0F172A',
+              shadowOffset: { width: 0, height: isDark ? 6 : 4 },
+              shadowOpacity: isDark ? 0.38 : 0.12,
+              shadowRadius: isDark ? 16 : 14,
+              elevation: isDark ? 8 : 6,
+            },
+          ]}
+        >
+          {/* Frosted & Tinted Surface (clipped with overflow: hidden) */}
+          <View style={styles.blurWrapper}>
+            <BlurView
+              intensity={Platform.OS === 'ios' ? 70 : 100}
+              tint={isDark ? 'dark' : 'light'}
+              style={StyleSheet.absoluteFill}
+            />
+            {/* Tactile Flat / Skeuomorphic Tinted Base: Dirty white / porcelain in light mode, full black in dark mode */}
+            <View
+              style={[
+                StyleSheet.absoluteFill,
+                {
+                  backgroundColor: isDark
+                    ? '#000000'
+                    : 'rgba(238, 241, 246, 0.95)',
+                  borderRadius: 32,
+                  borderWidth: 1,
+                  borderColor: isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(15, 23, 42, 0.08)',
+                },
+              ]}
+            />
+            {/* Skeuomorphic Top Specular Rim & Bottom Subtle Shading */}
+            <View
+              pointerEvents="none"
+              style={[
+                StyleSheet.absoluteFill,
+                {
+                  borderRadius: 32,
+                  borderTopWidth: 1.2,
+                  borderTopColor: isDark ? 'rgba(255, 255, 255, 0.14)' : 'rgba(255, 255, 255, 0.95)',
+                  borderBottomWidth: 1,
+                  borderBottomColor: isDark ? 'transparent' : 'rgba(0, 0, 0, 0.05)',
+                },
+              ]}
+            />
+          </View>
+
+          <View style={styles.tabBarPill}>
+            {PRIMARY_TABS.map((tab) => {
+              const route = state.routes.find((r) => r.name === tab.name);
+              const isFocused =
+                currentRouteName === tab.name ||
+                (tab.name === 'more' && isSecondaryActive);
+
+              const options = route ? descriptors[route.key]?.options ?? {} : {};
+
+              const onPress = () => {
+                triggerHaptic();
+
+                // When viewing secondary screens (downloads, community, settings), tapping More returns to the More hub
+                if (tab.name === 'more' && isSecondaryActive) {
+                  navigation.navigate('more');
+                  return;
+                }
+
+                if (route) {
+                  const event = navigation.emit({
+                    type: 'tabPress',
+                    target: route.key,
+                    canPreventDefault: true,
+                  });
+
+                  if (!isFocused && !event.defaultPrevented) {
+                    navigation.navigate(route.name);
+                  }
+                } else {
+                  navigation.navigate(tab.name);
+                }
+              };
+
+              const onLongPress = () => {
+                if (route) {
+                  navigation.emit({ type: 'tabLongPress', target: route.key });
+                }
+              };
+
+              return (
+                <Pressable
+                  key={tab.name}
+                  accessibilityRole="button"
+                  accessibilityState={isFocused ? { selected: true } : {}}
+                  accessibilityLabel={options.tabBarAccessibilityLabel || tab.title}
+                  testID={options.tabBarButtonTestID}
+                  android_ripple={{ color: 'transparent' }}
+                  onPress={onPress}
+                  onLongPress={onLongPress}
+                  style={({ pressed }) => [
+                    styles.tabItem,
+                    pressed && styles.tabItemPressed,
+                  ]}
+                >
+                  <AnimatedTabIcon
+                    focused={isFocused}
+                    tab={tab}
+                    colors={colors}
+                    selectedColor={navigationAccent}
+                  />
+                  <Text
+                    style={[
+                      styles.tabLabel,
+                      {
+                        color: isFocused ? navigationAccent : (isDark ? colors.tabIconDefault : '#4A5568'),
+                        fontWeight: isFocused ? '700' : '600',
+                      },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {tab.title}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      </View>
+      </Animated.View>
     </View>
   );
 }
 
 export default function TabLayout() {
   const colors = useThemeColors();
+  const { width: windowWidth } = useWindowDimensions();
+
+  // Pure horizontal slide: screens remain 100% solid & opaque to eliminate ghosting/shadow bleed-through
+  const sceneStyleInterpolator = useMemo(() => {
+    return ({ current }: { current: { progress: any } }) => ({
+      sceneStyle: {
+        transform: [
+          {
+            translateX: current.progress.interpolate({
+              inputRange: [-1, 0, 1],
+              outputRange: [-windowWidth, 0, windowWidth],
+            }),
+          },
+        ],
+      },
+    });
+  }, [windowWidth]);
 
   return (
     <Tabs
+      backBehavior="history"
       tabBar={(props) =>
         Platform.OS === 'web' ? null : <FloatingTabBar {...props} />
       }
       screenOptions={{
         headerShown: false,
+        animation: 'shift',
+        sceneStyleInterpolator,
+        transitionSpec: {
+          animation: 'timing',
+          config: {
+            duration: 240,
+            easing: Easing.bezier(0.23, 1, 0.32, 1),
+          },
+        },
+        freezeOnBlur: false,
         sceneStyle: {
           backgroundColor: colors.background,
         },
       }}
     >
-      {TABS.map((tab) => (
+      {ALL_TABS.map((tab) => (
         <Tabs.Screen key={tab.name} name={tab.name} options={{ title: tab.title }} />
       ))}
     </Tabs>
@@ -255,32 +422,56 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 20,
   },
+  bottomBlurStrip: {
+    bottom: 0,
+    left: 0,
+    overflow: 'hidden',
+    position: 'absolute',
+    right: 0,
+    width: '100%',
+  },
+  floatingPillWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    width: '100%',
+  },
+  pillShadowContainer: {
+    borderRadius: 32,
+    height: 60,
+    position: 'relative',
+    width: '94%',
+  },
+  blurWrapper: {
+    borderRadius: 32,
+    bottom: 0,
+    left: 0,
+    overflow: 'hidden',
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
   tabBarPill: {
     alignItems: 'center',
-    borderRadius: 32,
-    borderWidth: 0,
-    borderColor: 'transparent',
-    elevation: 0,
     flexDirection: 'row',
     height: 60,
-    overflow: 'hidden',
     paddingHorizontal: 4,
     position: 'relative',
-    shadowColor: 'transparent',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    width: '94%',
+    width: '100%',
   },
   tabItem: {
     alignItems: 'center',
     backgroundColor: 'transparent',
+    borderRadius: 22,
     flex: 1,
+    height: 52,
     justifyContent: 'center',
+    marginHorizontal: 1,
     minWidth: 0,
   },
   tabItemPressed: {
-    opacity: 0.68,
+    opacity: 0.72,
+    transform: [{ scale: 0.96 }],
   },
   iconSlot: {
     alignItems: 'center',
@@ -288,28 +479,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 30,
   },
-  activeIndicator: {
-    borderRadius: 16,
-    height: 34,
-    left: 0,
-    position: 'absolute',
-    top: 6,
-  },
   tabLabel: {
     color: Colors.dark.tabIconDefault,
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: '600',
+    letterSpacing: 0.1,
     marginTop: 1,
   },
   libraryMotionIcon: {
     height: 22,
     position: 'relative',
     width: 23,
-  },
-  communityMotionIcon: {
-    height: 23,
-    position: 'relative',
-    width: 24,
   },
   extensionsMotionIcon: {
     flexDirection: 'row',
@@ -324,3 +504,4 @@ const styles = StyleSheet.create({
     width: 8,
   },
 });
+
