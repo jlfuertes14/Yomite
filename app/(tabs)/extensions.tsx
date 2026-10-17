@@ -54,24 +54,26 @@ import { triggerHaptic } from '../../src/utils/haptics';
 import { detectMangaLanguage, getLanguageInfo } from '../../src/utils/language';
 import { normalizeRatingToTen } from '../../src/utils/rating';
 
-const STORAGE_KEY_INSTALLED_SOURCES = '@mangaapp_installed_sources_v2';
+const STORAGE_KEY_INSTALLED_SOURCES = '@mangaapp_installed_sources_v3';
 
 // Initial default sources displayed in the 4-column grid (Image 1)
 const DEFAULT_INSTALLED_IDS = [
-  'comix-to',
-  'reimanga',
-  'comick-fun',
-  'mangadex',
-  'mangapill',
-  'asurascans',
-  'linewebtoon',
-  'mangafire',
-  'mangaplus',
-  'mangareader',
-  'myreadingmanga',
-  'ninemanga',
-  'webtoons',
-  'batoto',
+  'comick-fun',   // 1. Comick
+  'mangadex',     // 2. Mangadex
+  'asurascans',   // 3. AsuraScans
+  'vortexscans',  // 4. VortexSCANS
+  'hitomila',     // 5. Hitomi
+  'toonily',      // 6. Toonily
+  'comix-to',     // 7. COMIX
+  'manganato',    // 8. Manganato
+  'reimanga',     // 9. ReiManga
+  'flamecomics',  // 10. FlameComics
+  'philiascans',  // 11. PhiliaScans
+  'ravenscans',   // 12. RavenScans
+  'mangadot',     // 13. MangaDot
+  'mangapill',    // 14. MangaPill
+  'omegascans',   // 15. OmegaScans
+  'hivetoon',     // 16. Hivetoon
 ];
 
 interface CuratedSourceMeta {
@@ -166,7 +168,7 @@ const CURATED_SOURCES: Record<string, CuratedSourceMeta> = {
   flamecomics: {
     id: 'flamecomics',
     name: 'FlameComics',
-    displayName: 'FlameC...',
+    displayName: 'FlameComics',
     domain: 'flamecomics.xyz',
     icon: 'https://icon.horse/icon/flamecomics.xyz',
     iconType: 'custom',
@@ -177,7 +179,7 @@ const CURATED_SOURCES: Record<string, CuratedSourceMeta> = {
   mangafire: {
     id: 'mangafire',
     name: 'MangaFire',
-    displayName: 'MangaFi...',
+    displayName: 'MangaFire',
     domain: 'mangafire.to',
     icon: 'https://www.google.com/s2/favicons?domain=mangafire.to&sz=64',
     iconType: 'mangafire',
@@ -187,7 +189,7 @@ const CURATED_SOURCES: Record<string, CuratedSourceMeta> = {
   mangapill: {
     id: 'mangapill',
     name: 'MangaPill',
-    displayName: 'MangaP...',
+    displayName: 'MangaPill',
     domain: 'mangapill.com',
     icon: 'https://www.google.com/s2/favicons?domain=mangapill.com&sz=64',
     iconType: 'mangapill',
@@ -284,7 +286,7 @@ const CURATED_SOURCES: Record<string, CuratedSourceMeta> = {
   vortexscans: {
     id: 'vortexscans',
     name: 'VortexScans',
-    displayName: 'VortexS...',
+    displayName: 'VortexScans',
     domain: 'vortexscans.org',
     icon: 'https://www.google.com/s2/favicons?domain=vortexscans.org&sz=64',
     iconType: 'custom',
@@ -295,12 +297,45 @@ const CURATED_SOURCES: Record<string, CuratedSourceMeta> = {
   hitomila: {
     id: 'hitomila',
     name: 'Hitomi.La',
-    displayName: 'Hitomi.La',
+    displayName: 'Hitomi',
     domain: 'hitomi.la',
     icon: 'https://www.google.com/s2/favicons?domain=hitomi.la&sz=64',
     iconType: 'custom',
     letter: 'H',
     letterColor: '#E11D48',
+    bgColor: '#18181B',
+  },
+  toonily: {
+    id: 'toonily',
+    name: 'Toonily',
+    displayName: 'Toonily',
+    domain: 'toonily.com',
+    icon: 'https://www.google.com/s2/favicons?domain=toonily.com&sz=64',
+    iconType: 'custom',
+    letter: 'T',
+    letterColor: '#EF4444',
+    bgColor: '#18181B',
+  },
+  philiascans: {
+    id: 'philiascans',
+    name: 'PhiliaScans',
+    displayName: 'PhiliaScans',
+    domain: 'philiascans.org',
+    icon: 'https://www.google.com/s2/favicons?domain=philiascans.org&sz=64',
+    iconType: 'custom',
+    letter: 'P',
+    letterColor: '#EC4899',
+    bgColor: '#18181B',
+  },
+  ravenscans: {
+    id: 'ravenscans',
+    name: 'RavenScans',
+    displayName: 'RavenScans',
+    domain: 'ravenscans.org',
+    icon: 'https://www.google.com/s2/favicons?domain=ravenscans.org&sz=64',
+    iconType: 'custom',
+    letter: 'R',
+    letterColor: '#6366F1',
     bgColor: '#18181B',
   },
   'comix-to': {
@@ -1234,8 +1269,14 @@ export default function ExtensionsScreen() {
           const parsed = JSON.parse(stored);
           if (Array.isArray(parsed) && parsed.length > 0) {
             setInstalledIds(parsed);
+            return;
           }
         }
+        // Initial install: persist default curated sources
+        await AsyncStorage.setItem(
+          STORAGE_KEY_INSTALLED_SOURCES,
+          JSON.stringify(DEFAULT_INSTALLED_IDS)
+        );
       } catch {
         // Fallback to default
       }

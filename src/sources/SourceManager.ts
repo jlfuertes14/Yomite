@@ -35,7 +35,7 @@ import { PhiliaScansParser } from './parsers/PhiliaScansParser';
 import { HiveToonParser } from './parsers/HiveToonParser';
 import rawCatalog from './catalog/sourcesCatalog.json';
 
-const STORAGE_KEY_ENABLED_SOURCES = '@mangaapp_enabled_sources_v1';
+const STORAGE_KEY_ENABLED_SOURCES = '@mangaapp_enabled_sources_v2';
 
 export interface CatalogFilterOptions {
   query?: string;
@@ -305,22 +305,43 @@ class SourceManagerService {
     this.parsers.set(mangadot.metadata.id, mangadot);
     this.parsers.set('mangadot.net', mangadot);
 
-    // Default enabled: MangaDex, Manganato, MangaDot, ManhuaFast, NHentai, OmegaScans, VortexScans, AsuraScans, Comix, ReiManga, FlameComics, PhiliaScans, HiveToon, RavenScans
+    // Toonily (Madara WordPress Engine)
+    const toonily = new MadaraParser({
+      id: 'toonily',
+      name: 'Toonily',
+      domain: 'toonily.com',
+      baseUrl: 'https://toonily.com',
+      locale: 'en',
+      isNsfw: false,
+      version: '1.0.0',
+      icon: 'https://www.google.com/s2/favicons?domain=toonily.com&sz=64',
+      description: 'Popular Korean webtoons, manhwa, and comics with fast updates.',
+      availableSortOrders: ['popular', 'latest', 'newest', 'alphabetical', 'rating'],
+      enabled: true,
+    });
+    this.parsers.set(toonily.metadata.id, toonily);
+    this.parsers.set('toonily.com', toonily);
+
+    // Default enabled: 14 Curated sources (ComicK, MangaDex, AsuraScans, VortexScans, Hitomi, Toonily, Comix, Manganato, ReiManga, FlameComics, PhiliaScans, RavenScans, MangaDot, MangaPill)
     this.enabledSourceIds = new Set([
+      'comick-fun',
       'mangadex',
-      'manganato',
-      'mangadot',
-      'manhuafast',
-      'nhentai',
-      'omegascans',
-      'vortexscans',
       'asurascans',
+      'vortexscans',
+      'hitomila',
+      'toonily',
       'comix-to',
+      'manganato',
       'reimanga',
       'flamecomics',
       'philiascans',
-      'hivetoon',
       'ravenscans',
+      'mangadot',
+      'mangapill',
+      'manhuafast',
+      'nhentai',
+      'omegascans',
+      'hivetoon',
     ]);
   }
 
