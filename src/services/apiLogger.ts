@@ -87,7 +87,7 @@ class ApiLoggerService {
       quotaInfo = ` [Quota: ${entry.rateLimit.remaining}/${entry.rateLimit.limit ?? 60}]`;
     }
 
-    let sourceLabel = 'MangaDex API';
+    let sourceLabel = 'MangaDex Source API';
     const lowerUrl = (entry.url || '').toLowerCase();
     if (lowerUrl.includes('mangadot.net') || lowerUrl.includes('/chapters/manga_')) {
       sourceLabel = 'MangaDot';

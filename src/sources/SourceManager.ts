@@ -33,6 +33,17 @@ import { ReiMangaParser } from './parsers/ReiMangaParser';
 import { FlameComicsParser } from './parsers/FlameComicsParser';
 import { PhiliaScansParser } from './parsers/PhiliaScansParser';
 import { HiveToonParser } from './parsers/HiveToonParser';
+import { ToonzParser } from './parsers/ToonzParser';
+import { KaganeParser } from './parsers/KaganeParser';
+import { MangaFireParser } from './parsers/MangaFireParser';
+import { ProjectSukiParser } from './parsers/ProjectSukiParser';
+import { MangaBallParser } from './parsers/MangaBallParser';
+import { AtsumaruParser } from './parsers/AtsumaruParser';
+import { MangaGoParser } from './parsers/MangaGoParser';
+import { WeebCentralParser } from './parsers/WeebCentralParser';
+import { MangaKParser } from './parsers/MangaKParser';
+import { OniSagaParser } from './parsers/OniSagaParser';
+import { ToonkotsuParser } from './parsers/ToonkotsuParser';
 import rawCatalog from './catalog/sourcesCatalog.json';
 
 const STORAGE_KEY_ENABLED_SOURCES = '@mangaapp_enabled_sources_v2';
@@ -322,7 +333,63 @@ class SourceManagerService {
     this.parsers.set(toonily.metadata.id, toonily);
     this.parsers.set('toonily.com', toonily);
 
-    // Default enabled: 14 Curated sources (ComicK, MangaDex, AsuraScans, VortexScans, Hitomi, Toonily, Comix, Manganato, ReiManga, FlameComics, PhiliaScans, RavenScans, MangaDot, MangaPill)
+    // Toonz (toonz.to)
+    const toonz = new ToonzParser();
+    this.parsers.set(toonz.metadata.id, toonz);
+    this.parsers.set('toonz.to', toonz);
+
+    // Kagane (kagane.moe)
+    const kagane = new KaganeParser();
+    this.parsers.set(kagane.metadata.id, kagane);
+    this.parsers.set('kagane.moe', kagane);
+
+    // MangaFire (mangafire.to)
+    const mangafire = new MangaFireParser();
+    this.parsers.set(mangafire.metadata.id, mangafire);
+    this.parsers.set('mangafire.to', mangafire);
+    this.parsers.set('mangafire-en', mangafire);
+
+    // Project Suki (projectsuki.com)
+    const projectsuki = new ProjectSukiParser();
+    this.parsers.set(projectsuki.metadata.id, projectsuki);
+    this.parsers.set('projectsuki.com', projectsuki);
+
+    // MangaBall (mangaball.com)
+    const mangaball = new MangaBallParser();
+    this.parsers.set(mangaball.metadata.id, mangaball);
+    this.parsers.set('mangaball.com', mangaball);
+
+    // Atsumaru (atsu.moe)
+    const atsumaru = new AtsumaruParser();
+    this.parsers.set(atsumaru.metadata.id, atsumaru);
+    this.parsers.set('atsu.moe', atsumaru);
+
+    // MangaGo (mangago.me)
+    const mangago = new MangaGoParser();
+    this.parsers.set(mangago.metadata.id, mangago);
+    this.parsers.set('mangago.me', mangago);
+
+    // WeebCentral (weebcentral.com)
+    const weebcentral = new WeebCentralParser();
+    this.parsers.set(weebcentral.metadata.id, weebcentral);
+    this.parsers.set('weebcentral.com', weebcentral);
+
+    // MangaK (mangak.io)
+    const mangak = new MangaKParser();
+    this.parsers.set(mangak.metadata.id, mangak);
+    this.parsers.set('mangak.io', mangak);
+
+    // OniSaga (onisaga.com)
+    const onisaga = new OniSagaParser();
+    this.parsers.set(onisaga.metadata.id, onisaga);
+    this.parsers.set('onisaga.com', onisaga);
+
+    // Toonkotsu (toonkotsu.com)
+    const toonkotsu = new ToonkotsuParser();
+    this.parsers.set(toonkotsu.metadata.id, toonkotsu);
+    this.parsers.set('toonkotsu.com', toonkotsu);
+
+    // Default enabled: Curated sources including toonz, kagane, mangafire, and newly added sources
     this.enabledSourceIds = new Set([
       'comick-fun',
       'mangadex',
@@ -342,6 +409,17 @@ class SourceManagerService {
       'nhentai',
       'omegascans',
       'hivetoon',
+      'toonz',
+      'kagane',
+      'mangafire',
+      'projectsuki',
+      'mangaball',
+      'atsumaru',
+      'mangago',
+      'weebcentral',
+      'mangak',
+      'onisaga',
+      'toonkotsu',
     ]);
   }
 
@@ -354,6 +432,34 @@ class SourceManagerService {
       const stored = await AsyncStorage.getItem(STORAGE_KEY_ENABLED_SOURCES);
       if (stored) {
         const ids: string[] = JSON.parse(stored);
+        const ENABLED_MIGRATION_KEY = '@mangaapp_enabled_v5_migrated';
+        const migrated = await AsyncStorage.getItem(ENABLED_MIGRATION_KEY);
+        if (!migrated) {
+          const newDefaults = [
+            'toonz',
+            'kagane',
+            'mangafire',
+            'projectsuki',
+            'mangaball',
+            'atsumaru',
+            'mangago',
+            'weebcentral',
+            'mangak',
+            'onisaga',
+            'toonkotsu',
+          ];
+          let added = false;
+          for (const nid of newDefaults) {
+            if (!ids.includes(nid)) {
+              ids.push(nid);
+              added = true;
+            }
+          }
+          await AsyncStorage.setItem(ENABLED_MIGRATION_KEY, 'true');
+          if (added) {
+            await AsyncStorage.setItem(STORAGE_KEY_ENABLED_SOURCES, JSON.stringify(ids));
+          }
+        }
         this.enabledSourceIds = new Set(ids);
 
         // Dynamically instantiate any enabled sources from the catalog
@@ -526,6 +632,41 @@ class SourceManagerService {
     // 5c. MangaDot dedicated parser
     if (item.id === 'mangadot' || item.domain?.includes('mangadot')) {
       return new MangaDotParser(baseMetadata);
+    }
+
+    // 5d. Toonz dedicated parser
+    if (item.id === 'toonz' || item.domain?.includes('toonz.to')) {
+      return new ToonzParser(baseMetadata);
+    }
+
+    // 5e. Kagane dedicated parser
+    if (item.id === 'kagane' || item.domain?.includes('kagane.moe')) {
+      return new KaganeParser(baseMetadata);
+    }
+
+    // 5f. MangaFire dedicated parser
+    if (item.id === 'mangafire' || item.domain?.includes('mangafire.to')) {
+      return new MangaFireParser(baseMetadata);
+    }
+
+    // 5g. WeebCentral dedicated parser
+    if (item.id === 'weebcentral' || item.domain?.includes('weebcentral.com')) {
+      return new WeebCentralParser(baseMetadata);
+    }
+
+    // 5h. MangaK dedicated parser
+    if (item.id === 'mangak' || item.domain?.includes('mangak.io')) {
+      return new MangaKParser(baseMetadata);
+    }
+
+    // 5i. OniSaga dedicated parser
+    if (item.id === 'onisaga' || item.domain?.includes('onisaga.com')) {
+      return new OniSagaParser(baseMetadata);
+    }
+
+    // 5j. Toonkotsu dedicated parser
+    if (item.id === 'toonkotsu' || item.domain?.includes('toonkotsu.com')) {
+      return new ToonkotsuParser(baseMetadata);
     }
 
     // 6. MangaBox engine (Manganato, Mangakakalot, etc.)
@@ -806,9 +947,13 @@ class SourceManagerService {
       const potentialSourceId = idOrUrl.substring(0, colonIndex);
       const parser = this.parsers.get(potentialSourceId);
       if (parser) {
+        let rawId = idOrUrl.substring(colonIndex + 1);
+        while (rawId.startsWith(`${potentialSourceId}:`)) {
+          rawId = rawId.substring(potentialSourceId.length + 1);
+        }
         return {
           parser,
-          rawId: idOrUrl.substring(colonIndex + 1),
+          rawId,
         };
       }
 
@@ -818,9 +963,13 @@ class SourceManagerService {
         const created = this.createParserForCatalogSource(catalogItem);
         if (created) {
           this.parsers.set(created.metadata.id, created);
+          let rawId = idOrUrl.substring(colonIndex + 1);
+          while (rawId.startsWith(`${potentialSourceId}:`)) {
+            rawId = rawId.substring(potentialSourceId.length + 1);
+          }
           return {
             parser: created,
-            rawId: idOrUrl.substring(colonIndex + 1),
+            rawId,
           };
         }
       }

@@ -39,9 +39,14 @@ export function isCloudflareProtectedUrl(url?: string | null): boolean {
     lower.includes('/media/manga_covers/') ||
     lower.includes('chapmanganato') ||
     lower.includes('manganato.gg') ||
-    lower.includes('comix.to')
+    lower.includes('comix.to') ||
+    lower.includes('onisaga.com') ||
+    lower.includes('toonkotsu.com') ||
+    lower.includes('mangak.io') ||
+    lower.includes('weebcentral.com')
   );
 }
+
 
 class WebViewBridgeService {
   private verifiedDomains: Set<string> = new Set();

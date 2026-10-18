@@ -1,5 +1,89 @@
 [
   {
+    "id": "projectsuki",
+    "name": "PROJECTSUKI",
+    "title": "Project Suki",
+    "domain": "projectsuki.com",
+    "baseUrl": "https://projectsuki.com",
+    "locale": "en",
+    "contentType": "manga",
+    "engine": "custom",
+    "isBroken": false,
+    "icon": "https://www.google.com/s2/favicons?domain=projectsuki.com&sz=64"
+  },
+  {
+    "id": "mangaball",
+    "name": "MANGABALL",
+    "title": "MangaBall",
+    "domain": "mangaball.com",
+    "baseUrl": "https://mangaball.com",
+    "locale": "en",
+    "contentType": "manga",
+    "engine": "custom",
+    "isBroken": false,
+    "icon": "https://mangaball.com/images/favicon.png"
+  },
+  {
+    "id": "atsumaru",
+    "name": "ATSUMARU",
+    "title": "Atsumaru",
+    "domain": "atsu.moe",
+    "baseUrl": "https://atsu.moe",
+    "locale": "en",
+    "contentType": "manga",
+    "engine": "custom",
+    "isBroken": false,
+    "icon": "https://www.google.com/s2/favicons?domain=atsu.moe&sz=64"
+  },
+  {
+    "id": "mangago",
+    "name": "MANGAGO",
+    "title": "MangaGo",
+    "domain": "mangago.me",
+    "baseUrl": "https://www.mangago.me",
+    "locale": "en",
+    "contentType": "manga",
+    "engine": "custom",
+    "isBroken": false,
+    "icon": "https://www.google.com/s2/favicons?domain=mangago.me&sz=64"
+  },
+  {
+    "id": "toonz",
+    "name": "TOONZ",
+    "title": "Toonz",
+    "domain": "toonz.to",
+    "baseUrl": "https://toonz.to",
+    "locale": "en",
+    "contentType": "manga",
+    "engine": "custom",
+    "isBroken": false,
+    "icon": "https://toonz.to/branding/toonz/og.png"
+  },
+  {
+    "id": "kagane",
+    "name": "KAGANE",
+    "title": "Kagane",
+    "domain": "kagane.moe",
+    "baseUrl": "https://kagane.moe",
+    "locale": "en",
+    "contentType": "manga",
+    "engine": "custom",
+    "isBroken": false,
+    "icon": "https://kagane.moe/favicons/android-icon-192x192.png"
+  },
+  {
+    "id": "mangafire",
+    "name": "MANGAFIRE",
+    "title": "MangaFire",
+    "domain": "mangafire.to",
+    "baseUrl": "https://mangafire.to",
+    "locale": "en",
+    "contentType": "manga",
+    "engine": "custom",
+    "isBroken": false,
+    "icon": "https://www.google.com/s2/favicons?domain=mangafire.to&sz=64"
+  },
+  {
     "id": "mangadot",
     "name": "MANGADOT",
     "title": "MangaDot",
@@ -94,18 +178,6 @@
     "engine": "custom",
     "isBroken": false,
     "icon": "https://www.google.com/s2/favicons?domain=mangadex.org&sz=64"
-  },
-  {
-    "id": "mangafire-en",
-    "name": "MANGAFIRE_EN",
-    "title": "MangaFire English",
-    "domain": "mangafire.to",
-    "baseUrl": "https://mangafire.to",
-    "locale": "en",
-    "contentType": "manga",
-    "engine": "custom",
-    "isBroken": false,
-    "icon": "https://www.google.com/s2/favicons?domain=mangafire.to&sz=64"
   },
   {
     "id": "mangapark",
@@ -15058,5 +15130,41 @@
     "isBroken": true,
     "brokenReason": "Source reported broken or offline",
     "icon": "https://www.google.com/s2/favicons?domain=www.yuramanga.my.id&sz=64"
+  },
+  {
+    "id": "mangak",
+    "name": "MANGAK",
+    "title": "MangaK",
+    "domain": "mangak.io",
+    "baseUrl": "https://mangak.io",
+    "locale": "en",
+    "contentType": "manga",
+    "engine": "custom",
+    "isBroken": false,
+    "icon": "https://www.google.com/s2/favicons?domain=mangak.io&sz=64"
+  },
+  {
+    "id": "onisaga",
+    "name": "ONISAGA",
+    "title": "OniSaga",
+    "domain": "onisaga.com",
+    "baseUrl": "https://onisaga.com",
+    "locale": "en",
+    "contentType": "manga",
+    "engine": "custom",
+    "isBroken": false,
+    "icon": "https://www.google.com/s2/favicons?domain=onisaga.com&sz=64"
+  },
+  {
+    "id": "toonkotsu",
+    "name": "TOONKOTSU",
+    "title": "Toonkotsu",
+    "domain": "toonkotsu.com",
+    "baseUrl": "https://toonkotsu.com",
+    "locale": "en",
+    "contentType": "manga",
+    "engine": "custom",
+    "isBroken": false,
+    "icon": "https://www.google.com/s2/favicons?domain=toonkotsu.com&sz=64"
   }
 ]

@@ -82,6 +82,8 @@ yomite-parsers/
 
 # Test & Investigation Scripts
 scripts/
+scratch/
+static-htmls/
 test*.js
 test*.ts
 verify*.js
