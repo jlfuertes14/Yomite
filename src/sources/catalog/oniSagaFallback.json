@@ -1,0 +1,291 @@
+[
+  {
+    "id": "onisaga:solo-leveling",
+    "sourceId": "onisaga",
+    "title": "Solo Leveling",
+    "url": "/manga/solo-leveling",
+    "publicUrl": "https://onisaga.com/manga/solo-leveling",
+    "coverUrl": "https://temp.compsci88.com/cover/fallback/01J76XYCPSY3C4BNPBRY8JMCBE.jpg",
+    "coverHeaders": {
+      "Referer": "https://onisaga.com/",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    },
+    "description": "10 years ago, after \"the Gate\" that connected the real world with the monster world opened, some of the ordinary, everyday people received the power to hunt monsters within the Gate. They are known as \"Hunters\". However, not all Hunters are powerful. Sung Jin-Woo is an E-rank Hunter who risks his life in the lowest of dungeons.",
+    "tags": [
+      "Action",
+      "Adventure",
+      "Fantasy",
+      "Supernatural"
+    ],
+    "state": "completed"
+  },
+  {
+    "id": "onisaga:watari-tori-to-katatsumuri",
+    "sourceId": "onisaga",
+    "title": "Watari Tori to Katatsumuri",
+    "url": "/manga/watari-tori-to-katatsumuri",
+    "publicUrl": "https://onisaga.com/manga/watari-tori-to-katatsumuri",
+    "coverUrl": "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx162085-dc4noEP4GJ6G.png",
+    "coverHeaders": {
+      "Referer": "https://onisaga.com/",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    },
+    "description": "A cozy story of nomadic travels and serene moments together across scenic roads.",
+    "tags": [
+      "Slice of Life",
+      "Seinen",
+      "Drama"
+    ],
+    "state": "ongoing"
+  },
+  {
+    "id": "onisaga:blue-wars",
+    "sourceId": "onisaga",
+    "title": "Blue Wars",
+    "url": "/manga/blue-wars",
+    "publicUrl": "https://onisaga.com/manga/blue-wars",
+    "coverUrl": "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx31663-SsUDgJiMa4yR.png",
+    "coverHeaders": {
+      "Referer": "https://onisaga.com/",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    },
+    "description": "A high-stakes tactical conflict fought under the deep oceanic expanse and sci-fi fronts.",
+    "tags": [
+      "Action",
+      "Sci-Fi",
+      "Mecha"
+    ],
+    "state": "ongoing"
+  },
+  {
+    "id": "onisaga:zhuansheng-cheng-zai-e-monv-de-wo-buxiang-bei-gonglve",
+    "sourceId": "onisaga",
+    "title": "Zhuansheng Cheng Zai E Monv De Wo Buxiang Bei Gonglve",
+    "url": "/manga/zhuansheng-cheng-zai-e-monv-de-wo-buxiang-bei-gonglve",
+    "publicUrl": "https://onisaga.com/manga/zhuansheng-cheng-zai-e-monv-de-wo-buxiang-bei-gonglve",
+    "coverUrl": "https://media.kitsu.app/manga/78051/poster_image/7ea2dcf41578032c160a9719d3a6311a.jpg",
+    "coverHeaders": {
+      "Referer": "https://onisaga.com/",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    },
+    "description": "Reincarnated as a villainess demoness, I have no desire to be conquered by heroic protagonists!",
+    "tags": [
+      "Fantasy",
+      "Comedy",
+      "Reincarnation"
+    ],
+    "state": "ongoing"
+  },
+  {
+    "id": "onisaga:mimi-paradise",
+    "sourceId": "onisaga",
+    "title": "Mimi Paradise",
+    "url": "/manga/mimi-paradise",
+    "publicUrl": "https://onisaga.com/manga/mimi-paradise",
+    "coverUrl": "https://media.kitsu.app/manga/poster_images/16702/original.jpg",
+    "coverHeaders": {
+      "Referer": "https://onisaga.com/",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    },
+    "description": "Charming daily encounters filled with adorable companions and sweet comedic misunderstandings.",
+    "tags": [
+      "Comedy",
+      "Slice of Life",
+      "Romance"
+    ],
+    "state": "ongoing"
+  },
+  {
+    "id": "onisaga:sticky-sweet",
+    "sourceId": "onisaga",
+    "title": "Sticky & Sweet",
+    "url": "/manga/sticky-sweet",
+    "publicUrl": "https://onisaga.com/manga/sticky-sweet",
+    "coverUrl": "https://media.kitsu.app/manga/poster_images/10919/original.jpg",
+    "coverHeaders": {
+      "Referer": "https://onisaga.com/",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    },
+    "description": "A confection of heartfelt romance with delightful culinary adventures and charming confessions.",
+    "tags": [
+      "Romance",
+      "Comedy",
+      "Drama"
+    ],
+    "state": "ongoing"
+  },
+  {
+    "id": "onisaga:my-love-with-thanatos",
+    "sourceId": "onisaga",
+    "title": "My Love with Thanatos",
+    "url": "/manga/my-love-with-thanatos",
+    "publicUrl": "https://onisaga.com/manga/my-love-with-thanatos",
+    "coverUrl": "https://media.kitsu.app/manga/poster_images/30043/original.jpg",
+    "coverHeaders": {
+      "Referer": "https://onisaga.com/",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    },
+    "description": "When supernatural death entities cross paths with ordinary mortal emotions, unexpected affection sparks.",
+    "tags": [
+      "Supernatural",
+      "Romance",
+      "Mystery"
+    ],
+    "state": "ongoing"
+  },
+  {
+    "id": "onisaga:playing-with-karma",
+    "sourceId": "onisaga",
+    "title": "Playing With Karma",
+    "url": "/manga/playing-with-karma",
+    "publicUrl": "https://onisaga.com/manga/playing-with-karma",
+    "coverUrl": "https://media.kitsu.app/manga/poster_images/43354/original.jpg",
+    "coverHeaders": {
+      "Referer": "https://onisaga.com/",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    },
+    "description": "Tinkering with fate brings unforeseen consequences in this intense psychological battle of wits.",
+    "tags": [
+      "Psychological",
+      "Drama",
+      "Mystery"
+    ],
+    "state": "ongoing"
+  },
+  {
+    "id": "onisaga:omniscient-readers-viewpoint",
+    "sourceId": "onisaga",
+    "title": "Omniscient Reader's Viewpoint",
+    "url": "/manga/omniscient-readers-viewpoint",
+    "publicUrl": "https://onisaga.com/manga/omniscient-readers-viewpoint",
+    "coverUrl": "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx119257-Pi21aq3ey9GG.jpg",
+    "coverHeaders": {
+      "Referer": "https://onisaga.com/",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    },
+    "description": "Only I know the end of this world. One day, our protagonist finds himself stuck in the world of his favorite webnovel.",
+    "tags": [
+      "Action",
+      "Fantasy",
+      "Adventure"
+    ],
+    "state": "ongoing"
+  },
+  {
+    "id": "onisaga:tower-of-god",
+    "sourceId": "onisaga",
+    "title": "Tower of God",
+    "url": "/manga/tower-of-god",
+    "publicUrl": "https://onisaga.com/manga/tower-of-god",
+    "coverUrl": "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx85143-23oup3ETbFJk.jpg",
+    "coverHeaders": {
+      "Referer": "https://onisaga.com/",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    },
+    "description": "What do you desire? Money and wealth? Honor and pride? Authority and power? Revenge? Or something that transcends them all? Whatever you desire is at the top of the tower.",
+    "tags": [
+      "Action",
+      "Adventure",
+      "Fantasy",
+      "Mystery"
+    ],
+    "state": "ongoing"
+  },
+  {
+    "id": "onisaga:the-beginning-after-the-end",
+    "sourceId": "onisaga",
+    "title": "The Beginning After the End",
+    "url": "/manga/the-beginning-after-the-end",
+    "publicUrl": "https://onisaga.com/manga/the-beginning-after-the-end",
+    "coverUrl": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx183161-5M054tuPmZJX.jpg",
+    "coverHeaders": {
+      "Referer": "https://onisaga.com/",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    },
+    "description": "King Grey has unrivaled strength, wealth, and prestige in a world governed by martial ability. Reborn into a new world steeped with magic and monsters.",
+    "tags": [
+      "Action",
+      "Adventure",
+      "Fantasy",
+      "Isekai"
+    ],
+    "state": "ongoing"
+  },
+  {
+    "id": "onisaga:return-of-the-mount-hua-sect",
+    "sourceId": "onisaga",
+    "title": "Return of the Mount Hua Sect",
+    "url": "/manga/return-of-the-mount-hua-sect",
+    "publicUrl": "https://onisaga.com/manga/return-of-the-mount-hua-sect",
+    "coverUrl": "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx132144-i5B4VnG9sRgh.png",
+    "coverHeaders": {
+      "Referer": "https://onisaga.com/",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    },
+    "description": "Chung Myung, the 13th disciple of the Great Mount Hua Sect, awakens a hundred years in the future to find his beloved sect in ruins.",
+    "tags": [
+      "Action",
+      "Martial Arts",
+      "Comedy",
+      "Historical"
+    ],
+    "state": "ongoing"
+  },
+  {
+    "id": "onisaga:eleceed",
+    "sourceId": "onisaga",
+    "title": "Eleceed",
+    "url": "/manga/eleceed",
+    "publicUrl": "https://onisaga.com/manga/eleceed",
+    "coverUrl": "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx106929-flAUvHZDUz5v.jpg",
+    "coverHeaders": {
+      "Referer": "https://onisaga.com/",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    },
+    "description": "Jiwoo is a kind-hearted young man who harnesses the lightning quick reflexes of a cat to secretly make the world a better place.",
+    "tags": [
+      "Action",
+      "Comedy",
+      "Supernatural"
+    ],
+    "state": "ongoing"
+  },
+  {
+    "id": "onisaga:sss-class-suicide-hunter",
+    "sourceId": "onisaga",
+    "title": "SSS-Class Suicide Hunter",
+    "url": "/manga/sss-class-suicide-hunter",
+    "publicUrl": "https://onisaga.com/manga/sss-class-suicide-hunter",
+    "coverUrl": "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx128067-wnLBg6Cy1ncs.jpg",
+    "coverHeaders": {
+      "Referer": "https://onisaga.com/",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    },
+    "description": "I want an S-rank skill too! I want it so badly I could die! A bizarre fantasy begins for Gong-ja, who can copy skills by dying.",
+    "tags": [
+      "Action",
+      "Fantasy",
+      "Psychological"
+    ],
+    "state": "ongoing"
+  },
+  {
+    "id": "onisaga:solo-leveling-ragnarok",
+    "sourceId": "onisaga",
+    "title": "Solo Leveling: Ragnarok",
+    "url": "/manga/solo-leveling-ragnarok",
+    "publicUrl": "https://onisaga.com/manga/solo-leveling-ragnarok",
+    "coverUrl": "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx179445-ho0nb7baJ1a5.jpg",
+    "coverHeaders": {
+      "Referer": "https://onisaga.com/",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    },
+    "description": "The earth has faced extinction again! Sung Su-ho, the son of the Shadow Monarch Sung Jin-Woo, awakens to defend humanity.",
+    "tags": [
+      "Action",
+      "Fantasy",
+      "Supernatural"
+    ],
+    "state": "ongoing"
+  }
+]

@@ -19,6 +19,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -26,7 +27,7 @@ import {
   useWindowDimensions,
   View
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { Radius, Spacing, Typography } from '../../constants/Colors';
 import {
@@ -74,6 +75,17 @@ const DEFAULT_INSTALLED_IDS = [
   'mangapill',    // 14. MangaPill
   'omegascans',   // 15. OmegaScans
   'hivetoon',     // 16. Hivetoon
+  'toonz',        // 17. Toonz
+  'kagane',       // 18. Kagane
+  'mangafire',    // 19. MangaFire
+  'projectsuki',  // 20. Project Suki
+  'mangaball',    // 21. MangaBall
+  'atsumaru',     // 22. Atsumaru
+  'mangago',      // 23. MangaGo
+  'weebcentral',  // 24. Weeb Central
+  'mangak',       // 25. MangaK
+  'onisaga',      // 26. OniSaga
+  'toonkotsu',    // 27. Toonkotsu
 ];
 
 interface CuratedSourceMeta {
@@ -183,6 +195,7 @@ const CURATED_SOURCES: Record<string, CuratedSourceMeta> = {
     domain: 'mangafire.to',
     icon: 'https://www.google.com/s2/favicons?domain=mangafire.to&sz=64',
     iconType: 'mangafire',
+    letter: 'M',
     letterColor: '#38BDF8',
     bgColor: '#0F172A',
   },
@@ -360,6 +373,116 @@ const CURATED_SOURCES: Record<string, CuratedSourceMeta> = {
     letterColor: '#FB725D',
     bgColor: '#18181B',
   },
+  toonz: {
+    id: 'toonz',
+    name: 'Toonz',
+    displayName: 'Toonz',
+    domain: 'toonz.to',
+    icon: 'https://toonz.to/branding/toonz/og.png',
+    iconType: 'custom',
+    letter: 'T',
+    letterColor: '#E11D48',
+    bgColor: '#18181B',
+  },
+  kagane: {
+    id: 'kagane',
+    name: 'Kagane',
+    displayName: 'Kagane',
+    domain: 'kagane.moe',
+    icon: 'https://kagane.moe/favicons/android-icon-192x192.png',
+    iconType: 'custom',
+    letter: 'K',
+    letterColor: '#8B5CF6',
+    bgColor: '#18181B',
+  },
+  projectsuki: {
+    id: 'projectsuki',
+    name: 'Project Suki',
+    displayName: 'Project Suki',
+    domain: 'projectsuki.com',
+    icon: 'https://www.google.com/s2/favicons?domain=projectsuki.com&sz=64',
+    iconType: 'custom',
+    letter: 'P',
+    letterColor: '#EC4899',
+    bgColor: '#18181B',
+  },
+  mangaball: {
+    id: 'mangaball',
+    name: 'MangaBall',
+    displayName: 'MangaBall',
+    domain: 'mangaball.net',
+    icon: 'https://www.google.com/s2/favicons?domain=mangaball.net&sz=64',
+    iconType: 'custom',
+    letter: 'M',
+    letterColor: '#EAB308',
+    bgColor: '#18181B',
+  },
+  atsumaru: {
+    id: 'atsumaru',
+    name: 'Atsumaru',
+    displayName: 'Atsumaru',
+    domain: 'atsumaru.net',
+    icon: 'https://www.google.com/s2/favicons?domain=atsumaru.net&sz=64',
+    iconType: 'custom',
+    letter: 'A',
+    letterColor: '#A855F7',
+    bgColor: '#18181B',
+  },
+  mangago: {
+    id: 'mangago',
+    name: 'MangaGo',
+    displayName: 'MangaGo',
+    domain: 'mangago.me',
+    icon: 'https://www.google.com/s2/favicons?domain=mangago.me&sz=64',
+    iconType: 'custom',
+    letter: 'G',
+    letterColor: '#22C55E',
+    bgColor: '#18181B',
+  },
+  weebcentral: {
+    id: 'weebcentral',
+    name: 'Weeb Central',
+    displayName: 'Weeb Central',
+    domain: 'weebcentral.com',
+    icon: 'https://www.google.com/s2/favicons?domain=weebcentral.com&sz=64',
+    iconType: 'custom',
+    letter: 'W',
+    letterColor: '#10B981',
+    bgColor: '#18181B',
+  },
+  mangak: {
+    id: 'mangak',
+    name: 'MangaK',
+    displayName: 'MangaK',
+    domain: 'mangak.io',
+    icon: 'https://www.google.com/s2/favicons?domain=mangak.io&sz=64',
+    iconType: 'custom',
+    letter: 'M',
+    letterColor: '#38BDF8',
+    bgColor: '#18181B',
+  },
+  onisaga: {
+    id: 'onisaga',
+    name: 'OniSaga',
+    displayName: 'OniSaga',
+    domain: 'onisaga.com',
+    icon: 'https://www.google.com/s2/favicons?domain=onisaga.com&sz=64',
+    iconType: 'custom',
+    letter: 'O',
+    letterColor: '#F43F5E',
+    bgColor: '#18181B',
+  },
+  toonkotsu: {
+    id: 'toonkotsu',
+    name: 'Toonkotsu',
+    displayName: 'Toonkotsu',
+    domain: 'toonkotsu.com',
+    icon: 'https://toonkotsu.com/favicon-32x32.png?v=4',
+    iconType: 'custom',
+    letter: 'T',
+    letterColor: '#F59E0B',
+    bgColor: '#18181B',
+  },
 };
 
 const POPULAR_LANGUAGES = [
@@ -471,6 +594,9 @@ export function resolveSourceWebsiteUrl(
   // 5. Special source-id fallbacks
   if (sourceId === 'mangadex') return 'https://mangadex.org';
   if (sourceId === 'reimanga') return 'https://reimanga.net';
+  if (sourceId === 'toonz') return 'https://toonz.to';
+  if (sourceId === 'kagane') return 'https://kagane.moe';
+  if (sourceId === 'mangafire' || sourceId === 'mangafire-en') return 'https://mangafire.to';
   if (sourceId === 'comix-to' || sourceId === 'comixto') return 'https://comix.to';
   if (sourceId === 'asurascans' || sourceId === 'asuracomic') return 'https://asuracomic.net';
   if (sourceId === 'mangapill') return 'https://mangapill.com';
@@ -486,6 +612,14 @@ export function resolveSourceWebsiteUrl(
   if (sourceId === 'vortexscans') return 'https://vortexscans.org';
   if (sourceId === 'hitomila') return 'https://hitomi.la';
   if (sourceId === 'batoto') return 'https://bato.to';
+  if (sourceId === 'projectsuki') return 'https://projectsuki.com';
+  if (sourceId === 'mangaball') return 'https://mangaball.net';
+  if (sourceId === 'atsumaru' || sourceId === 'atsumoe') return 'https://atsumaru.net';
+  if (sourceId === 'mangago') return 'https://www.mangago.me';
+  if (sourceId === 'weebcentral') return 'https://weebcentral.com';
+  if (sourceId === 'mangak') return 'https://mangak.io';
+  if (sourceId === 'onisaga') return 'https://onisaga.com';
+  if (sourceId === 'toonkotsu') return 'https://toonkotsu.com';
 
   return `https://${sourceId}.com`;
 }
@@ -985,6 +1119,8 @@ export default function ExtensionsScreen() {
   const colors = useThemeColors();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const insets = useSafeAreaInsets();
+  const safeTop = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { reopenCatalog } = useLocalSearchParams<{ reopenCatalog?: string }>();
 
@@ -1268,6 +1404,41 @@ export default function ExtensionsScreen() {
         if (stored) {
           const parsed = JSON.parse(stored);
           if (Array.isArray(parsed) && parsed.length > 0) {
+            // Auto-migration to ensure new curated sources appear for existing users
+            const MIGRATION_KEY_V5 = '@mangaapp_catalog_v5_migrated';
+            const migrated = await AsyncStorage.getItem(MIGRATION_KEY_V5);
+            if (!migrated) {
+              const NEW_DEFAULT_IDS = [
+                'toonz',
+                'kagane',
+                'mangafire',
+                'projectsuki',
+                'mangaball',
+                'atsumaru',
+                'mangago',
+                'weebcentral',
+                'mangak',
+                'onisaga',
+                'toonkotsu',
+              ];
+              const merged = [...parsed];
+              let addedAny = false;
+              for (const id of NEW_DEFAULT_IDS) {
+                if (!merged.includes(id)) {
+                  merged.push(id);
+                  addedAny = true;
+                }
+              }
+              await AsyncStorage.setItem(MIGRATION_KEY_V5, 'true');
+              if (addedAny) {
+                await AsyncStorage.setItem(
+                  STORAGE_KEY_INSTALLED_SOURCES,
+                  JSON.stringify(merged)
+                );
+                setInstalledIds(merged);
+                return;
+              }
+            }
             setInstalledIds(parsed);
             return;
           }
@@ -2320,7 +2491,7 @@ export default function ExtensionsScreen() {
                     style={[
                       styles.langDropdownPopup,
                       {
-                        top: (Platform.OS === 'ios' ? 104 : 96) + (isCatalogSearchOpen ? 48 : 0),
+                        top: (safeTop > 0 ? safeTop + 52 : (Platform.OS === 'ios' ? 104 : 96)) + (isCatalogSearchOpen ? 48 : 0),
                         left:
                           Platform.OS === 'web' && windowWidth > 1200
                             ? Math.max(16, (windowWidth - 1200) / 2 + 16)
@@ -2391,11 +2562,22 @@ export default function ExtensionsScreen() {
           visible={mangaModalVisible}
           animationType="slide"
           presentationStyle="fullScreen"
-          onRequestClose={() => setMangaModalVisible(false)}
+          onRequestClose={() => {
+            if (isMangaSearchOpen) {
+              setIsMangaSearchOpen(false);
+              return;
+            }
+            if (sortPickerVisible) {
+              setSortPickerVisible(false);
+              return;
+            }
+            isRestoringFromDetailRef.current = false;
+            isViewingMangaFromCatalogRef.current = false;
+            setMangaModalVisible(false);
+          }}
         >
-          <SafeAreaView
+          <View
             style={[styles.modalContainer, { backgroundColor: colors.background }]}
-            edges={['top', 'bottom']}
           >
             {/* Curtain Sticky Header in Source Catalog Modal */}
             <Animated.View
@@ -2408,6 +2590,7 @@ export default function ExtensionsScreen() {
                 {
                   backgroundColor: colors.background,
                   borderBottomColor: colors.border,
+                  paddingTop: safeTop,
                   transform: [{ translateY: catalogHeaderAnim }],
                   opacity: catalogHeaderOpacity,
                 },
@@ -2799,7 +2982,7 @@ export default function ExtensionsScreen() {
                 keyExtractor={(item, index) => `${item.id}-${index}`}
                 contentContainerStyle={[
                   styles.mangaGridContent,
-                  { paddingTop: catalogHeaderHeight + Spacing.xs },
+                  { paddingTop: catalogHeaderHeight + Spacing.xs, paddingBottom: insets.bottom + 24 },
                 ]}
                 columnWrapperStyle={{ gap: modalGap }}
                 showsVerticalScrollIndicator={false}
@@ -2819,7 +3002,12 @@ export default function ExtensionsScreen() {
                         isRestoringFromDetailRef.current = true;
                         isViewingMangaFromCatalogRef.current = true;
                         setMangaModalVisible(false);
-                        router.push(`/manga/${encodeURIComponent(item.id)}?fromCatalog=${activeMangaSource.id}` as any);
+                        const params = new URLSearchParams();
+                        if (activeMangaSource?.id) params.set('fromCatalog', activeMangaSource.id);
+                        if (item.coverUrl) params.set('coverUrl', item.coverUrl);
+                        if (item.title) params.set('title', item.title);
+                        const qs = params.toString() ? `?${params.toString()}` : '';
+                        router.push(`/manga/${encodeURIComponent(item.id)}${qs}` as any);
                       }}
                       style={({ pressed }) => [
                         styles.mangaCardItem,
@@ -2910,7 +3098,7 @@ export default function ExtensionsScreen() {
                     style={[
                       styles.sortDropdownPopup,
                       {
-                        top: (Platform.OS === 'ios' ? 120 : 105) + (isMangaSearchOpen ? 52 : 0),
+                        top: (safeTop > 0 ? safeTop + 52 : (Platform.OS === 'ios' ? 120 : 105)) + (isMangaSearchOpen ? 52 : 0),
                         right:
                           Platform.OS === 'web' && windowWidth > 1200
                             ? Math.max(16, (windowWidth - 1200) / 2 + 16)
@@ -3275,7 +3463,7 @@ export default function ExtensionsScreen() {
                 </SafeAreaView>
               </Modal>
             )}
-          </SafeAreaView>
+          </View>
         </Modal>
 
         {/* Navigation Drawer */}
@@ -3660,15 +3848,22 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   modalBackBtn: {
-    padding: Spacing.xs,
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   modalTopBarRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md,
+    gap: Spacing.xs,
   },
   modalActionBtn: {
-    padding: Spacing.xs,
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.full,
   },
   modalSearchBox: {
     flexDirection: 'row',

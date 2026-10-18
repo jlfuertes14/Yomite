@@ -59,6 +59,17 @@ export abstract class BaseParser implements MangaParser {
   }
 
   /**
+   * Default headers used when loading images from this source
+   */
+  public getImageHeaders(): Record<string, string> {
+    return {
+      'User-Agent': DEFAULT_USER_AGENT,
+      Referer: this.metadata.baseUrl,
+      Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+    };
+  }
+
+  /**
    * Helper to resolve relative URLs into full URLs
    */
   protected toAbsoluteUrl(url: string, baseDomain = this.metadata.baseUrl): string {

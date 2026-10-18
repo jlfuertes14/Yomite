@@ -16,6 +16,7 @@ import {
   StatusBar,
   Platform,
   Modal,
+  AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -60,6 +61,7 @@ import {
   imageBridgeCache,
   isCloudflareProtectedUrl,
 } from '../../src/sources/network/webViewBridge';
+import { fetchBufferAsDataUri } from '../../src/sources/network/imageHelper';
 import type { ReadingMode, Chapter } from '../../src/types';
 import * as WebBrowser from 'expo-web-browser';
 import { WebView } from 'react-native-webview';
@@ -127,13 +129,24 @@ const ReaderImagePage = React.memo(function ReaderImagePage({
   const [isRetrying, setIsRetrying] = useState(false);
   const [bridgedDataUri, setBridgedDataUri] = useState<string | null>(() => imageBridgeCache.get(url) || null);
 
-  const isCfProtectedUrl = useMemo(() => isCloudflareProtectedUrl(url), [url]);
+  const resolvedUrl = useMemo(() => {
+    if (!url) return '';
+    if (url.startsWith('http') || url.startsWith('data:') || url.startsWith('file:')) {
+      return url;
+    }
+    if (url.startsWith('/api/media/') || url.includes('philia')) {
+      return `https://philiascans.org/${url.replace(/^\/+/, '')}`;
+    }
+    return url;
+  }, [url]);
+
+  const isCfProtectedUrl = useMemo(() => isCloudflareProtectedUrl(resolvedUrl), [resolvedUrl]);
 
   useEffect(() => {
     setIsError(false);
     setIsRetrying(false);
     setRetryCount(0);
-    const cached = imageBridgeCache.get(url) || null;
+    const cached = imageBridgeCache.get(resolvedUrl) || null;
     if (cached) {
       setBridgedDataUri(cached);
       return;
@@ -145,10 +158,10 @@ const ReaderImagePage = React.memo(function ReaderImagePage({
     if (isCfProtectedUrl && Platform.OS !== 'web' && webViewBridge.hasSender()) {
       let isMounted = true;
       webViewBridge
-        .fetchImageBase64(url, 20000)
+        .fetchImageBase64(resolvedUrl, 20000)
         .then((dataUri) => {
           if (isMounted && dataUri) {
-            imageBridgeCache.set(url, dataUri);
+            imageBridgeCache.set(resolvedUrl, dataUri);
             setBridgedDataUri(dataUri);
             setIsError(false);
             setIsRetrying(false);
@@ -163,22 +176,43 @@ const ReaderImagePage = React.memo(function ReaderImagePage({
         isMounted = false;
       };
     }
-  }, [headers, reloadTrigger, url, isCfProtectedUrl, index, onImageSuccess]);
+
+    // Proactively fetch via HTTP buffer if JXL/Kagane image
+    const isJxlOrKagane = resolvedUrl && (resolvedUrl.includes('.jxl') || resolvedUrl.includes('kstatic.to'));
+    if (isJxlOrKagane) {
+      let isMounted = true;
+      fetchBufferAsDataUri(resolvedUrl, headers)
+        .then((dataUri) => {
+          if (isMounted && dataUri) {
+            imageBridgeCache.set(resolvedUrl, dataUri);
+            setBridgedDataUri(dataUri);
+            setIsError(false);
+            setIsRetrying(false);
+            onImageSuccess?.(index);
+          }
+        })
+        .catch(() => {});
+
+      return () => {
+        isMounted = false;
+      };
+    }
+  }, [headers, reloadTrigger, resolvedUrl, isCfProtectedUrl, index, onImageSuccess]);
 
   const imageSource = useMemo(() => {
     if (bridgedDataUri) return { uri: bridgedDataUri };
-    if (!url) return null;
-    return headers ? { uri: url, headers } : { uri: url };
-  }, [url, headers, bridgedDataUri]);
+    if (!resolvedUrl) return null;
+    return headers ? { uri: resolvedUrl, headers } : { uri: resolvedUrl };
+  }, [resolvedUrl, headers, bridgedDataUri]);
 
   const handleImageError = useCallback(async () => {
     // 1. If Cloudflare protected domain and not already bridged, attempt WebView bridge fetch FIRST
     if (isCfProtectedUrl && !bridgedDataUri && Platform.OS !== 'web' && webViewBridge.hasSender()) {
       try {
         setIsRetrying(true);
-        const dataUri = await webViewBridge.fetchImageBase64(url, 20000);
+        const dataUri = await webViewBridge.fetchImageBase64(resolvedUrl, 20000);
         if (dataUri) {
-          imageBridgeCache.set(url, dataUri);
+          imageBridgeCache.set(resolvedUrl, dataUri);
           setBridgedDataUri(dataUri);
           setIsError(false);
           setIsRetrying(false);
@@ -190,19 +224,23 @@ const ReaderImagePage = React.memo(function ReaderImagePage({
       }
     }
 
-    // 2. Only if the bridge ALSO failed or is unavailable do we log and trigger verification modal/banner
-    ApiLogger.logRequest({
-      timestamp: Date.now(),
-      method: 'GET_IMG',
-      url,
-      status: isCfProtectedUrl ? 403 : null,
-      statusText: isCfProtectedUrl ? 'Cloudflare Challenge / 403' : 'Image Load Failed',
-      durationMs: 0,
-      error: `Page ${index + 1} image failed to load${isCfProtectedUrl ? ' (Cloudflare verification required)' : ''}`,
-    });
+    // 1.5. Resilient fallback to direct HTTP buffer for ANY image that failed in native decoder
+    if (resolvedUrl && !bridgedDataUri) {
+      try {
+        setIsRetrying(true);
+        const dataUri = await fetchBufferAsDataUri(resolvedUrl, headers);
+        if (dataUri) {
+          imageBridgeCache.set(resolvedUrl, dataUri);
+          setBridgedDataUri(dataUri);
+          setIsError(false);
+          setIsRetrying(false);
+          onImageSuccess?.(index);
+          return;
+        }
+      } catch {}
+    }
 
-    onImageError?.(index, url);
-
+    // 2. Retry before logging hard error
     if (retryCount < 2) {
       setIsRetrying(true);
       const delay = Math.pow(2, retryCount + 1) * 600;
@@ -210,20 +248,45 @@ const ReaderImagePage = React.memo(function ReaderImagePage({
         setRetryCount((prev) => prev + 1);
         setIsRetrying(false);
       }, delay);
-    } else {
-      setIsError(true);
-      setIsRetrying(false);
+      return;
     }
-  }, [url, index, retryCount, isCfProtectedUrl, onImageError, onImageSuccess, bridgedDataUri]);
+
+    // 3. Only if ALL retries and fallbacks have failed, log and set error state
+    ApiLogger.logRequest({
+      timestamp: Date.now(),
+      method: 'GET_IMG',
+      url: resolvedUrl,
+      status: isCfProtectedUrl ? 403 : null,
+      statusText: isCfProtectedUrl ? 'Cloudflare Challenge / 403' : 'Image Load Failed',
+      durationMs: 0,
+      error: `Page ${index + 1} image failed to load${isCfProtectedUrl ? ' (Cloudflare verification required)' : ''}`,
+    });
+
+    onImageError?.(index, resolvedUrl);
+    setIsError(true);
+    setIsRetrying(false);
+  }, [resolvedUrl, index, retryCount, isCfProtectedUrl, headers, onImageError, onImageSuccess, bridgedDataUri]);
 
   const handleManualRetry = useCallback(async () => {
     setIsError(false);
     setIsRetrying(true);
     if (isCfProtectedUrl && Platform.OS !== 'web' && webViewBridge.hasSender()) {
       try {
-        const dataUri = await webViewBridge.fetchImageBase64(url, 20000);
+        const dataUri = await webViewBridge.fetchImageBase64(resolvedUrl, 20000);
         if (dataUri) {
-          imageBridgeCache.set(url, dataUri);
+          imageBridgeCache.set(resolvedUrl, dataUri);
+          setBridgedDataUri(dataUri);
+          setIsRetrying(false);
+          onImageSuccess?.(index);
+          return;
+        }
+      } catch {}
+    }
+    if (resolvedUrl) {
+      try {
+        const dataUri = await fetchBufferAsDataUri(resolvedUrl, headers);
+        if (dataUri) {
+          imageBridgeCache.set(resolvedUrl, dataUri);
           setBridgedDataUri(dataUri);
           setIsRetrying(false);
           onImageSuccess?.(index);
@@ -233,7 +296,7 @@ const ReaderImagePage = React.memo(function ReaderImagePage({
     }
     setRetryCount((prev) => prev + 1);
     setTimeout(() => setIsRetrying(false), 500);
-  }, [isCfProtectedUrl, url, index, onImageSuccess]);
+  }, [isCfProtectedUrl, resolvedUrl, headers, index, onImageSuccess]);
 
   return (
     <View style={{ width, height, justifyContent: 'center', alignItems: 'center' }}>
@@ -511,6 +574,7 @@ export default function ReaderScreen() {
   const persistentBridgeRef = useRef<any>(null);
   const cfWebViewRef = useRef<any>(null);
   const hasSolvedRef = useRef(false);
+  const isSolvingCloudflareRef = useRef(false);
   const [persistentBridgeUrl, setPersistentBridgeUrl] = useState('https://mangadot.net/');
 
   // Register WebView script dispatcher for authenticated requests
@@ -531,10 +595,24 @@ export default function ReaderScreen() {
 
   useEffect(() => {
     let targetUrl = 'https://mangadot.net/';
-    if (chapterId?.includes('mangadot')) {
+    if (chapterId?.includes('reimanga')) {
+      const parts = chapterId.replace(/^reimanga:/, '').split(':');
+      targetUrl =
+        parts.length > 0 && parts[0]
+          ? `https://reimanga.net/manga/${parts[0].replace(/^manga\//, '')}`
+          : 'https://reimanga.net/';
+    } else if (chapterId?.includes('mangadot')) {
       targetUrl = 'https://mangadot.net/';
     } else if (chapterId?.includes('manganato')) {
       targetUrl = 'https://manganato.gg/';
+    } else if (chapterId?.includes('onisaga')) {
+      targetUrl = 'https://onisaga.com/';
+    } else if (chapterId?.includes('toonkotsu')) {
+      targetUrl = 'https://toonkotsu.com/';
+    } else if (chapterId?.includes('weebcentral')) {
+      targetUrl = 'https://weebcentral.com/';
+    } else if (chapterId?.includes('mangak')) {
+      targetUrl = 'https://mangak.io/';
     } else if (chapterId?.includes('nhentai')) {
       targetUrl = 'https://nhentai.net/';
     } else if (chapterId?.includes('comix')) {
@@ -551,17 +629,28 @@ export default function ReaderScreen() {
   const isCloudflareSource = useMemo(() => {
     if (!chapterId) return false;
     return (
+      chapterId.includes('reimanga') ||
       chapterId.includes('mangadot') ||
       chapterId.includes('manganato') ||
       chapterId.includes('comix') ||
+      chapterId.includes('weebcentral') ||
+      chapterId.includes('mangak') ||
+      chapterId.includes('onisaga') ||
+      chapterId.includes('toonkotsu') ||
       pages.some(
         (p) =>
+          p.includes('reimanga.net') ||
           p.includes('mangadot.net') ||
           p.includes('/chapters/manga_') ||
-          p.includes('chapmanganato')
+          p.includes('chapmanganato') ||
+          p.includes('onisaga.com') ||
+          p.includes('toonkotsu.com') ||
+          p.includes('mangak.io') ||
+          p.includes('weebcentral.com')
       )
     );
   }, [chapterId, pages]);
+
 
   const flatListRef = useRef<FlatList>(null);
   const webtoonListRef = useRef<FlatList<string>>(null);
@@ -685,7 +774,16 @@ export default function ReaderScreen() {
         const isExt = isExternalSource(chapterId!);
         if (isExt) {
           const result = await getUniversalChapterPages(chapterId!);
-          loadedPages = result.pages;
+          loadedPages = (result.pages || []).map((p) => {
+            if (!p) return p;
+            if (p.startsWith('http') || p.startsWith('data:') || p.startsWith('file:')) {
+              return p;
+            }
+            if (p.startsWith('/api/media/') || chapterId?.includes('philia')) {
+              return `https://philiascans.org/${p.replace(/^\/+/, '')}`;
+            }
+            return p;
+          });
           if (result.mangaId && !resolvedMangaId) {
             setResolvedMangaId(result.mangaId);
           }
@@ -694,18 +792,52 @@ export default function ReaderScreen() {
           const isMangaDot = chapterId.includes('mangadot');
           const cfCookie = isMangaDot
             ? CloudFlareCookieManager.getCookie('mangadot.net')
+            : chapterId.includes('reimanga')
+            ? CloudFlareCookieManager.getCookie('reimanga.net')
             : chapterId.includes('manganato')
             ? CloudFlareCookieManager.getCookie('manganato.gg')
+            : chapterId.includes('onisaga')
+            ? CloudFlareCookieManager.getCookie('onisaga.com')
+            : chapterId.includes('toonkotsu')
+            ? CloudFlareCookieManager.getCookie('toonkotsu.com')
+            : chapterId.includes('weebcentral')
+            ? CloudFlareCookieManager.getCookie('weebcentral.com')
+            : chapterId.includes('mangak')
+            ? CloudFlareCookieManager.getCookie('mangak.io')
+            : chapterId.includes('toonz')
+            ? CloudFlareCookieManager.getCookie('toonz.to')
+            : chapterId.includes('kagane')
+            ? CloudFlareCookieManager.getCookie('kagane.moe')
             : undefined;
 
           const defaultHeaders: Record<string, string> = {
             'User-Agent': DEFAULT_USER_AGENT,
             Referer: isMangaDot
               ? 'https://mangadot.net/'
+              : chapterId.includes('reimanga')
+              ? 'https://reimanga.net/'
               : chapterId.includes('nhentai')
               ? 'https://nhentai.net/'
               : chapterId.includes('manganato')
               ? 'https://www.manganato.gg/'
+              : chapterId.includes('onisaga')
+              ? 'https://onisaga.com/'
+              : chapterId.includes('toonkotsu')
+              ? 'https://toonkotsu.com/'
+              : chapterId.includes('weebcentral')
+              ? 'https://weebcentral.com/'
+              : chapterId.includes('mangak')
+              ? 'https://mangak.io/'
+              : chapterId.includes('mangafire')
+              ? 'https://mangafire.to/'
+              : chapterId.includes('toonz')
+              ? 'https://toonz.to/'
+              : chapterId.includes('kagane')
+              ? 'https://kagane.moe/'
+              : chapterId.includes('comix')
+              ? 'https://comix.net/'
+              : chapterId.includes('philia')
+              ? 'https://philiascans.org/'
               : 'https://mangadex.org/',
           };
           if (cfCookie) {
@@ -723,7 +855,18 @@ export default function ReaderScreen() {
         }
       }
 
-      setPages(loadedPages);
+      const sanitizedPages = (loadedPages || []).map((p) => {
+        if (!p) return p;
+        if (p.startsWith('http') || p.startsWith('data:') || p.startsWith('file:')) {
+          return p;
+        }
+        if (p.startsWith('/api/media/') || chapterId?.includes('philia')) {
+          return `https://philiascans.org/${p.replace(/^\/+/, '')}`;
+        }
+        return p;
+      });
+
+      setPages(sanitizedPages);
 
       let targetPage = 0;
       if (page !== undefined && page !== null && page !== '') {
@@ -751,14 +894,35 @@ export default function ReaderScreen() {
             err.message.toLowerCase().includes('turnstile')));
       if (isCf) {
         setIsCloudflare(true);
-        if (chapterId?.includes('mangadot')) {
+        if (chapterId?.includes('reimanga')) {
+          const parts = chapterId.replace(/^reimanga:/, '').split(':');
+          setCfInAppUrl(
+            parts.length > 0 && parts[0]
+              ? `https://reimanga.net/manga/${parts[0].replace(/^manga\//, '')}`
+              : 'https://reimanga.net/'
+          );
+        } else if (chapterId?.includes('mangadot')) {
           setCfInAppUrl('https://mangadot.net/');
         } else if (chapterId?.includes('manganato')) {
           setCfInAppUrl('https://manganato.gg/');
+        } else if (chapterId?.includes('onisaga')) {
+          setCfInAppUrl('https://onisaga.com/');
+        } else if (chapterId?.includes('toonkotsu')) {
+          setCfInAppUrl('https://toonkotsu.com/');
+        } else if (chapterId?.includes('weebcentral')) {
+          setCfInAppUrl('https://weebcentral.com/');
+        } else if (chapterId?.includes('mangak')) {
+          setCfInAppUrl('https://mangak.io/');
         } else if (chapterId?.includes('nhentai')) {
           setCfInAppUrl('https://nhentai.net/');
         } else if (chapterId?.includes('comix')) {
           setCfInAppUrl('https://comix.net/');
+        } else if (chapterId?.includes('mangafire')) {
+          setCfInAppUrl('https://mangafire.to/');
+        } else if (chapterId?.includes('toonz')) {
+          setCfInAppUrl('https://toonz.to/');
+        } else if (chapterId?.includes('kagane')) {
+          setCfInAppUrl('https://kagane.moe/');
         } else {
           setCfInAppUrl('https://mangadot.net/');
         }
@@ -776,17 +940,53 @@ export default function ReaderScreen() {
     }
   };
 
+  // Auto-reload chapter pages when returning back to Yomite app from external browser
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active' && isSolvingCloudflareRef.current) {
+        isSolvingCloudflareRef.current = false;
+        setIsCfInAppModalOpen(false);
+        setIsCloudflare(false);
+        setFailedPages(new Set());
+        imageBridgeCache.clear();
+        setReloadTrigger((v) => v + 1);
+        persistentBridgeRef.current?.reload();
+        loadPages();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
   const handleCloudflareSolved = useCallback(
     async (newCookie?: string) => {
       let domain = 'mangadot.net';
-      if (chapterId.includes('mangadot')) {
+      if (chapterId.includes('reimanga')) {
+        domain = 'reimanga.net';
+      } else if (chapterId.includes('mangadot')) {
         domain = 'mangadot.net';
       } else if (chapterId.includes('manganato')) {
         domain = 'manganato.gg';
+      } else if (chapterId.includes('onisaga')) {
+        domain = 'onisaga.com';
+      } else if (chapterId.includes('toonkotsu')) {
+        domain = 'toonkotsu.com';
+      } else if (chapterId.includes('weebcentral')) {
+        domain = 'weebcentral.com';
+      } else if (chapterId.includes('mangak')) {
+        domain = 'mangak.io';
       } else if (chapterId.includes('nhentai')) {
         domain = 'nhentai.net';
       } else if (chapterId.includes('comix')) {
         domain = 'comix.to';
+      } else if (chapterId.includes('mangafire')) {
+        domain = 'mangafire.to';
+      } else if (chapterId.includes('toonz')) {
+        domain = 'toonz.to';
+      } else if (chapterId.includes('kagane')) {
+        domain = 'kagane.moe';
       } else if (pages.length > 0 && pages[0]) {
         try {
           const u = new URL(pages[0]);
@@ -848,9 +1048,17 @@ export default function ReaderScreen() {
         url.includes('challenges.cloudflare.com') ||
         url.includes('/cdn-cgi/challenge-platform/');
       const isTargetDomain =
+        url.includes('reimanga.net') ||
         url.includes('mangadot.net') ||
         url.includes('manganato') ||
+        url.includes('onisaga') ||
+        url.includes('toonkotsu') ||
+        url.includes('weebcentral') ||
+        url.includes('mangak') ||
         url.includes('nhentai') ||
+        url.includes('toonz') ||
+        url.includes('kagane') ||
+        url.includes('mangafire') ||
         url.includes('comix');
 
       if (!navState.loading && isTargetDomain && !isCfTitle && !isCfHost) {
@@ -874,7 +1082,13 @@ export default function ReaderScreen() {
 
   const handleOpenCloudflareVerification = useCallback(() => {
     let targetUrl = 'https://mangadot.net/';
-    if (chapterId.includes('mangadot')) {
+    if (chapterId.includes('reimanga')) {
+      const parts = chapterId.replace(/^reimanga:/, '').split(':');
+      targetUrl =
+        parts.length > 0 && parts[0]
+          ? `https://reimanga.net/manga/${parts[0].replace(/^manga\//, '')}`
+          : 'https://reimanga.net/';
+    } else if (chapterId.includes('mangadot')) {
       targetUrl = 'https://mangadot.net/';
     } else if (chapterId.includes('manganato')) {
       targetUrl = 'https://manganato.gg/';
@@ -882,7 +1096,22 @@ export default function ReaderScreen() {
       targetUrl = 'https://nhentai.net/';
     } else if (chapterId.includes('comix')) {
       targetUrl = 'https://comix.net/';
+    } else if (chapterId.includes('mangafire')) {
+      targetUrl = 'https://mangafire.to/';
+    } else if (chapterId.includes('toonz')) {
+      targetUrl = 'https://toonz.to/';
+    } else if (chapterId.includes('kagane')) {
+      targetUrl = 'https://kagane.moe/';
+    } else if (chapterId.includes('weebcentral')) {
+      targetUrl = 'https://weebcentral.com/';
+    } else if (chapterId.includes('mangak')) {
+      targetUrl = 'https://mangak.io/';
+    } else if (chapterId.includes('onisaga')) {
+      targetUrl = 'https://onisaga.com/';
+    } else if (chapterId.includes('toonkotsu')) {
+      targetUrl = 'https://toonkotsu.com/';
     } else if (pages.length > 0 && pages[0]) {
+
       try {
         const u = new URL(pages[0]);
         targetUrl = `${u.protocol}//${u.host}/`;
@@ -939,6 +1168,7 @@ export default function ReaderScreen() {
             <Pressable
               onPress={() => {
                 if (cfInAppUrl) {
+                  isSolvingCloudflareRef.current = true;
                   WebBrowser.openBrowserAsync(cfInAppUrl).catch(() => {});
                 }
               }}
@@ -959,7 +1189,20 @@ export default function ReaderScreen() {
               <Ionicons name="open-outline" size={18} color={colors.text} />
             </Pressable>
             <Pressable
-              onPress={() => setIsCfInAppModalOpen(false)}
+              onPress={() => {
+                const domain = chapterId.includes('reimanga')
+                  ? 'reimanga.net'
+                  : chapterId.includes('onisaga')
+                  ? 'onisaga.com'
+                  : chapterId.includes('toonkotsu')
+                  ? 'toonkotsu.com'
+                  : chapterId.includes('weebcentral')
+                  ? 'weebcentral.com'
+                  : 'mangadot.net';
+                webViewBridge.setDomainVerified(domain, true);
+                setIsCfInAppModalOpen(false);
+                loadPages();
+              }}
               style={({ pressed }) => [
                 {
                   width: 40,
@@ -1009,9 +1252,17 @@ export default function ReaderScreen() {
                 url.includes('challenges.cloudflare.com') ||
                 url.includes('/cdn-cgi/challenge-platform/');
               const isTargetDomain =
+                url.includes('reimanga.net') ||
                 url.includes('mangadot.net') ||
                 url.includes('manganato') ||
+                url.includes('onisaga') ||
+                url.includes('toonkotsu') ||
+                url.includes('weebcentral') ||
+                url.includes('mangak') ||
                 url.includes('nhentai') ||
+                url.includes('toonz') ||
+                url.includes('kagane') ||
+                url.includes('mangafire') ||
                 url.includes('comix');
 
               if (isTargetDomain && !isCfTitle && !isCfHost) {
@@ -1343,23 +1594,46 @@ export default function ReaderScreen() {
       const result = isExternalSource(nextChapterId)
         ? await getUniversalChapterPages(nextChapterId)
         : await getChapterPages(nextChapterId, dataSaver);
-      setNextChapterPages(result.pages);
+      const rawPages = result.pages || [];
+      const sanitizedNextPages = rawPages.map((p) => {
+        if (!p) return p;
+        if (p.startsWith('http') || p.startsWith('data:') || p.startsWith('file:')) {
+          return p;
+        }
+        if (p.startsWith('/api/media/') || nextChapterId?.includes('philia')) {
+          return `https://philiascans.org/${p.replace(/^\/+/, '')}`;
+        }
+        return p;
+      });
+      setNextChapterPages(sanitizedNextPages);
       const isExtNext = isExternalSource(nextChapterId);
       if (isExtNext) {
         const cfCookie = nextChapterId.includes('mangadot')
           ? CloudFlareCookieManager.getCookie('mangadot.net')
+          : nextChapterId.includes('reimanga')
+          ? CloudFlareCookieManager.getCookie('reimanga.net')
           : nextChapterId.includes('manganato')
           ? CloudFlareCookieManager.getCookie('manganato.gg')
+          : nextChapterId.includes('onisaga')
+          ? CloudFlareCookieManager.getCookie('onisaga.com')
+          : nextChapterId.includes('toonkotsu')
+          ? CloudFlareCookieManager.getCookie('toonkotsu.com')
           : undefined;
 
         const defaultHeaders: Record<string, string> = {
           'User-Agent': DEFAULT_USER_AGENT,
           Referer: nextChapterId.includes('mangadot')
             ? 'https://mangadot.net/'
+            : nextChapterId.includes('reimanga')
+            ? 'https://reimanga.net/'
             : nextChapterId.includes('nhentai')
             ? 'https://nhentai.net/'
             : nextChapterId.includes('manganato')
             ? 'https://www.manganato.gg/'
+            : nextChapterId.includes('onisaga')
+            ? 'https://onisaga.com/'
+            : nextChapterId.includes('toonkotsu')
+            ? 'https://toonkotsu.com/'
             : 'https://mangadex.org/',
         };
         if (cfCookie) {

@@ -16,6 +16,7 @@ import {
   Linking,
   Share,
   useWindowDimensions,
+  AppState,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -86,7 +87,15 @@ function formatStatNumber(num?: number | null): string | null {
   return num.toString();
 }
 
-function MangaDetailSkeleton() {
+function MangaDetailSkeleton({
+  initialCoverUrl,
+  coverHeaders,
+  initialTitle,
+}: {
+  initialCoverUrl?: string | null;
+  coverHeaders?: Record<string, string>;
+  initialTitle?: string | null;
+} = {}) {
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
   const isWeb = Platform.OS === 'web';
@@ -99,6 +108,19 @@ function MangaDetailSkeleton() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Hero Section Skeleton */}
       <View style={styles.heroContainer}>
+        {initialCoverUrl && (
+          <BridgedImage
+            source={{ uri: initialCoverUrl, headers: coverHeaders }}
+            style={styles.backdropImage}
+            contentFit="cover"
+            blurRadius={6}
+          />
+        )}
+        <LinearGradient
+          colors={['rgba(9,9,11,0.25)', 'rgba(9,9,11,0.75)', colors.background]}
+          style={styles.backdropGradient}
+        />
+
         {/* Top Bar Skeleton */}
         <View style={[styles.topBarContainer, { paddingTop: topBarPaddingTop }]}>
           <Skeleton width={32} height={32} borderRadius={16} />
@@ -110,13 +132,39 @@ function MangaDetailSkeleton() {
 
         <View style={[styles.heroContent, isWeb && styles.webCenteredContent, { paddingTop: heroContentPaddingTop }]}>
           {/* Cover Skeleton */}
-          <Skeleton width={coverWidth} height={coverHeight} borderRadius={14} />
+          {initialCoverUrl ? (
+            <View
+              style={{
+                width: coverWidth,
+                height: coverHeight,
+                borderRadius: 14,
+                overflow: 'hidden',
+                backgroundColor: colors.surfaceElevated,
+              }}
+            >
+              <BridgedImage
+                source={{ uri: initialCoverUrl, headers: coverHeaders }}
+                style={{ width: '100%', height: '100%' }}
+                contentFit="cover"
+              />
+            </View>
+          ) : (
+            <Skeleton width={coverWidth} height={coverHeight} borderRadius={14} />
+          )}
 
           {/* Hero Meta Skeleton */}
           <View style={[styles.heroMeta, { justifyContent: 'space-between' }]}>
             <View style={{ gap: 8 }}>
-              <Skeleton width="92%" height={isWeb ? 24 : 18} borderRadius={Radius.sm} />
-              <Skeleton width="65%" height={isWeb ? 24 : 18} borderRadius={Radius.sm} />
+              {initialTitle ? (
+                <Text style={[styles.mangaTitle, { color: colors.text }]} numberOfLines={2}>
+                  {initialTitle}
+                </Text>
+              ) : (
+                <>
+                  <Skeleton width="92%" height={isWeb ? 24 : 18} borderRadius={Radius.sm} />
+                  <Skeleton width="65%" height={isWeb ? 24 : 18} borderRadius={Radius.sm} />
+                </>
+              )}
               <Skeleton width="45%" height={12} borderRadius={Radius.xs} style={{ marginTop: 2 }} />
               <Skeleton width={70} height={18} borderRadius={Radius.xs} style={{ marginTop: 2 }} />
               <View style={{ flexDirection: 'row', gap: 12, marginTop: 4 }}>
@@ -172,8 +220,26 @@ function MangaDetailSkeleton() {
 
 export default function MangaDetailScreen() {
   const insets = useSafeAreaInsets();
-  const { id: paramId, fromCatalog } = useLocalSearchParams<{ id: string; fromCatalog?: string }>();
+  const {
+    id: paramId,
+    fromCatalog,
+    coverUrl: paramCoverUrl,
+    title: paramTitle,
+  } = useLocalSearchParams<{
+    id: string;
+    fromCatalog?: string;
+    coverUrl?: string;
+    title?: string;
+  }>();
   const id = useMemo(() => (paramId ? decodeURIComponent(paramId) : paramId), [paramId]);
+  const initialCoverUrl = useMemo(
+    () => (paramCoverUrl ? decodeURIComponent(paramCoverUrl) : null),
+    [paramCoverUrl]
+  );
+  const initialTitle = useMemo(
+    () => (paramTitle ? decodeURIComponent(paramTitle) : null),
+    [paramTitle]
+  );
   const router = useRouter();
   const colors = useThemeColors();
   const { width: windowWidth } = useWindowDimensions();
@@ -192,7 +258,7 @@ export default function MangaDetailScreen() {
   }, [windowWidth]);
 
   const [manga, setManga] = useState<Manga | null>(null);
-  useDocumentTitle(manga ? getMangaTitle(manga) : 'Manga Details');
+  useDocumentTitle(manga ? getMangaTitle(manga) : (initialTitle || 'Manga Details'));
   const [activeTab, setActiveTab] = useState<'chapters' | 'details' | 'similar'>('chapters');
   const [stats, setStats] = useState<MangaStatistics | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -262,10 +328,102 @@ export default function MangaDetailScreen() {
         ...(cfCookie ? { Cookie: cfCookie } : {}),
       };
     }
+    if (lowerId.startsWith('kagane:') || lowerId.includes('kagane')) {
+      return {
+        Referer: 'https://kagane.moe/',
+        'User-Agent': DEFAULT_USER_AGENT,
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      };
+    }
+    if (lowerId.startsWith('toonz:') || lowerId.includes('toonz')) {
+      return {
+        Referer: 'https://toonz.to/',
+        'User-Agent': DEFAULT_USER_AGENT,
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      };
+    }
+    if (lowerId.startsWith('mangafire:') || lowerId.includes('mangafire')) {
+      return {
+        Referer: 'https://mangafire.to/',
+        'User-Agent': DEFAULT_USER_AGENT,
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      };
+    }
+    if (lowerId.startsWith('projectsuki:') || lowerId.includes('projectsuki')) {
+      return {
+        Referer: 'https://projectsuki.com/',
+        'User-Agent': DEFAULT_USER_AGENT,
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      };
+    }
+    if (lowerId.startsWith('mangaball:') || lowerId.includes('mangaball')) {
+      return {
+        Referer: 'https://mangaball.com/',
+        'User-Agent': DEFAULT_USER_AGENT,
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      };
+    }
+    if (lowerId.startsWith('atsumaru:') || lowerId.includes('atsumaru') || lowerId.includes('atsu.moe')) {
+      return {
+        Referer: 'https://atsu.moe/',
+        'User-Agent': DEFAULT_USER_AGENT,
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      };
+    }
+    if (lowerId.startsWith('mangago:') || lowerId.includes('mangago')) {
+      return {
+        Referer: 'https://www.mangago.me/',
+        'User-Agent': DEFAULT_USER_AGENT,
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      };
+    }
+    if (lowerId.startsWith('weebcentral:') || lowerId.includes('weebcentral')) {
+      return {
+        Referer: 'https://weebcentral.com/',
+        'User-Agent': DEFAULT_USER_AGENT,
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      };
+    }
+    if (lowerId.startsWith('mangak:') || lowerId.includes('mangak')) {
+      return {
+        Referer: 'https://mangak.io/',
+        'User-Agent': DEFAULT_USER_AGENT,
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      };
+    }
+    if (lowerId.startsWith('onisaga:') || lowerId.includes('onisaga')) {
+      return {
+        Referer: 'https://onisaga.com/',
+        'User-Agent': DEFAULT_USER_AGENT,
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      };
+    }
+    if (lowerId.startsWith('reimanga:') || lowerId.includes('reimanga')) {
+      return {
+        Referer: 'https://reimanga.net/',
+        'User-Agent': DEFAULT_USER_AGENT,
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      };
+    }
+    if (lowerId.startsWith('toonkotsu:') || lowerId.includes('toonkotsu')) {
+      return {
+        Referer: 'https://toonkotsu.com/',
+        'User-Agent': DEFAULT_USER_AGENT,
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      };
+    }
     if (isExternalSource(id)) {
       const resolved = SourceManager.resolveSource(id);
-      if (resolved && resolved.parser.getRequestHeaders) {
-        return resolved.parser.getRequestHeaders();
+      if (resolved) {
+        if (resolved.parser.getImageHeaders) {
+          return resolved.parser.getImageHeaders();
+        }
+        if (resolved.parser.getRequestHeaders) {
+          const headers = { ...resolved.parser.getRequestHeaders() };
+          delete headers['Accept'];
+          delete headers['accept'];
+          return headers;
+        }
       }
     }
     return undefined;
@@ -454,7 +612,7 @@ export default function MangaDetailScreen() {
       setError(null);
       const isExt = isExternalSource(id!);
       const [data, statistics] = await Promise.all([
-        isExt ? getUniversalMangaDetails(id!) : getMangaDetails(id!),
+        isExt ? getUniversalMangaDetails(id!, initialCoverUrl, initialTitle) : getMangaDetails(id!),
         !isExt ? getMangaStatistics(id!) : Promise.resolve(null),
       ]);
       setManga(data);
@@ -473,7 +631,17 @@ export default function MangaDetailScreen() {
         setChaptersIsCloudflare(true);
         const resolvedDomain =
           err?.domain ||
-          (id?.includes('manganato')
+          (id?.includes('reimanga')
+            ? 'reimanga.net'
+            : id?.includes('onisaga')
+            ? 'onisaga.com'
+            : id?.includes('toonkotsu')
+            ? 'toonkotsu.com'
+            : id?.includes('weebcentral')
+            ? 'weebcentral.com'
+            : id?.includes('mangak')
+            ? 'mangak.io'
+            : id?.includes('manganato')
             ? 'manganato.gg'
             : id?.includes('mangadot')
             ? 'mangadot.net'
@@ -585,7 +753,17 @@ export default function MangaDetailScreen() {
         setChaptersIsCloudflare(true);
         const resolvedDomain =
           err?.domain ||
-          (id?.includes('manganato')
+          (id?.includes('reimanga')
+            ? 'reimanga.net'
+            : id?.includes('onisaga')
+            ? 'onisaga.com'
+            : id?.includes('toonkotsu')
+            ? 'toonkotsu.com'
+            : id?.includes('weebcentral')
+            ? 'weebcentral.com'
+            : id?.includes('mangak')
+            ? 'mangak.io'
+            : id?.includes('manganato')
             ? 'manganato.gg'
             : id?.includes('mangadot')
             ? 'mangadot.net'
@@ -614,7 +792,17 @@ export default function MangaDetailScreen() {
     triggerHaptic();
     const sourceDomain =
       chaptersCfDomain ||
-      (id?.includes('manganato')
+      (id?.includes('reimanga')
+        ? 'reimanga.net'
+        : id?.includes('onisaga')
+        ? 'onisaga.com'
+        : id?.includes('toonkotsu')
+        ? 'toonkotsu.com'
+        : id?.includes('weebcentral')
+        ? 'weebcentral.com'
+        : id?.includes('mangak')
+        ? 'mangak.io'
+        : id?.includes('manganato')
         ? 'manganato.gg'
         : id?.includes('mangadot')
         ? 'mangadot.net'
@@ -626,6 +814,14 @@ export default function MangaDetailScreen() {
       (sourceDomain.startsWith('http') ? sourceDomain : `https://${sourceDomain}`);
     if (targetUrl.includes('/api/')) {
       targetUrl = sourceDomain.startsWith('http') ? sourceDomain : `https://${sourceDomain}/`;
+    }
+    if (id?.includes('reimanga')) {
+      const cleanSlug = id.replace(/^reimanga:/, '').replace(/^\/+/, '');
+      if (cleanSlug && !cleanSlug.startsWith('http')) {
+        targetUrl = `https://reimanga.net/manga/${cleanSlug.replace(/^manga\//, '')}`;
+      } else if (!targetUrl.includes('/manga/')) {
+        targetUrl = `https://reimanga.net/manga/${cleanSlug.replace(/^manga\//, '')}`;
+      }
     }
 
     if (Platform.OS === 'web') {
@@ -648,6 +844,23 @@ export default function MangaDetailScreen() {
       setIsCfInAppModalOpen(true);
     }
   }, [chaptersCfDomain, manga, id]);
+
+  // Auto-reload manga details and chapters when returning from external browser
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active' && isSolvingCloudflareRef.current) {
+        isSolvingCloudflareRef.current = false;
+        setChaptersIsCloudflare(false);
+        setIsCfInAppModalOpen(false);
+        loadMangaDetails();
+        loadChapters();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [loadMangaDetails, loadChapters]);
 
   const handleSelectCategory = useCallback(
     (category: LibraryCategory) => {
@@ -942,10 +1155,100 @@ export default function MangaDetailScreen() {
   };
 
   if (isLoading) {
-    return <MangaDetailSkeleton />;
+    return (
+      <MangaDetailSkeleton
+        initialCoverUrl={initialCoverUrl}
+        coverHeaders={coverHeaders}
+        initialTitle={initialTitle}
+      />
+    );
   }
 
   if (error || !manga) {
+    if (chaptersIsCloudflare) {
+      return (
+        <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+          <View style={{ flex: 1, padding: 32, alignItems: 'center', justifyContent: 'center' }}>
+            <View
+              style={{
+                width: 54,
+                height: 54,
+                borderRadius: 18,
+                backgroundColor: colors.surfaceElevated || colors.surface,
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 16,
+                borderWidth: 1,
+                borderColor: colors.border,
+              }}
+            >
+              <Ionicons name="shield-checkmark" size={26} color={colors.accent} />
+            </View>
+            <Text style={{ fontSize: 17, fontWeight: '700', color: colors.text, textAlign: 'center' }}>
+              Verification Required
+            </Text>
+            <Text
+              style={{
+                fontSize: 13,
+                color: colors.textMuted,
+                textAlign: 'center',
+                marginTop: 6,
+                lineHeight: 18,
+                maxWidth: 280,
+              }}
+            >
+              {chaptersCfDomain} requires a quick bot check to display this title and chapters.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 20, width: '100%', maxWidth: 280 }}>
+              <Pressable
+                onPress={handleSolveCloudflare}
+                style={{
+                  flex: 1,
+                  height: 44,
+                  borderRadius: Radius.md,
+                  backgroundColor: colors.accent,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                accessibilityRole="button"
+                aria-label="Verify with Source"
+              >
+                <Ionicons name="shield-checkmark-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>
+                  Verify
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  loadMangaDetails();
+                  loadChapters();
+                }}
+                style={{
+                  height: 44,
+                  paddingHorizontal: 16,
+                  borderRadius: Radius.md,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  backgroundColor: colors.surface,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                accessibilityRole="button"
+                aria-label="Retry Loading"
+              >
+                <Ionicons name="reload-outline" size={16} color={colors.text} style={{ marginRight: 6 }} />
+                <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>
+                  Retry
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </SafeAreaView>
+      );
+    }
+
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <OfflineState
@@ -959,10 +1262,25 @@ export default function MangaDetailScreen() {
   }
 
   const coverFileName = extractCoverFileName(manga);
-  const coverUrl = getCoverUrl(manga.id, coverFileName, '512');
+  const rawCoverUrl = getCoverUrl(manga.id, coverFileName, '512');
+  const coverUrl = rawCoverUrl || initialCoverUrl || null;
   const rawTitle = getMangaTitle(manga);
+  let candidateTitle = rawTitle || initialTitle || 'Untitled';
+  candidateTitle = candidateTitle
+    .replace(/^Read\s+/i, '')
+    .replace(/\s+(?:Online\s+Free|Read\s+Online).*$/i, '')
+    .replace(/\s*-\s*MangaBall$/i, '')
+    .replace(/\s*\|\s*Project\s*Suki$/i, '')
+    .replace(/\s*-\s*MangaGo$/i, '')
+    .trim();
+  const cleanTitle =
+    !candidateTitle ||
+    candidateTitle.toLowerCase().includes('mangafire') ||
+    candidateTitle.toLowerCase().includes('read manga online free')
+      ? initialTitle || candidateTitle || 'Untitled'
+      : candidateTitle;
   // Strip any leading flag emojis so chapter list manga title is completely clean
-  const title = rawTitle.replace(/^[\uD83C][\uDDE6-\uDDFF][\uD83C][\uDDE6-\uDDFF]\s*/, '').trim();
+  const title = (cleanTitle.replace(/^[\uD83C][\uDDE6-\uDDFF][\uD83C][\uDDE6-\uDDFF]\s*/, '').trim()) || initialTitle || 'Untitled';
   const description = getMangaDescription(manga);
   const author = extractAuthorName(manga);
   const artist = extractArtistName(manga);
@@ -1918,7 +2236,7 @@ export default function MangaDetailScreen() {
 
               return (
                 <AnimatedCard
-                  key={chapter.id}
+                  key={`${chapter.id}-${idx}`}
                   index={idx}
                   onPress={() => handleReadChapter(chapter.id)}
                   style={[
@@ -2820,8 +3138,24 @@ export default function MangaDetailScreen() {
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Pressable
-                  onPress={() => {
+                  onPress={async () => {
+                    const domain =
+                      chaptersCfDomain ||
+                      (id?.includes('reimanga')
+                        ? 'reimanga.net'
+                        : id?.includes('onisaga')
+                        ? 'onisaga.com'
+                        : id?.includes('toonkotsu')
+                        ? 'toonkotsu.com'
+                        : id?.includes('weebcentral')
+                        ? 'weebcentral.com'
+                        : 'reimanga.net');
+                    if (domain) {
+                      webViewBridge.setDomainVerified(domain, true);
+                    }
                     setIsCfInAppModalOpen(false);
+                    setChaptersIsCloudflare(false);
+                    loadMangaDetails();
                     loadChapters();
                   }}
                   style={{
@@ -2839,6 +3173,7 @@ export default function MangaDetailScreen() {
                 <Pressable
                   onPress={() => {
                     if (cfInAppUrl) {
+                      isSolvingCloudflareRef.current = true;
                       Linking.openURL(cfInAppUrl).catch(() => {});
                     }
                   }}
@@ -2861,7 +3196,11 @@ export default function MangaDetailScreen() {
             {WebView && Platform.OS !== 'web' ? (
               <WebView
                 source={{ uri: cfInAppUrl }}
-                userAgent={DEFAULT_USER_AGENT}
+                userAgent={
+                  Platform.OS === 'android'
+                    ? 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
+                    : DEFAULT_USER_AGENT
+                }
                 sharedCookiesEnabled={true}
                 thirdPartyCookiesEnabled={true}
                 style={{ flex: 1, backgroundColor: colors.background }}
@@ -2914,7 +3253,17 @@ export default function MangaDetailScreen() {
                   try {
                     const parsed = JSON.parse(event.nativeEvent.data);
                     if (parsed.type === 'CF_SOLVED') {
-                      const domain = chaptersCfDomain;
+                      const domain =
+                        chaptersCfDomain ||
+                        (id?.includes('reimanga')
+                          ? 'reimanga.net'
+                          : id?.includes('onisaga')
+                          ? 'onisaga.com'
+                          : id?.includes('toonkotsu')
+                          ? 'toonkotsu.com'
+                          : id?.includes('weebcentral')
+                          ? 'weebcentral.com'
+                          : 'reimanga.net');
                       if (domain) {
                         webViewBridge.setDomainVerified(domain, true);
                       }
@@ -2922,6 +3271,8 @@ export default function MangaDetailScreen() {
                         const match = parsed.cookie.match(/cf_clearance=([^;]+)/);
                         if (match) {
                           await CloudFlareCookieManager.setCookie(domain, match[0]);
+                        } else if (parsed.cookie.includes('=')) {
+                          await CloudFlareCookieManager.setCookie(domain, parsed.cookie);
                         }
                       }
                       setIsCfInAppModalOpen(false);

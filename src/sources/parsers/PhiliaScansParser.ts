@@ -461,53 +461,98 @@ export class PhiliaScansParser extends BaseParser {
     }
 
     const pages: SourcePage[] = [];
+    const seenUrls = new Set<string>();
+    const seenPages = new Set<number>();
 
-    // 1. Strict regex for authentic media.philiascans.org CDN URLs with tokens
-    const cdnRegex = /https?:\/\/media\.philiascans\.org\/api\/media\/chapters\/[^\s"']+(?=\\"|")/g;
-    const matches = [...rawHtml.matchAll(cdnRegex)];
-    const uniqueUrls: string[] = [];
-    const seen = new Set<string>();
+    // 1. Next.js App Router stream payloads with pageNumber
+    const pageNumRegex =
+      /\\?"src\\?":\s*\\?"(\/api\/media\/[^\s"'\\]+(?:\\u0026[^\s"'\\]+)*)\\?",\s*\\?"pageNumber\\"?:\s*(\d+)/g;
+    const numMatches = [...rawHtml.matchAll(pageNumRegex)];
 
-    for (const m of matches) {
-      let rawUrl = m[0];
-      // Normalize escaped unicode e.g. \u0026 -> &
-      rawUrl = rawUrl.replace(/\\u0026/g, '&');
-      // Strip trailing backslashes, quotes or semicolons
-      const cleanUrl = rawUrl.replace(/\\+$/, '').replace(/[";]+$/, '').trim();
+    if (numMatches.length > 0) {
+      const sorted = numMatches
+        .map((m) => ({
+          page: parseInt(m[2], 10),
+          rawUrl: m[1],
+        }))
+        .sort((a, b) => a.page - b.page);
 
-      if (!seen.has(cleanUrl) && cleanUrl.includes('token=')) {
-        seen.add(cleanUrl);
-        uniqueUrls.push(cleanUrl);
-      }
-    }
+      for (const item of sorted) {
+        if (seenPages.has(item.page)) continue;
+        seenPages.add(item.page);
 
-    // 2. Fallback: match any media.philiascans.org URL
-    if (uniqueUrls.length === 0) {
-      for (const m of matches) {
-        let cleanUrl = m[0].replace(/\\u0026/g, '&').replace(/\\+$/, '').replace(/[";]+$/, '').trim();
-        if (!seen.has(cleanUrl)) {
-          seen.add(cleanUrl);
-          uniqueUrls.push(cleanUrl);
+        let u = item.rawUrl.replace(/\\u0026/g, '&').replace(/\\+$/, '').replace(/[";]+$/, '').trim();
+        if (!u.startsWith('http')) {
+          u = this.toAbsoluteUrl(u);
+        }
+        if (!seenUrls.has(u)) {
+          seenUrls.add(u);
+          pages.push({
+            index: pages.length,
+            url: u,
+            headers: {
+              Referer: 'https://philiascans.org/',
+              'User-Agent': DEFAULT_USER_AGENT,
+              Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+            },
+          });
         }
       }
     }
 
-    // 3. Fallback: match any general api/media/chapters/ and rewrite to media.philiascans.org
-    if (uniqueUrls.length === 0) {
-      const generalMatches = [...rawHtml.matchAll(/(https?:\/\/[^\s"'\\]+api\/media\/chapters\/[^\s"'\\]+)/g)];
-      for (const gm of generalMatches) {
-        let clean = gm[1].replace(/\\u0026/g, '&').replace(/\\+$/, '').replace(/[";]+$/, '').trim();
-        if (clean.startsWith('https://philiascans.org/api/media/chapters/')) {
-          clean = clean.replace('https://philiascans.org/', 'https://media.philiascans.org/');
+    // 2. Secondary pass: Any additional media URLs in document order (spreads, fillers, etc.)
+    const tokenRegex =
+      /(?:https?:\/\/philiascans\.org)?(\/api\/media\/[a-zA-Z0-9_\/.-]+\?token=[a-zA-Z0-9]+(?:\\u0026|[^\s"'\\])*)/g;
+    const allMatches = [...rawHtml.matchAll(tokenRegex)];
+
+    for (const m of allMatches) {
+      let u = m[1].replace(/\\u0026/g, '&').replace(/\\+$/, '').replace(/[";]+$/, '').trim();
+      if (u.includes('/covers/') || u.includes('/avatars/') || u.includes('/assets/')) {
+        continue;
+      }
+      if (!u.startsWith('http')) {
+        u = this.toAbsoluteUrl(u);
+      }
+      if (!seenUrls.has(u)) {
+        seenUrls.add(u);
+        pages.push({
+          index: pages.length,
+          url: u,
+          headers: {
+            Referer: 'https://philiascans.org/',
+            'User-Agent': DEFAULT_USER_AGENT,
+            Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+          },
+        });
+      }
+    }
+
+    // 3. Fallback: match any legacy CDN URLs
+    if (pages.length === 0) {
+      const cdnRegex = /https?:\/\/(?:media\.)?philiascans\.org\/api\/media\/[^\s"']+(?=\\"|")/g;
+      const legacyMatches = [...rawHtml.matchAll(cdnRegex)];
+      for (const lm of legacyMatches) {
+        let u = lm[0].replace(/\\u0026/g, '&').replace(/\\+$/, '').replace(/[";]+$/, '').trim();
+        if (u.includes('/covers/') || u.includes('/avatars/') || u.includes('/assets/')) continue;
+        if (!u.startsWith('http')) {
+          u = this.toAbsoluteUrl(u);
         }
-        if (!seen.has(clean)) {
-          seen.add(clean);
-          uniqueUrls.push(clean);
+        if (!seenUrls.has(u)) {
+          seenUrls.add(u);
+          pages.push({
+            index: pages.length,
+            url: u,
+            headers: {
+              Referer: 'https://philiascans.org/',
+              'User-Agent': DEFAULT_USER_AGENT,
+              Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+            },
+          });
         }
       }
     }
 
-    if (uniqueUrls.length === 0) {
+    if (pages.length === 0) {
       const lower = rawHtml.toLowerCase();
       if (
         lower.includes('unlock this chapter with coins') ||
@@ -520,17 +565,6 @@ export class PhiliaScansParser extends BaseParser {
         );
       }
     }
-
-    uniqueUrls.forEach((imgUrl, index) => {
-      pages.push({
-        index,
-        url: imgUrl,
-        headers: {
-          Referer: 'https://philiascans.org/',
-          'User-Agent': DEFAULT_USER_AGENT,
-        },
-      });
-    });
 
     return pages;
   }

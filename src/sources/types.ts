@@ -121,6 +121,11 @@ export interface MangaParser {
   getRequestHeaders?(): Record<string, string>;
 
   /**
+   * Returns headers specifically configured for image loading (Accept, Referer)
+   */
+  getImageHeaders?(): Record<string, string>;
+
+  /**
    * Returns supported tags/genres for catalog browsing
    */
   getAvailableTags?(): Promise<SourceTag[]> | SourceTag[];

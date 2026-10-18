@@ -9,6 +9,8 @@ import {
   getMangaDetails as getMangaDexDetails,
   getMangaChapters as getMangaDexChapters,
   getChapterPages as getMangaDexPages,
+  extractCoverFileName,
+  getMangaTitle,
 } from '../api/mangadex';
 import { CacheManager } from '../utils/cacheManager';
 import type { Manga, Chapter } from '../types';
@@ -27,7 +29,13 @@ export function isExternalSource(idOrUrl: string): boolean {
   );
   if (isMangaDexUuid) return false;
 
-  return idOrUrl.includes(':') || idOrUrl.startsWith('http://') || idOrUrl.startsWith('https://');
+  return (
+    idOrUrl.includes(':') ||
+    idOrUrl.startsWith('http://') ||
+    idOrUrl.startsWith('https://') ||
+    idOrUrl.startsWith('/') ||
+    idOrUrl.includes('/')
+  );
 }
 
 /**
@@ -140,11 +148,24 @@ export function sourceChapterToAppChapter(c: SourceChapter): Chapter {
  * Universal Manga Details Fetcher
  * Automatically dispatches to either MangaDex or the corresponding Kotatsu extension
  */
-export async function getUniversalMangaDetails(mangaId: string): Promise<Manga> {
+export async function getUniversalMangaDetails(
+  mangaId: string,
+  initialCoverUrl?: string | null,
+  initialTitle?: string | null
+): Promise<Manga> {
   const cacheKey = `manga_details_${mangaId}`;
   const cached = await CacheManager.get<Manga>(cacheKey);
   if (cached) {
-    return cached;
+    const cachedCover = extractCoverFileName(cached);
+    const cachedTitle = getMangaTitle(cached);
+    const isCorruptedSpa =
+      !cachedTitle ||
+      cachedTitle.toLowerCase().includes('read manga online free') ||
+      cachedTitle.toLowerCase().includes('mangafire -');
+
+    if (!isCorruptedSpa && (cachedCover || !initialCoverUrl)) {
+      return cached;
+    }
   }
 
   let result: Manga;
@@ -160,15 +181,27 @@ export async function getUniversalMangaDetails(mangaId: string): Promise<Manga> 
     const dummyManga: SourceManga = {
       id: mangaId,
       sourceId: resolved.parser.metadata.id,
-      title: '',
+      title: initialTitle || '',
       url: resolved.rawId,
       publicUrl: resolved.rawId.startsWith('http')
         ? resolved.rawId
+        : resolved.parser.metadata.id === 'reimanga'
+        ? `${resolved.parser.metadata.baseUrl}/manga/${resolved.rawId.replace(/^(?:reimanga:)?(?:\/manga\/)?/, '').replace(/^\/+/, '')}`
         : `${resolved.parser.metadata.baseUrl}/${resolved.rawId.replace(/^\/+/, '')}`,
-      coverUrl: null,
+      coverUrl: initialCoverUrl || null,
+      coverHeaders: resolved.parser.getImageHeaders ? resolved.parser.getImageHeaders() : undefined,
     };
 
     const detailed = await resolved.parser.getDetails(dummyManga);
+
+    // Safeguard: Ensure coverUrl and title are preserved from initial values if detailed is missing them
+    if (!detailed.coverUrl && initialCoverUrl) {
+      detailed.coverUrl = initialCoverUrl;
+    }
+    if (!detailed.title && initialTitle) {
+      detailed.title = initialTitle;
+    }
+
     result = sourceMangaToAppManga(detailed);
   }
 
@@ -207,6 +240,8 @@ export async function getUniversalMangaChapters(mangaId: string): Promise<Chapte
       url: resolved.rawId,
       publicUrl: resolved.rawId.startsWith('http')
         ? resolved.rawId
+        : resolved.parser.metadata.id === 'reimanga'
+        ? `${resolved.parser.metadata.baseUrl}/manga/${resolved.rawId.replace(/^(?:reimanga:)?(?:\/manga\/)?/, '').replace(/^\/+/, '')}`
         : `${resolved.parser.metadata.baseUrl}/${resolved.rawId.replace(/^\/+/, '')}`,
       coverUrl: null,
     };
@@ -232,6 +267,18 @@ export async function getUniversalChapterPages(
     cacheKey
   );
   if (cached && cached.pages && cached.pages.length > 0) {
+    const hasRelative = cached.pages.some((p) => !p.startsWith('http') && !p.startsWith('data:'));
+    if (hasRelative) {
+      const resolved = SourceManager.resolveSource(chapterId);
+      const base = resolved?.parser.metadata.baseUrl?.replace(/\/+$/, '') || 'https://philiascans.org';
+      cached.pages = cached.pages.map((p) => {
+        if (!p.startsWith('http') && !p.startsWith('data:')) {
+          return `${base}/${p.replace(/^\/+/, '')}`;
+        }
+        return p;
+      });
+      await CacheManager.set(cacheKey, cached, 24 * 60 * 60 * 1000);
+    }
     return cached;
   }
 
@@ -250,17 +297,82 @@ export async function getUniversalChapterPages(
       throw new Error(`Unable to resolve chapter source for: ${chapterId}`);
     }
 
+    let reconstructedUrl = resolved.rawId;
+    const rawParts = resolved.rawId.split(':');
+    const sourceId = resolved.parser.metadata.id;
+
+    if (sourceId === 'projectsuki' && rawParts.length >= 2) {
+      reconstructedUrl = `/read/${rawParts[0]}/${rawParts[1]}/1`;
+    } else if (sourceId === 'mangaball' && rawParts.length >= 2) {
+      reconstructedUrl = `/chapter-detail/${rawParts[1]}`;
+    } else if (sourceId === 'atsumaru' && rawParts.length >= 2) {
+      reconstructedUrl = `/read/${rawParts[0]}/${rawParts[1]}`;
+    } else if (sourceId === 'mangago' && rawParts.length >= 2) {
+      const slug = rawParts[0];
+      if (rawParts.length >= 3) {
+        // e.g. ["shutline", "uu", "br_chapter-449456"] or ["cherry_blossoms_after_winter", "nbt", "br_chapter-451165"]
+        const sec = rawParts[1];
+        let fol = rawParts[2];
+        if (/^\d+$/.test(fol)) fol = `br_chapter-${fol}`;
+        reconstructedUrl = `/read-manga/${slug}/${sec}/${fol}/pg-1/`;
+      } else {
+        let token = rawParts[1];
+        if (/^\d+$/.test(token)) {
+          token = `br_chapter-${token}`;
+        }
+        if (token.includes('/')) {
+          reconstructedUrl = `/read-manga/${slug}/${token.replace(/^\/+/, '').replace(/\/$/, '')}/pg-1/`;
+        } else {
+          reconstructedUrl = `/read-manga/${slug}/uu/${token}/pg-1/`;
+        }
+      }
+      reconstructedUrl = reconstructedUrl.replace(/\/pg-\d+\/pg-\d+\/?$/, '/pg-1/').replace(/\/?$/, '/');
+    } else if (sourceId === 'weebcentral') {
+      const cleanRaw = resolved.rawId.replace(/^weebcentral:/, '');
+      const token = rawParts.length >= 2 ? rawParts[rawParts.length - 1] : cleanRaw;
+      reconstructedUrl = token.startsWith('/') ? token : `/chapters/${token}`;
+    } else if (sourceId === 'mangak') {
+      const cleanRaw = resolved.rawId.replace(/^mangak:/, '');
+      reconstructedUrl = cleanRaw.startsWith('/') ? cleanRaw : `/${cleanRaw}`;
+    } else if (sourceId === 'onisaga') {
+      const cleanRaw = resolved.rawId.replace(/^onisaga:/, '');
+      if (rawParts.length >= 2) {
+        reconstructedUrl = `/read/${rawParts[0]}/${rawParts[1]}`;
+      } else {
+        reconstructedUrl = cleanRaw.startsWith('/') ? cleanRaw : `/read/${cleanRaw.replace(/^read\//, '')}`;
+      }
+    } else if (sourceId === 'toonkotsu') {
+      const cleanRaw = resolved.rawId.replace(/^toonkotsu:/, '');
+      reconstructedUrl = cleanRaw.startsWith('/') ? cleanRaw : `/${cleanRaw}`;
+    } else if (sourceId === 'reimanga') {
+      if (rawParts.length >= 2) {
+        const mangaSlug = rawParts[0].replace(/^(?:reimanga:)?(?:\/manga\/)?/, '').replace(/^\/+/, '');
+        const chToken = rawParts[rawParts.length - 1];
+        reconstructedUrl = `/manga/${mangaSlug}/${chToken}`;
+      } else {
+        const clean = resolved.rawId.replace(/^reimanga:/, '').replace(/^\/+/, '');
+        reconstructedUrl = clean.startsWith('manga/') ? `/${clean}` : `/manga/${clean}`;
+      }
+    }
+
     const dummyChapter: SourceChapter = {
       id: chapterId,
       sourceId: resolved.parser.metadata.id,
-      mangaId: '',
-      url: resolved.rawId,
+      mangaId: rawParts.length >= 2 ? rawParts[0] : '',
+      url: reconstructedUrl,
       name: '',
       number: 0,
     };
 
     const sourcePages = await resolved.parser.getPages(dummyChapter);
-    const pages = sourcePages.map((p) => p.url);
+    const base = resolved.parser.metadata.baseUrl?.replace(/\/+$/, '') || '';
+    const pages = sourcePages.map((p) => {
+      let u = p.url;
+      if (u && !u.startsWith('http') && !u.startsWith('data:') && base) {
+        u = `${base}/${u.replace(/^\/+/, '')}`;
+      }
+      return u;
+    });
     const headers = sourcePages[0]?.headers || (resolved.parser as any).getRequestHeaders?.();
 
     result = {
@@ -271,7 +383,10 @@ export async function getUniversalChapterPages(
   }
 
   if (result && result.pages && result.pages.length > 0) {
-    await CacheManager.set(cacheKey, result, 24 * 60 * 60 * 1000); // 24 hours TTL
+    const isPlaceholderOnly = result.pages.every((p) => p.includes('placeholder') || p.includes('logo-new-g'));
+    if (!isPlaceholderOnly) {
+      await CacheManager.set(cacheKey, result, 24 * 60 * 60 * 1000); // 24 hours TTL
+    }
   }
 
   return result;

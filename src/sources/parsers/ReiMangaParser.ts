@@ -104,7 +104,10 @@ export class ReiMangaParser extends BaseParser {
         if (json?.data && Array.isArray(json.data) && json.data.length > 0) {
           return json.data.map((item: any) => this.mapApiItemToManga(item));
         }
-      } catch {
+      } catch (err: any) {
+        if (err?.isCloudFlare || err?.name === 'CloudFlareError') {
+          throw err;
+        }
         // Fallback to HTML scraping below
       }
 
@@ -129,7 +132,10 @@ export class ReiMangaParser extends BaseParser {
       if (items && Array.isArray(items) && items.length > 0) {
         return items.map((item: any) => this.mapApiItemToManga(item));
       }
-    } catch {
+    } catch (err: any) {
+      if (err?.isCloudFlare || err?.name === 'CloudFlareError') {
+        throw err;
+      }
       // Fallback to HTML scraping
     }
 
@@ -152,8 +158,11 @@ export class ReiMangaParser extends BaseParser {
           const genres = Array.isArray(m.genres) ? m.genres.map((g: any) => g.name).filter(Boolean) : [];
           const authors = Array.isArray(m.authors) ? m.authors.map((a: any) => a.name).filter(Boolean) : [];
 
+          const seriesUrl = this.toSeriesUrl(manga.url || manga.id);
           return {
             ...manga,
+            url: seriesUrl,
+            publicUrl: seriesUrl,
             title: m.title || manga.title,
             altTitles: m.alt_title ? [m.alt_title] : manga.altTitles,
             description: this.cleanText(m.description || m.ai_description || manga.description),
@@ -235,7 +244,10 @@ export class ReiMangaParser extends BaseParser {
         authors: authors.length ? authors : manga.authors,
         coverUrl: cover ? this.toAbsoluteUrl(cover) : manga.coverUrl,
       };
-    } catch {
+    } catch (err: any) {
+      if (err?.isCloudFlare || err?.name === 'CloudFlareError' || err?.status === 403) {
+        throw err;
+      }
       return manga;
     }
   }
@@ -243,42 +255,53 @@ export class ReiMangaParser extends BaseParser {
   public async getChapters(manga: SourceManga): Promise<SourceChapter[]> {
     const numericId = this.extractNumericId(manga.url || manga.id);
     const slug = this.extractSlug(manga.url || manga.id);
-    let chapterCount = 0;
 
-    // 1. Try to get chapters from JSON API
+    // 1. Try to get chapters from JSON API: /api/chapters/manga/{numericId}
     if (numericId) {
       try {
         const json = await sourceHttpClient.fetchJson<any>(
-          `${this.metadata.baseUrl}/api/manga/${numericId}`,
+          `${this.metadata.baseUrl}/api/chapters/manga/${numericId}`,
           { headers: this.getRequestHeaders() }
         );
-        if (json?.manga?.chapter_count) {
-          chapterCount = parseInt(json.manga.chapter_count, 10) || 0;
-        }
 
-        const apiChapters = Array.isArray(json?.chapters)
+        const apiChapters = Array.isArray(json?.data)
+          ? json.data
+          : Array.isArray(json?.chapters)
           ? json.chapters
-          : Array.isArray(json?.manga?.chapters)
-          ? json.manga.chapters
+          : Array.isArray(json)
+          ? json
           : [];
 
         if (apiChapters.length > 0) {
-          return apiChapters.map((ch: any, idx: number) => {
-            const chNum = typeof ch.number === 'number' ? ch.number : parseFloat(ch.chapter || ch.name || `${idx + 1}`) || idx + 1;
-            const chSlug = ch.slug || ch.id || String(chNum);
+          const chapters: SourceChapter[] = apiChapters.map((ch: any, idx: number) => {
+            const rawNum =
+              typeof ch.chapter_number === 'string'
+                ? parseFloat(ch.chapter_number)
+                : typeof ch.chapter_number === 'number'
+                ? ch.chapter_number
+                : typeof ch.number === 'number'
+                ? ch.number
+                : parseFloat(ch.chapter || ch.name || '');
+            const chNum = !isNaN(rawNum) ? rawNum : (idx + 1);
+            const chId = ch.id ? String(ch.id) : String(chNum);
+            const chSlug = ch.chapter_number != null ? String(ch.chapter_number) : chId;
             return {
-              id: `${this.metadata.id}:${slug}:${chSlug}`,
+              id: `${this.metadata.id}:${slug}:${chId}`,
               sourceId: this.metadata.id,
               mangaId: manga.id,
               url: `${this.metadata.baseUrl}/manga/${slug}/${chSlug}`,
-              name: ch.title || ch.name || `Chapter ${chNum}`,
+              name: ch.name || ch.title || `Chapter ${chSlug}`,
               number: chNum,
               dateUpload: ch.created_at ? Date.parse(ch.created_at) : undefined,
             };
           });
+
+          return chapters.sort((a, b) => (b.number ?? 0) - (a.number ?? 0));
         }
-      } catch {
-        // Ignore and continue
+      } catch (err: any) {
+        if (err?.isCloudFlare || err?.name === 'CloudFlareError') {
+          throw err;
+        }
       }
     }
 
@@ -295,18 +318,27 @@ export class ReiMangaParser extends BaseParser {
           const chList = parsed?.props?.pageProps?.chapters || parsed?.props?.pageProps?.manga?.chapters;
           if (Array.isArray(chList) && chList.length > 0) {
             return chList.map((ch: any, idx: number) => {
-              const chNum = typeof ch.number === 'number' ? ch.number : parseFloat(ch.chapter || ch.name || `${idx + 1}`) || idx + 1;
-              const chSlug = ch.slug || ch.id || String(chNum);
+              const rawNum =
+                typeof ch.chapter_number === 'string'
+                  ? parseFloat(ch.chapter_number)
+                  : typeof ch.chapter_number === 'number'
+                  ? ch.chapter_number
+                  : typeof ch.number === 'number'
+                  ? ch.number
+                  : parseFloat(ch.chapter || ch.name || '');
+              const chNum = !isNaN(rawNum) ? rawNum : (idx + 1);
+              const chId = ch.id ? String(ch.id) : String(chNum);
+              const chSlug = ch.chapter_number != null ? String(ch.chapter_number) : (ch.slug || chId);
               return {
-                id: `${this.metadata.id}:${slug}:${chSlug}`,
+                id: `${this.metadata.id}:${slug}:${chId}`,
                 sourceId: this.metadata.id,
                 mangaId: manga.id,
                 url: `${this.metadata.baseUrl}/manga/${slug}/${chSlug}`,
-                name: ch.title || ch.name || `Chapter ${chNum}`,
+                name: ch.title || ch.name || `Chapter ${chSlug}`,
                 number: chNum,
                 dateUpload: ch.created_at ? Date.parse(ch.created_at) : undefined,
               };
-            });
+            }).sort((a, b) => (b.number ?? 0) - (a.number ?? 0));
           }
         } catch {}
       }
@@ -315,7 +347,7 @@ export class ReiMangaParser extends BaseParser {
       const seen = new Set<string>();
 
       $('a[href*="/manga/"]').each((_, el) => {
-        const href = el.attr('href') || '';
+        const href = $(el).attr('href') || '';
         // Look for chapter link e.g. /manga/{slug}-{id}/{chapterNum}
         const m = href.match(/\/manga\/[^/]+\/([0-9.]+)/i);
         if (!m) return;
@@ -324,7 +356,7 @@ export class ReiMangaParser extends BaseParser {
         seen.add(chNumStr);
 
         const chNum = parseFloat(chNumStr) || 0;
-        const titleText = this.cleanText(el.text()) || `Chapter ${chNumStr}`;
+        const titleText = this.cleanText($(el).text()) || `Chapter ${chNumStr}`;
 
         chapters.push({
           id: `${this.metadata.id}:${slug}:${chNumStr}`,
@@ -337,27 +369,13 @@ export class ReiMangaParser extends BaseParser {
       });
 
       if (chapters.length > 0) {
-        chapters.sort((a, b) => (b.number || 0) - (a.number || 0));
+        chapters.sort((a, b) => (b.number ?? 0) - (a.number ?? 0));
         return chapters;
       }
-    } catch {
-      // HTML scraping failed
-    }
-
-    // 3. If HTML was blocked but we know chapterCount from API, generate chapter stubs
-    if (chapterCount > 0 && slug) {
-      const generatedChapters: SourceChapter[] = [];
-      for (let i = chapterCount; i >= 1; i--) {
-        generatedChapters.push({
-          id: `${this.metadata.id}:${slug}:${i}`,
-          sourceId: this.metadata.id,
-          mangaId: manga.id,
-          url: `${this.metadata.baseUrl}/manga/${slug}/${i}`,
-          name: `Chapter ${i}`,
-          number: i,
-        });
+    } catch (err: any) {
+      if (err?.isCloudFlare || err?.name === 'CloudFlareError' || err?.status === 403) {
+        throw err;
       }
-      return generatedChapters;
     }
 
     return [];
@@ -365,31 +383,168 @@ export class ReiMangaParser extends BaseParser {
 
   private toSeriesUrl(input: string): string {
     if (!input) return `${this.metadata.baseUrl}/latest-update`;
-    if (input.startsWith('http://') || input.startsWith('https://')) return input;
+    if (input.startsWith('http://') || input.startsWith('https://')) {
+      if (input.includes('/manga/')) return input;
+      try {
+        const u = new URL(input);
+        const cleanPath = u.pathname.replace(/^\/+/, '');
+        return `${this.metadata.baseUrl}/manga/${cleanPath}`;
+      } catch {
+        return input;
+      }
+    }
     const clean = input.replace(/^(?:reimanga:)?(?:\/manga\/)?/, '').replace(/^\/+/, '');
     return `${this.metadata.baseUrl}/manga/${clean}`;
   }
 
   public async getPages(chapter: SourceChapter): Promise<SourcePage[]> {
-    const $ = await this.fetchHtml(chapter.url);
-    const pages: SourcePage[] = [];
-    const seen = new Set<string>();
+    // 1. Direct REST API: /api/chapters/{chapterId}/images
+    const idParts = (chapter.id || '').split(':');
+    const chToken = idParts.length >= 3 ? idParts[2] : idParts[idParts.length - 1];
+    const urlParts = (chapter.url || '').split('/').filter(Boolean);
+    const lastUrlToken = urlParts[urlParts.length - 1] || '';
 
-    $('img[src*="covers/"], img[src*="reimanga.net"], img[src*="cdn"]').each((i, el) => {
-      const src = $(el).attr('src') || $(el).attr('data-src');
-      if (!src || src.includes('logo') || src.includes('icon') || src.includes('avatar')) return;
-      const absUrl = this.toAbsoluteUrl(src);
-      if (seen.has(absUrl)) return;
-      seen.add(absUrl);
+    // If chToken or lastUrlToken looks like a numeric chapter ID (e.g. 100080338 or 3384284 or 2761028)
+    const directChId =
+      (/^\d{5,}$/.test(chToken) && chToken) ||
+      (/^\d{5,}$/.test(lastUrlToken) && lastUrlToken) ||
+      '';
 
-      pages.push({
-        index: pages.length,
-        url: absUrl,
-        headers: this.getRequestHeaders(),
+    if (directChId) {
+      try {
+        const json = await sourceHttpClient.fetchJson<any>(
+          `${this.metadata.baseUrl}/api/chapters/${directChId}/images`,
+          { headers: this.getRequestHeaders() }
+        );
+        if (json?.images && Array.isArray(json.images) && json.images.length > 0) {
+          return json.images.map((img: any, idx: number) => ({
+            index: typeof img.page_number === 'number' ? img.page_number - 1 : idx,
+            url: this.toAbsoluteUrl(img.image_url || img.url || img.src),
+            headers: {
+              ...this.getRequestHeaders(),
+              Referer: `${this.metadata.baseUrl}/`,
+            },
+          }));
+        }
+      } catch (err: any) {
+        if (err?.isCloudFlare || err?.name === 'CloudFlareError') throw err;
+      }
+    }
+
+    // 2. If direct ID was missing or failed, but we have a chapter number (e.g. "39"),
+    // look it up in the manga's chapters list to find the real chapter ID
+    const candidateNum = chToken || lastUrlToken;
+    const mangaNumericId = this.extractNumericId(chapter.mangaId || chapter.id || chapter.url);
+
+    if (mangaNumericId && candidateNum) {
+      try {
+        const listJson = await sourceHttpClient.fetchJson<any>(
+          `${this.metadata.baseUrl}/api/chapters/manga/${mangaNumericId}`,
+          { headers: this.getRequestHeaders() }
+        );
+        const list = Array.isArray(listJson?.data) ? listJson.data : [];
+        const match = list.find(
+          (c: any) =>
+            String(c.id) === String(candidateNum) ||
+            String(c.chapter_number) === String(candidateNum) ||
+            parseFloat(c.chapter_number) === parseFloat(candidateNum)
+        );
+        if (match && match.id) {
+          const imgJson = await sourceHttpClient.fetchJson<any>(
+            `${this.metadata.baseUrl}/api/chapters/${match.id}/images`,
+            { headers: this.getRequestHeaders() }
+          );
+          if (imgJson?.images && Array.isArray(imgJson.images) && imgJson.images.length > 0) {
+            return imgJson.images.map((img: any, idx: number) => ({
+              index: typeof img.page_number === 'number' ? img.page_number - 1 : idx,
+              url: this.toAbsoluteUrl(img.image_url || img.url || img.src),
+              headers: {
+                ...this.getRequestHeaders(),
+                Referer: `${this.metadata.baseUrl}/`,
+              },
+            }));
+          }
+        }
+      } catch (err: any) {
+        if (err?.isCloudFlare || err?.name === 'CloudFlareError') throw err;
+      }
+    }
+
+    // 3. Fallback to HTML scraping
+    try {
+      const $ = await this.fetchHtml(chapter.url);
+      const pages: SourcePage[] = [];
+      const seen = new Set<string>();
+
+      // 3a. Try __NEXT_DATA__ Next.js hydration payload
+      const nextDataText = $('#__NEXT_DATA__').text();
+      if (nextDataText) {
+        try {
+          const parsed = JSON.parse(nextDataText);
+          const imgs =
+            parsed?.props?.pageProps?.chapter?.images ||
+            parsed?.props?.pageProps?.images ||
+            parsed?.props?.pageProps?.pages;
+          if (Array.isArray(imgs) && imgs.length > 0) {
+            return imgs.map((img: any, idx: number) => {
+              const rawUrl = typeof img === 'string' ? img : img.image_url || img.url || img.src || img.image;
+              return {
+                index: idx,
+                url: this.toAbsoluteUrl(rawUrl),
+                headers: {
+                  ...this.getRequestHeaders(),
+                  Referer: `${this.metadata.baseUrl}/`,
+                },
+              };
+            });
+          }
+        } catch {}
+      }
+
+      // 3b. DOM selectors - specifically exclude covers, logos, avatars, icons
+      $('img').each((i, el) => {
+        const src = $(el).attr('src') || $(el).attr('data-src') || $(el).attr('data-lazy-src');
+        if (!src) return;
+        if (
+          src.includes('logo') ||
+          src.includes('icon') ||
+          src.includes('avatar') ||
+          src.includes('/covers/') ||
+          src.includes('favicon')
+        ) {
+          return;
+        }
+        if (
+          !src.includes('reimanga.net') &&
+          !src.includes('samdech.xyz') &&
+          !src.includes('cdn') &&
+          !src.includes('storage') &&
+          !src.startsWith('/') &&
+          !src.startsWith('http')
+        ) {
+          return;
+        }
+        const absUrl = this.toAbsoluteUrl(src);
+        if (seen.has(absUrl)) return;
+        seen.add(absUrl);
+
+        pages.push({
+          index: pages.length,
+          url: absUrl,
+          headers: {
+            ...this.getRequestHeaders(),
+            Referer: `${this.metadata.baseUrl}/`,
+          },
+        });
       });
-    });
 
-    return pages;
+      return pages;
+    } catch (err: any) {
+      if (err?.isCloudFlare || err?.name === 'CloudFlareError' || err?.status === 403) {
+        throw err;
+      }
+      return [];
+    }
   }
 
   /**

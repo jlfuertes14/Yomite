@@ -4,6 +4,7 @@
  * Node standard library dependencies (node:stream) in Hermes / React Native.
  */
 import { parse, HTMLElement, Node } from 'node-html-parser';
+export { parse, HTMLElement, Node };
 
 export class HtmlElementWrapper {
   public readonly raw: HTMLElement | null;

@@ -54,6 +54,36 @@ export class SourceHttpClient {
     }
   }
 
+  private prepareHeaders(
+    url: string,
+    baseHeaders: Record<string, string | undefined>
+  ): Record<string, string> {
+    const headers: Record<string, string> = {};
+    for (const [k, v] of Object.entries(baseHeaders)) {
+      if (typeof v === 'string') headers[k] = v;
+    }
+
+    if (Platform.OS === 'web') {
+      const forbidden = [
+        'user-agent',
+        'referer',
+        'cookie',
+        'host',
+        'origin',
+        'connection',
+      ];
+      for (const key of Object.keys(headers)) {
+        if (forbidden.includes(key.toLowerCase())) {
+          delete headers[key];
+        }
+      }
+      return headers;
+    }
+
+    this.applyCookies(url, headers);
+    return headers;
+  }
+
   /**
    * Fetches an HTML page and returns a ready-to-query HTML parser instance ($)
    */
@@ -85,7 +115,7 @@ export class SourceHttpClient {
       }
     }
 
-    const headers: Record<string, string> = {
+    const headers = this.prepareHeaders(url, {
       'User-Agent': DEFAULT_USER_AGENT,
       Accept:
         'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
@@ -94,9 +124,7 @@ export class SourceHttpClient {
       Pragma: 'no-cache',
       ...(options.referer ? { Referer: options.referer } : {}),
       ...(options.headers as Record<string, string>),
-    };
-
-    this.applyCookies(url, headers);
+    });
 
     try {
       const response: AxiosResponse<string> = await axios.get(url, {
@@ -210,14 +238,12 @@ export class SourceHttpClient {
       }
     }
 
-    const headers: Record<string, string> = {
+    const headers = this.prepareHeaders(url, {
       'User-Agent': DEFAULT_USER_AGENT,
       Accept: 'application/json, text/plain, */*',
       ...(options.referer ? { Referer: options.referer } : {}),
       ...(options.headers as Record<string, string>),
-    };
-
-    this.applyCookies(url, headers);
+    });
 
     try {
       const response = await axios.get<T>(url, {
@@ -281,14 +307,12 @@ export class SourceHttpClient {
     const startTime = Date.now();
     const sourceId = options.sourceId || 'Source';
 
-    const headers: Record<string, string> = {
+    const headers = this.prepareHeaders(url, {
       'User-Agent': DEFAULT_USER_AGENT,
       Accept: 'text/plain, application/javascript, */*',
       ...(options.referer ? { Referer: options.referer } : {}),
       ...(options.headers as Record<string, string>),
-    };
-
-    this.applyCookies(url, headers);
+    });
 
     try {
       const response = await axios.get<string>(url, {
@@ -353,13 +377,11 @@ export class SourceHttpClient {
     const startTime = Date.now();
     const sourceId = options.sourceId || 'Source';
 
-    const headers: Record<string, string> = {
+    const headers = this.prepareHeaders(url, {
       'User-Agent': DEFAULT_USER_AGENT,
       ...(options.referer ? { Referer: options.referer } : {}),
       ...(options.headers as Record<string, string>),
-    };
-
-    this.applyCookies(url, headers);
+    });
 
     try {
       const response = await axios.get(url, {
@@ -403,15 +425,13 @@ export class SourceHttpClient {
     data: any,
     options: RequestOptions = {}
   ): Promise<string> {
-    const headers: Record<string, string> = {
+    const headers = this.prepareHeaders(url, {
       'User-Agent': DEFAULT_USER_AGENT,
       'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
       'X-Requested-With': 'XMLHttpRequest',
       ...(options.referer ? { Referer: options.referer } : {}),
       ...(options.headers as Record<string, string>),
-    };
-
-    this.applyCookies(url, headers);
+    });
 
     const startTime = Date.now();
     const sourceId = options.sourceId || 'Source';
@@ -443,6 +463,98 @@ export class SourceHttpClient {
       });
       throw err;
     }
+  }
+
+  /**
+   * Performs an HTTP POST request sending JSON payload
+   */
+  public async postJson<T = any>(
+    url: string,
+    data: any = {},
+    options: RequestOptions = {}
+  ): Promise<T> {
+    const startTime = Date.now();
+    const sourceId = options.sourceId || 'Source';
+
+    const headers = this.prepareHeaders(url, {
+      'User-Agent': DEFAULT_USER_AGENT,
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/plain, */*',
+      ...(options.referer ? { Referer: options.referer } : {}),
+      ...(options.headers as Record<string, string>),
+    });
+
+    try {
+      const response = await axios.post<T>(url, data, {
+        timeout: 15000,
+        ...options,
+        headers,
+      });
+
+      if (!options.silent) {
+        ApiLogger.logRequest({
+          timestamp: Date.now(),
+          method: `POST_JSON:${sourceId}`,
+          url,
+          status: response.status,
+          durationMs: Date.now() - startTime,
+        });
+      }
+
+      return response.data;
+    } catch (err: any) {
+      if (!options.silent) {
+        ApiLogger.logRequest({
+          timestamp: Date.now(),
+          method: `POST_JSON:${sourceId}`,
+          url,
+          status: err.response?.status || null,
+          durationMs: Date.now() - startTime,
+          error: err.message,
+        });
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Convenience wrapper around axios.get returning full AxiosResponse
+   */
+  public async get<T = any>(
+    url: string,
+    options: RequestOptions = {}
+  ): Promise<AxiosResponse<T>> {
+    const headers = this.prepareHeaders(url, {
+      'User-Agent': DEFAULT_USER_AGENT,
+      ...(options.referer ? { Referer: options.referer } : {}),
+      ...(options.headers as Record<string, string>),
+    });
+    return axios.get<T>(url, {
+      timeout: 15000,
+      ...options,
+      headers,
+    });
+  }
+
+  /**
+   * Convenience wrapper around axios.post returning full AxiosResponse
+   */
+  public async post<T = any>(
+    url: string,
+    data: any = {},
+    options: RequestOptions = {}
+  ): Promise<AxiosResponse<T>> {
+    const headers = this.prepareHeaders(url, {
+      'User-Agent': DEFAULT_USER_AGENT,
+      'Content-Type': 'application/json',
+      ...(options.referer ? { Referer: options.referer } : {}),
+      ...(options.headers as Record<string, string>),
+    });
+    return axios.post<T>(url, data, {
+      timeout: 15000,
+      ...options,
+      headers,
+    });
   }
 }
 
