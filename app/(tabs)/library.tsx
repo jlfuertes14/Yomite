@@ -1388,7 +1388,6 @@ const styles = StyleSheet.create({
     borderWidth: 0,
   },
   tabPillInactive: {
-    backgroundColor: '#18181C',
     borderWidth: 0,
   },
   tabLabel: {

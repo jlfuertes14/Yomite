@@ -765,6 +765,7 @@ function SourceGridCell({
   source,
   colors,
   exploding,
+  isDefault,
   onPress,
   onLongPress,
 }: {
@@ -779,6 +780,7 @@ function SourceGridCell({
   };
   colors: any;
   exploding: boolean;
+  isDefault?: boolean;
   onPress: () => void;
   onLongPress: (layout?: { x: number; y: number; width: number; height: number }) => void;
 }) {
@@ -1041,6 +1043,12 @@ function SourceGridCell({
           />
         </Animated.View>
 
+        {isDefault && (
+          <View style={styles.primaryBadgeContainer} accessibilityLabel="Primary Discover Source">
+            <Ionicons name="star" size={10} color="#FFFFFF" />
+          </View>
+        )}
+
         {/* Light-gray impact flash washing over the tile background */}
         {exploding && (
           <Animated.View
@@ -1133,6 +1141,8 @@ export default function ExtensionsScreen() {
 
   // Installed Sources on the 4-column grid (Image 1)
   const [installedIds, setInstalledIds] = useState<string[]>(DEFAULT_INSTALLED_IDS);
+  const [defaultSourceId, setDefaultSourceId] = useState<string>('mangadex');
+  const [advancedSearchVisible, setAdvancedSearchVisible] = useState(false);
 
   // Source Card Action Floating Bar state (Long Press on Grid Card)
   const [sourceActionModalVisible, setSourceActionModalVisible] = useState(false);
@@ -1400,6 +1410,7 @@ export default function ExtensionsScreen() {
     (async () => {
       try {
         await SourceManager.init();
+        setDefaultSourceId(SourceManager.getDefaultDiscoverSourceId());
         const stored = await AsyncStorage.getItem(STORAGE_KEY_INSTALLED_SOURCES);
         if (stored) {
           const parsed = JSON.parse(stored);
@@ -1524,6 +1535,15 @@ export default function ExtensionsScreen() {
       pendingRemovalTimeout.current = null;
     }, 600);
   }, [selectedSourceForAction, explodingId]);
+
+  const handleSetPrimarySourceFromFab = useCallback(async () => {
+    if (!selectedSourceForAction) return;
+    triggerHaptic();
+    const srcId = selectedSourceForAction.id;
+    await SourceManager.setDefaultDiscoverSourceId(srcId);
+    setDefaultSourceId(srcId);
+    dismissFab();
+  }, [selectedSourceForAction, dismissFab]);
 
   // All 1,223 catalog items
   const allCatalog = useMemo(() => SourceManager.getCatalog(), []);
@@ -2112,6 +2132,7 @@ export default function ExtensionsScreen() {
                     source={source}
                     colors={colors}
                     exploding={explodingId === source.id}
+                    isDefault={source.id === defaultSourceId}
                     onPress={() => {
                       if (explodingId) return;
                       handleOpenMangaModal(source);
@@ -2183,7 +2204,30 @@ export default function ExtensionsScreen() {
                   <Ionicons name="book-outline" size={20} color={isDark ? '#F4F4F5' : '#18181B'} />
                 </Pressable>
 
-                {/* 2. Remove / Delete Button (-) */}
+                {/* 2. Set as Primary Discover Source Button */}
+                <Pressable
+                  onPress={handleSetPrimarySourceFromFab}
+                  style={({ pressed }) => [
+                    styles.fabActionButton,
+                    pressed && {
+                      opacity: 0.7,
+                      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.10)' : 'rgba(0, 0, 0, 0.06)',
+                      transform: [{ scale: 0.92 }],
+                    },
+                    Platform.OS === 'web' && { cursor: 'pointer' as any },
+                  ]}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Set ${selectedSourceForAction.name} as primary discover source`}
+                >
+                  <Ionicons
+                    name={selectedSourceForAction.id === defaultSourceId ? 'star' : 'star-outline'}
+                    size={20}
+                    color={selectedSourceForAction.id === defaultSourceId ? '#EAB308' : isDark ? '#F4F4F5' : '#18181B'}
+                  />
+                </Pressable>
+
+                {/* 3. Remove / Delete Button (-) */}
                 <Pressable
                   onPress={handleRemoveSourceFromGrid}
                   style={({ pressed }) => [
@@ -2418,6 +2462,28 @@ export default function ExtensionsScreen() {
 
                     {/* Right: Actions */}
                     <View style={styles.sourceListActionBox}>
+                      <Pressable
+                        onPress={async () => {
+                          triggerHaptic();
+                          await SourceManager.setDefaultDiscoverSourceId(item.id);
+                          setDefaultSourceId(item.id);
+                          if (!isInstalled) {
+                            handleToggleInstallSource(item.id);
+                          }
+                        }}
+                        hitSlop={8}
+                        style={styles.sourceListGlobeBtn}
+                        aria-label={`Set ${item.title} as primary discover source`}
+                      >
+                        <Ionicons
+                          name={item.id === defaultSourceId ? 'star' : 'star-outline'}
+                          size={18}
+                          color={item.id === defaultSourceId ? '#EAB308' : colors.textSecondary}
+                        />
+                      </Pressable>
+
+                      <View style={[styles.verticalSeparator, { backgroundColor: colors.border }]} />
+
                       <Pressable
                         onPress={() => {
                           triggerHaptic();
@@ -2711,31 +2777,55 @@ export default function ExtensionsScreen() {
                   {activeMangaSource.name}
                 </Text>
 
-                {/* Sort Order Selector Button: e.g. "Popular ⏷" */}
-                <Pressable
-                  onPress={() => {
-                    triggerHaptic();
-                    setSortPickerVisible((prev) => !prev);
-                  }}
-                  style={[
-                    styles.sortFilterBtn,
-                    {
-                      backgroundColor: sortPickerVisible ? colors.surfaceElevated : colors.surface,
-                      borderWidth: 0,
-                    },
-                  ]}
-                  aria-label="Change Sort Order"
-                >
-                  <Ionicons name="filter-outline" size={14} color={colors.textSecondary} />
-                  <Text style={[styles.sortFilterText, { color: colors.text }]}>
-                    {availableSorts.find((s) => s.id === selectedSort)?.label || selectedSort || 'Popular'}
-                  </Text>
-                  <Ionicons
-                    name={sortPickerVisible ? 'chevron-up' : 'chevron-down'}
-                    size={14}
-                    color={colors.textSecondary}
-                  />
-                </Pressable>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  {activeMangaSource?.id === 'mangadex' && (
+                    <Pressable
+                      onPress={() => {
+                        triggerHaptic();
+                        setAdvancedSearchVisible(true);
+                      }}
+                      style={[
+                        styles.sortFilterBtn,
+                        {
+                          backgroundColor: colors.surfaceElevated,
+                          borderWidth: 0,
+                        },
+                      ]}
+                      aria-label="Open MangaDex Filters Modal"
+                    >
+                      <Ionicons name="options-outline" size={14} color={colors.accent} />
+                      <Text style={[styles.sortFilterText, { color: colors.accent, fontWeight: '600' }]}>
+                        Filters
+                      </Text>
+                    </Pressable>
+                  )}
+
+                  {/* Sort Order Selector Button: e.g. "Popular ⏷" */}
+                  <Pressable
+                    onPress={() => {
+                      triggerHaptic();
+                      setSortPickerVisible((prev) => !prev);
+                    }}
+                    style={[
+                      styles.sortFilterBtn,
+                      {
+                        backgroundColor: sortPickerVisible ? colors.surfaceElevated : colors.surface,
+                        borderWidth: 0,
+                      },
+                    ]}
+                    aria-label="Change Sort Order"
+                  >
+                    <Ionicons name="filter-outline" size={14} color={colors.textSecondary} />
+                    <Text style={[styles.sortFilterText, { color: colors.text }]}>
+                      {availableSorts.find((s) => s.id === selectedSort)?.label || selectedSort || 'Popular'}
+                    </Text>
+                    <Ionicons
+                      name={sortPickerVisible ? 'chevron-up' : 'chevron-down'}
+                      size={14}
+                      color={colors.textSecondary}
+                    />
+                  </Pressable>
+                </View>
               </View>
 
               {/* Dynamic Genre / Tag / Category Filter Chips fetched from Source */}

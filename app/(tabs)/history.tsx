@@ -318,9 +318,12 @@ export default function HistoryScreen() {
   const clearHistory = useHistoryStore((s) => s.clearHistory);
   const cleanDuplicates = useHistoryStore((s) => s.cleanDuplicates);
 
-  // Clean existing historical duplicates from persistent store on mount
+  // Clean existing historical duplicates from persistent store after tab transition completes
   useEffect(() => {
-    cleanDuplicates();
+    const timer = setTimeout(() => {
+      cleanDuplicates();
+    }, 150);
+    return () => clearTimeout(timer);
   }, [cleanDuplicates]);
 
   // Search & Pagination state
@@ -780,7 +783,6 @@ const styles = StyleSheet.create({
     height: 42,
     maxHeight: 42,
     borderRadius: 12,
-    backgroundColor: '#18181C',
     borderWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
@@ -951,7 +953,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 10,
-    backgroundColor: '#18181C',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.07)',
     gap: 4,
@@ -991,7 +992,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 18,
-    backgroundColor: '#18181C',
     borderWidth: 0,
     elevation: 0,
   },

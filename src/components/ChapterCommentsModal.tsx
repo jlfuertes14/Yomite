@@ -66,7 +66,7 @@ export function ChapterCommentsModal({
         <MobileSheetPanel
           visible={visible}
           onClose={onClose}
-          style={[styles.modalContainer, { backgroundColor: '#141417', borderColor: 'transparent' }]}
+          style={[styles.modalContainer, { backgroundColor: colors.background, borderColor: 'transparent' }]}
         >
           {/* Header */}
           <View style={styles.header}>

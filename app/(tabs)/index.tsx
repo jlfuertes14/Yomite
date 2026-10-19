@@ -58,6 +58,9 @@ import { useUIStore } from '../../src/store/uiStore';
 import { getUserAvatarUrl, getUserDisplayName, getUserHandle, useUserStore } from '../../src/store/userStore';
 import type { Manga, SearchFilters } from '../../src/types';
 import { BannerCacheManager } from '../../src/utils/bannerCache';
+import { getUniversalDiscoverData, sourceMangaToAppManga } from '../../src/sources/adapter';
+import { SourceManager } from '../../src/sources/SourceManager';
+import type { MangaSourceMetadata } from '../../src/sources/types';
 import { triggerHaptic } from '../../src/utils/haptics';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 
@@ -141,6 +144,47 @@ interface WebHeaderProps {
   isScrolled: boolean;
   onResetToDiscover?: () => void;
   onOpenAuth: () => void;
+}
+
+function ExtensionSourceFavicon({
+  icon,
+  letter,
+  accentColor,
+}: {
+  icon?: string;
+  letter: string;
+  accentColor: string;
+}) {
+  const [imgError, setImgError] = useState(false);
+  const isValidUrl = icon && (icon.startsWith('http://') || icon.startsWith('https://')) && !imgError;
+
+  if (isValidUrl) {
+    return (
+      <Image
+        source={{ uri: icon }}
+        style={{ width: 20, height: 20, borderRadius: 5 }}
+        contentFit="cover"
+        onError={() => setImgError(true)}
+      />
+    );
+  }
+
+  return (
+    <View
+      style={{
+        width: 20,
+        height: 20,
+        borderRadius: 5,
+        backgroundColor: 'rgba(234, 179, 8, 0.15)',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Text style={{ fontSize: 10, fontWeight: '700', color: accentColor }}>
+        {letter.toUpperCase()}
+      </Text>
+    </View>
+  );
 }
 
 const WebHeader: React.FC<WebHeaderProps> = ({
@@ -788,6 +832,10 @@ export default function DiscoverScreen() {
   const [isLoadingCarousels, setIsLoadingCarousels] = useState(true);
   const [activeSeeAllSection, setActiveSeeAllSection] = useState<'top_rated' | 'most_popular' | 'recently_added' | 'latest' | null>(null);
 
+  // Primary Discover Source States
+  const [primarySourceName, setPrimarySourceName] = useState<string>('MangaDex');
+  const [primarySourceId, setPrimarySourceId] = useState<string>('mangadex');
+
   // Search & Navigation Feed States
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Manga[]>([]);
@@ -795,6 +843,16 @@ export default function DiscoverScreen() {
   const [isChangingPage, setIsChangingPage] = useState(false);
   const [activeFeedTitle, setActiveFeedTitle] = useState('Recently Added');
   const [activeNavId, setActiveNavId] = useState('recently_added');
+
+  // Cross-Extension Mobile Search States
+  const [isMobileSearchActive, setIsMobileSearchActive] = useState(false);
+  const [groupedExtensionResults, setGroupedExtensionResults] = useState<
+    { source: MangaSourceMetadata; mangaList: Manga[] }[]
+  >([]);
+  const [activeSeeAllExtension, setActiveSeeAllExtension] = useState<{
+    source: MangaSourceMetadata;
+    mangaList: Manga[];
+  } | null>(null);
 
   // Retractable Sidebar states
   const [sidebarVisible, setSidebarVisible] = useState(false); // Inline desktop sidebar
@@ -1142,29 +1200,25 @@ export default function DiscoverScreen() {
     try {
       setIsLoadingPopular(true);
       setIsLoadingFeed(true);
+      setIsLoadingCarousels(true);
       setCurrentPage(1);
 
-      if (Platform.OS !== 'web') {
-        setIsLoadingCarousels(true);
-        const [pop, topRatedRes, mostPopRes, recentRes, latestRes] = await Promise.all([
-          getPopularManga(POPULAR_TOP_LIMIT),
-          getTopRatedManga(14, 0),
-          getMostPopularManga(14, 0),
-          getRecentlyAdded(14, 0),
-          getLatestUpdates(14, 0),
-        ]);
-        setPopular(pop);
-        setTopRatedManga(topRatedRes.data);
-        setMostPopularManga(mostPopRes.data);
-        setRecentlyAddedManga(recentRes.data);
-        setLatestUpdatesManga(latestRes.data);
-        setFeedManga(recentRes.data);
-        setTotalMangaCount(recentRes.total);
-        setActiveFeedTitle('Recently Added');
-        setActiveNavId('recently_added');
+      const data = await getUniversalDiscoverData(undefined, false);
+      setPrimarySourceName(data.primarySourceName);
+      setPrimarySourceId(data.primarySourceId);
 
-        // Preload & cache ALL 10 popular hero banner covers into memory-disk cache & local persistent storage
-        const heroItems = pop.slice(0, POPULAR_TOP_LIMIT).map((m) => ({
+      setPopular(data.popular || []);
+      setTopRatedManga(data.topRated || []);
+      setMostPopularManga(data.mostPopular || []);
+      setRecentlyAddedManga(data.recentlyAdded || []);
+      setLatestUpdatesManga(data.latestUpdates || []);
+      setFeedManga(data.recentlyAdded || []);
+      setTotalMangaCount(data.recentlyAdded?.length || 0);
+      setActiveFeedTitle('Recently Added');
+      setActiveNavId('recently_added');
+
+      if (data.popular && data.popular.length > 0) {
+        const heroItems = data.popular.slice(0, POPULAR_TOP_LIMIT).map((m) => ({
           id: m.id,
           url: getMangaCover(m, '512'),
         }));
@@ -1177,37 +1231,16 @@ export default function DiscoverScreen() {
             setCachedHeroBanners((prev) => ({ ...prev, ...resolved }));
           }
         });
-
-        const allLoaded = [
-          ...pop,
-          ...topRatedRes.data,
-          ...mostPopRes.data,
-          ...recentRes.data,
-          ...latestRes.data,
-        ];
-        fetchStatsForList(allLoaded);
-        setIsLoadingCarousels(false);
-      } else {
-        const [pop, feedResult] = await Promise.all([
-          getPopularManga(POPULAR_TOP_LIMIT),
-          getRecentlyAdded(PAGE_SIZE, 0),
-        ]);
-        setPopular(pop);
-
-        const heroCoverUrls = pop
-          .slice(0, POPULAR_TOP_LIMIT)
-          .map((m) => getMangaCover(m, '512'))
-          .filter(Boolean) as string[];
-        if (heroCoverUrls.length > 0) {
-          Image.prefetch(heroCoverUrls, 'memory-disk');
-        }
-
-        setFeedManga(feedResult.data);
-        setTotalMangaCount(feedResult.total);
-        setActiveFeedTitle('Recently Added');
-        setActiveNavId('recently_added');
-        fetchStatsForList([...pop, ...feedResult.data]);
       }
+
+      const allLoaded = [
+        ...(data.popular || []),
+        ...(data.topRated || []),
+        ...(data.mostPopular || []),
+        ...(data.recentlyAdded || []),
+        ...(data.latestUpdates || []),
+      ];
+      fetchStatsForList(allLoaded);
     } catch (err) {
       console.error('Failed to fetch discover data:', err);
     } finally {
@@ -1228,10 +1261,14 @@ export default function DiscoverScreen() {
   useFocusEffect(
     useCallback(() => {
       setIsScreenFocused(true);
+      const currentDefault = SourceManager.getDefaultDiscoverSourceId();
+      if (currentDefault !== primarySourceId) {
+        fetchData();
+      }
       return () => {
         setIsScreenFocused(false);
       };
-    }, [])
+    }, [primarySourceId, fetchData])
   );
 
   // Auto-advance hero banner every 7 seconds: instant state change with NO swipe animation if not swiped by user
@@ -1302,66 +1339,45 @@ export default function DiscoverScreen() {
       setCachedHeroBanners({});
     } catch {}
 
-    if (Platform.OS !== 'web' && !activeSeeAllSection && !isShowingSearch) {
-      try {
-        const [pop, topRatedRes, mostPopRes, recentRes, latestRes] = await Promise.all([
-          getPopularManga(POPULAR_TOP_LIMIT, true),
-          getTopRatedManga(14, 0, true),
-          getMostPopularManga(14, 0, true),
-          getRecentlyAdded(14, 0, true),
-          getLatestUpdates(14, 0, true),
-        ]);
-        setPopular(pop);
-        setTopRatedManga(topRatedRes.data);
-        setMostPopularManga(mostPopRes.data);
-        setRecentlyAddedManga(recentRes.data);
-        setLatestUpdatesManga(latestRes.data);
-        fetchStatsForList([
-          ...pop,
-          ...topRatedRes.data,
-          ...mostPopRes.data,
-          ...recentRes.data,
-          ...latestRes.data,
-        ]);
-      } catch (err) {
-        console.error('Mobile refresh failed:', err);
-      } finally {
-        setRefreshing(false);
-      }
-      return;
-    }
+    try {
+      const data = await getUniversalDiscoverData(undefined, true);
+      setPrimarySourceName(data.primarySourceName);
+      setPrimarySourceId(data.primarySourceId);
 
-    let feedRequest;
-    if (activeSeeAllSection === 'top_rated') {
-      feedRequest = getTopRatedManga(PAGE_SIZE, 0, true);
-    } else if (activeSeeAllSection === 'most_popular' || activeNavId === 'popular') {
-      feedRequest = getMostPopularManga(PAGE_SIZE, 0, true);
-    } else if (activeSeeAllSection === 'latest' || activeNavId === 'latest') {
-      feedRequest = getLatestUpdates(PAGE_SIZE, 0, true);
-    } else {
-      feedRequest = getRecentlyAdded(PAGE_SIZE, 0, true);
-    }
+      setPopular(data.popular || []);
+      setTopRatedManga(data.topRated || []);
+      setMostPopularManga(data.mostPopular || []);
+      setRecentlyAddedManga(data.recentlyAdded || []);
+      setLatestUpdatesManga(data.latestUpdates || []);
 
-    const [pop, feedResult] = await Promise.all([
-      getPopularManga(POPULAR_TOP_LIMIT, true),
-      feedRequest,
-    ]);
-    setPopular(pop);
-    if (!isShowingSearch && activeNavId === 'popular' && activeSeeAllSection === null) {
-      setTotalMangaCount(pop.length);
-      fetchStatsForList(pop);
-    } else {
-      setFeedManga(feedResult.data);
-      setTotalMangaCount(feedResult.total);
-      fetchStatsForList([...pop, ...feedResult.data]);
+      let feedList = data.recentlyAdded || [];
+      if (activeSeeAllSection === 'top_rated') feedList = data.topRated || [];
+      else if (activeSeeAllSection === 'most_popular') feedList = data.mostPopular || [];
+      else if (activeSeeAllSection === 'latest') feedList = data.latestUpdates || [];
+
+      setFeedManga(feedList);
+      setTotalMangaCount(feedList.length);
+
+      fetchStatsForList([
+        ...(data.popular || []),
+        ...(data.topRated || []),
+        ...(data.mostPopular || []),
+        ...(data.recentlyAdded || []),
+        ...(data.latestUpdates || []),
+      ]);
+    } catch (err) {
+      console.error('Mobile refresh failed:', err);
+    } finally {
+      setRefreshing(false);
     }
-    setRefreshing(false);
-  }, [activeNavId, activeSeeAllSection, isShowingSearch]);
+  }, [activeSeeAllSection]);
 
   const handleSearch = useCallback(async () => {
-    if (!searchQuery.trim()) {
+    const query = searchQuery.trim();
+    if (!query) {
       if (activeFilters === null) {
         setSearchResults([]);
+        setGroupedExtensionResults([]);
       }
       return;
     }
@@ -1369,10 +1385,28 @@ export default function DiscoverScreen() {
       setIsSearching(true);
       setCurrentPage(1);
       setActiveFeedTitle('Search Results');
-      const result = await searchManga({ title: searchQuery.trim() }, PAGE_SIZE, 0);
-      setSearchResults(result.data);
-      setTotalMangaCount(result.total);
-      fetchStatsForList(result.data);
+      setActiveNavId('search_results');
+
+      if (Platform.OS !== 'web') {
+        const rawResults = await SourceManager.searchAll(query);
+        const grouped = rawResults
+          .map((item) => ({
+            source: item.source,
+            mangaList: (item.results || []).map((sm) => sourceMangaToAppManga(sm)),
+          }))
+          .filter((item) => item.mangaList.length > 0);
+
+        setGroupedExtensionResults(grouped);
+        const allFoundManga = grouped.flatMap((g) => g.mangaList);
+        setSearchResults(allFoundManga);
+        setTotalMangaCount(allFoundManga.length);
+        fetchStatsForList(allFoundManga);
+      } else {
+        const result = await searchManga({ title: query }, PAGE_SIZE, 0);
+        setSearchResults(result.data || []);
+        setTotalMangaCount(result.total || 0);
+        fetchStatsForList(result.data || []);
+      }
     } catch (err) {
       console.error('Search failed:', err);
     } finally {
@@ -1874,105 +1908,273 @@ export default function DiscoverScreen() {
               {isShowingSearch ? (
                 /* ─── Search Results ─── */
                 <View style={[styles.section, Platform.OS === 'web' && styles.webCenteredContent]}>
-
-                  <View style={styles.sectionHeader}>
-                    <View style={styles.sectionHeaderLeft}>
-                      <Text style={[styles.sectionTitle, { color: colors.text }]}>Search Results</Text>
-                      {searchResults.length > 0 && (
-                        <Text style={[styles.sectionItemCount, { color: colors.textMuted }]}>
-                          ({totalMangaCount.toLocaleString()} titles)
-                        </Text>
-                      )}
-                    </View>
-                  </View>
-                  {(isSearching || isChangingPage) ? (
-                    <View style={styles.mangaGrid}>
-                      {Array.from({ length: 9 }).map((_, i) => (
-                        <View
-                          key={i}
-                          style={{
-                            width: Platform.OS === 'web' ? ('calc((100% - 80px) / 9)' as any) : feedCardWidth,
-                            marginBottom: 12,
-                          }}
-                        >
-                          <Skeleton width="100%" height={feedCardHeight} borderRadius={Radius.md} />
-                          <View style={{ marginTop: 6, gap: 4 }}>
-                            <Skeleton width="85%" height={12} borderRadius={Radius.xs} />
-                            <Skeleton width="50%" height={10} borderRadius={Radius.xs} />
-                          </View>
-                        </View>
-                      ))}
-                    </View>
-                  ) : searchResults.length === 0 ? (
-                    <View style={styles.emptyState}>
-                      <Ionicons name="search-outline" size={40} color={colors.textMuted} />
-                      <Text style={[styles.emptyText, { color: colors.textMuted }]}>
-                        No titles match your search filters
-                      </Text>
-                    </View>
-                  ) : (
-                    <>
-                      <View style={styles.mangaGrid}>
-                        {searchResults.map((manga, idx) => {
-                          const stat = mangaStatsMap[manga.id];
-                          const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
-                          return (
-                            <MangaCard
-                              key={manga.id}
-                              id={manga.id}
-                              index={idx}
-                              title={getMangaTitle(manga)}
-                              coverUrl={getMangaCover(manga)}
-                              author={extractAuthorName(manga)}
-                              rating={ratingVal}
-                              follows={stat?.follows ?? null}
-                              onPress={navigateToManga}
-                            />
-                          );
-                        })}
-                      </View>
-
-                      {/* Search Results Pagination */}
-                      {searchResults.length > 0 && totalMangaCount > PAGE_SIZE && (
-                        <View style={styles.paginationRow}>
+                  {Platform.OS !== 'web' ? (
+                    activeSeeAllExtension ? (
+                      /* Expanded "See All" view for a specific extension */
+                      <View>
+                        <View style={styles.seeAllHeaderRow}>
                           <Pressable
-                            disabled={currentPage <= 1 || isSearching || isChangingPage}
-                            onPress={() => handlePageChange(currentPage - 1)}
-                            style={({ pressed }) => [
-                              styles.pageBtn,
-                              { backgroundColor: colors.surfaceElevated },
-                              (currentPage <= 1 || isSearching || isChangingPage) && { opacity: 0.3 },
-                              pressed && { opacity: 0.7 },
-                            ]}
+                            onPress={() => {
+                              triggerHaptic();
+                              setActiveSeeAllExtension(null);
+                            }}
+                            style={({ pressed }) => [styles.seeAllBackBtn, pressed && { opacity: 0.6 }]}
+                            hitSlop={8}
                             accessibilityRole="button"
-                            accessibilityLabel="Previous page"
+                            accessibilityLabel="Back to cross-extension results"
                           >
-                            <Ionicons name="chevron-back" size={15} color={colors.text} />
-                            <Text style={[styles.pageBtnText, { color: colors.text }]}>Prev</Text>
+                            <Ionicons name="chevron-back" size={24} color={colors.accent} />
                           </Pressable>
-
-                          <View style={styles.pageIndicatorPill}>
-                            <Text style={[styles.pageIndicatorText, { color: colors.text }]}>
-                              Page {currentPage} of {Math.ceil(totalMangaCount / PAGE_SIZE)}
+                          <View style={styles.seeAllTitleWrap}>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]} numberOfLines={1}>
+                              {activeSeeAllExtension.source.name} Search Results
+                            </Text>
+                            <Text style={[styles.sectionItemCount, { color: colors.textMuted }]}>
+                              ({activeSeeAllExtension.mangaList.length} titles)
                             </Text>
                           </View>
-
-                          <Pressable
-                            disabled={currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isSearching || isChangingPage}
-                            onPress={() => handlePageChange(currentPage + 1)}
-                            style={({ pressed }) => [
-                              styles.pageBtn,
-                              { backgroundColor: colors.surfaceElevated },
-                              (currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isSearching || isChangingPage) && { opacity: 0.3 },
-                              pressed && { opacity: 0.7 },
-                            ]}
-                            accessibilityRole="button"
-                            accessibilityLabel="Next page"
-                          >
-                            <Text style={[styles.pageBtnText, { color: colors.text }]}>Next</Text>
-                            <Ionicons name="chevron-forward" size={15} color={colors.text} />
-                          </Pressable>
                         </View>
+
+                        <View style={styles.mangaGrid}>
+                          {activeSeeAllExtension.mangaList.map((manga, idx) => {
+                            const stat = mangaStatsMap[manga.id];
+                            const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
+                            return (
+                              <MangaCard
+                                key={manga.id}
+                                id={manga.id}
+                                index={idx}
+                                title={getMangaTitle(manga)}
+                                coverUrl={getMangaCover(manga)}
+                                author={extractAuthorName(manga)}
+                                rating={ratingVal}
+                                follows={stat?.follows ?? null}
+                                onPress={navigateToManga}
+                              />
+                            );
+                          })}
+                        </View>
+                      </View>
+                    ) : (
+                      /* Cross-Extension Search Carousels */
+                      <View>
+                        <View style={styles.sectionHeader}>
+                          <View style={styles.sectionHeaderLeft}>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                              Extension Search Results
+                            </Text>
+                            {groupedExtensionResults.length > 0 && (
+                              <Text style={[styles.sectionItemCount, { color: colors.textMuted }]}>
+                                ({groupedExtensionResults.reduce((acc, g) => acc + g.mangaList.length, 0)} titles)
+                              </Text>
+                            )}
+                          </View>
+                        </View>
+
+                        {isSearching ? (
+                          <View style={{ gap: 16 }}>
+                            {Array.from({ length: 3 }).map((_, i) => (
+                              <View key={i} style={{ gap: 8 }}>
+                                <Skeleton width={140} height={18} borderRadius={Radius.xs} />
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
+                                  {Array.from({ length: 4 }).map((_, j) => (
+                                    <View key={j} style={{ width: 124 }}>
+                                      <Skeleton width={124} height={178} borderRadius={Radius.md} />
+                                    </View>
+                                  ))}
+                                </ScrollView>
+                              </View>
+                            ))}
+                          </View>
+                        ) : groupedExtensionResults.length === 0 ? (
+                          <View style={styles.emptyState}>
+                            <Ionicons name="search-outline" size={40} color={colors.textMuted} />
+                            <Text style={[styles.emptyText, { color: colors.textMuted }]}>
+                              {searchQuery.trim()
+                                ? `No titles match "${searchQuery}" across active extensions`
+                                : 'Type a title to search across installed extensions'}
+                            </Text>
+                          </View>
+                        ) : (
+                          <View style={{ gap: 20 }}>
+                            {groupedExtensionResults.map((group) => (
+                              <View key={group.source.id} style={styles.carouselSection}>
+                                {/* Header Row: Title & Right Arrow on the SAME row */}
+                                <View style={styles.carouselHeaderRow}>
+                                  <Pressable
+                                    onPress={() => {
+                                      triggerHaptic();
+                                      setActiveSeeAllExtension(group);
+                                    }}
+                                    style={({ pressed }) => [
+                                      styles.carouselTitleLeft,
+                                      { flexDirection: 'row', alignItems: 'center', gap: 8 },
+                                      pressed && { opacity: 0.7 },
+                                    ]}
+                                    hitSlop={8}
+                                  >
+                                    <ExtensionSourceFavicon
+                                      icon={group.source.icon}
+                                      letter={group.source.name.charAt(0)}
+                                      accentColor={colors.accent}
+                                    />
+                                    <Text style={[styles.carouselTitle, { color: colors.text }]}>
+                                      {group.source.name}
+                                    </Text>
+                                    <Text style={[styles.sectionItemCount, { color: colors.textMuted }]}>
+                                      ({group.mangaList.length})
+                                    </Text>
+                                  </Pressable>
+
+                                  <Pressable
+                                    onPress={() => {
+                                      triggerHaptic();
+                                      setActiveSeeAllExtension(group);
+                                    }}
+                                    style={({ pressed }) => [styles.seeAllBtn, pressed && { opacity: 0.6 }]}
+                                    hitSlop={8}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`See all search results for ${group.source.name}`}
+                                  >
+                                    <Text style={[styles.seeAllBtnText, { color: colors.accent }]}>See All</Text>
+                                    <Ionicons name="chevron-forward" size={16} color={colors.accent} />
+                                  </Pressable>
+                                </View>
+
+                                {/* Horizontal Carousel */}
+                                <ScrollView
+                                  horizontal
+                                  showsHorizontalScrollIndicator={false}
+                                  contentContainerStyle={styles.carouselContent}
+                                >
+                                  {group.mangaList.map((manga, idx) => {
+                                    const stat = mangaStatsMap[manga.id];
+                                    const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
+                                    return (
+                                      <MangaCard
+                                        key={manga.id}
+                                        id={manga.id}
+                                        index={idx}
+                                        width={124}
+                                        title={getMangaTitle(manga)}
+                                        coverUrl={getMangaCover(manga)}
+                                        author={extractAuthorName(manga)}
+                                        rating={ratingVal}
+                                        follows={stat?.follows ?? null}
+                                        onPress={navigateToManga}
+                                      />
+                                    );
+                                  })}
+                                </ScrollView>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                    )
+                  ) : (
+                    /* Web Search View */
+                    <>
+                      <View style={styles.sectionHeader}>
+                        <View style={styles.sectionHeaderLeft}>
+                          <Text style={[styles.sectionTitle, { color: colors.text }]}>Search Results</Text>
+                          {searchResults.length > 0 && (
+                            <Text style={[styles.sectionItemCount, { color: colors.textMuted }]}>
+                              ({totalMangaCount.toLocaleString()} titles)
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                      {(isSearching || isChangingPage) ? (
+                        <View style={styles.mangaGrid}>
+                          {Array.from({ length: 9 }).map((_, i) => (
+                            <View
+                              key={i}
+                              style={{
+                                width: 'calc((100% - 80px) / 9)' as any,
+                                marginBottom: 12,
+                              }}
+                            >
+                              <Skeleton width="100%" height={feedCardHeight} borderRadius={Radius.md} />
+                              <View style={{ marginTop: 6, gap: 4 }}>
+                                <Skeleton width="85%" height={12} borderRadius={Radius.xs} />
+                                <Skeleton width="50%" height={10} borderRadius={Radius.xs} />
+                              </View>
+                            </View>
+                          ))}
+                        </View>
+                      ) : searchResults.length === 0 ? (
+                        <View style={styles.emptyState}>
+                          <Ionicons name="search-outline" size={40} color={colors.textMuted} />
+                          <Text style={[styles.emptyText, { color: colors.textMuted }]}>
+                            No titles match your search filters
+                          </Text>
+                        </View>
+                      ) : (
+                        <>
+                          <View style={styles.mangaGrid}>
+                            {searchResults.map((manga, idx) => {
+                              const stat = mangaStatsMap[manga.id];
+                              const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
+                              return (
+                                <MangaCard
+                                  key={manga.id}
+                                  id={manga.id}
+                                  index={idx}
+                                  title={getMangaTitle(manga)}
+                                  coverUrl={getMangaCover(manga)}
+                                  author={extractAuthorName(manga)}
+                                  rating={ratingVal}
+                                  follows={stat?.follows ?? null}
+                                  onPress={navigateToManga}
+                                />
+                              );
+                            })}
+                          </View>
+
+                          {/* Search Results Pagination */}
+                          {searchResults.length > 0 && totalMangaCount > PAGE_SIZE && (
+                            <View style={styles.paginationRow}>
+                              <Pressable
+                                disabled={currentPage <= 1 || isSearching || isChangingPage}
+                                onPress={() => handlePageChange(currentPage - 1)}
+                                style={({ pressed }) => [
+                                  styles.pageBtn,
+                                  { backgroundColor: colors.surfaceElevated },
+                                  (currentPage <= 1 || isSearching || isChangingPage) && { opacity: 0.3 },
+                                  pressed && { opacity: 0.7 },
+                                ]}
+                                accessibilityRole="button"
+                                accessibilityLabel="Previous page"
+                              >
+                                <Ionicons name="chevron-back" size={15} color={colors.text} />
+                                <Text style={[styles.pageBtnText, { color: colors.text }]}>Prev</Text>
+                              </Pressable>
+
+                              <View style={styles.pageIndicatorPill}>
+                                <Text style={[styles.pageIndicatorText, { color: colors.text }]}>
+                                  Page {currentPage} of {Math.ceil(totalMangaCount / PAGE_SIZE)}
+                                </Text>
+                              </View>
+
+                              <Pressable
+                                disabled={currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isSearching || isChangingPage}
+                                onPress={() => handlePageChange(currentPage + 1)}
+                                style={({ pressed }) => [
+                                  styles.pageBtn,
+                                  { backgroundColor: colors.surfaceElevated },
+                                  (currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isSearching || isChangingPage) && { opacity: 0.3 },
+                                  pressed && { opacity: 0.7 },
+                                ]}
+                                accessibilityRole="button"
+                                accessibilityLabel="Next page"
+                              >
+                                <Text style={[styles.pageBtnText, { color: colors.text }]}>Next</Text>
+                                <Ionicons name="chevron-forward" size={15} color={colors.text} />
+                              </Pressable>
+                            </View>
+                          )}
+                        </>
                       )}
                     </>
                   )}
@@ -2524,212 +2726,219 @@ export default function DiscoverScreen() {
                   {Platform.OS !== 'web' && activeSeeAllSection === null ? (
                     <View style={{ paddingTop: Spacing.xs }}>
                       {/* 1. Top Rated Manga Carousel */}
-                      <View style={styles.carouselSection}>
-                        <View style={styles.carouselHeaderRow}>
-                          <View style={styles.carouselTitleLeft}>
-                            <Text style={[styles.carouselTitle, { color: colors.text }]}>Top Rated Manga</Text>
+                      {(isLoadingCarousels || topRatedManga.length > 0) && (
+                        <View style={styles.carouselSection}>
+                          <View style={styles.carouselHeaderRow}>
+                            <View style={styles.carouselTitleLeft}>
+                              <Text style={[styles.carouselTitle, { color: colors.text }]}>Top Rated Manga</Text>
+                            </View>
+                            <Pressable
+                              onPress={() => handleOpenSeeAll('top_rated')}
+                              style={({ pressed }) => [styles.seeAllBtn, pressed && { opacity: 0.6 }]}
+                              hitSlop={8}
+                              accessibilityRole="button"
+                              accessibilityLabel="See all top rated manga"
+                            >
+                              <Text style={[styles.seeAllBtnText, { color: colors.accent }]}>See All</Text>
+                              <Ionicons name="chevron-forward" size={14} color={colors.accent} />
+                            </Pressable>
                           </View>
-                          <Pressable
-                            onPress={() => handleOpenSeeAll('top_rated')}
-                            style={({ pressed }) => [styles.seeAllBtn, pressed && { opacity: 0.6 }]}
-                            hitSlop={8}
-                            accessibilityRole="button"
-                            accessibilityLabel="See all top rated manga"
-                          >
-                            <Text style={[styles.seeAllBtnText, { color: colors.accent }]}>See All</Text>
-                            <Ionicons name="chevron-forward" size={14} color={colors.accent} />
-                          </Pressable>
-                        </View>
 
-                        {isLoadingCarousels ? (
-                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
-                            {Array.from({ length: 4 }).map((_, i) => (
-                              <View key={i} style={{ width: 124 }}>
-                                <Skeleton width={124} height={178} borderRadius={Radius.md} />
-                                <View style={{ height: 6 }} />
-                                <Skeleton width={100} height={14} borderRadius={Radius.xs} />
-                              </View>
-                            ))}
-                          </ScrollView>
-                        ) : (
-                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
-                            {topRatedManga.map((manga, idx) => {
-                              const stat = mangaStatsMap[manga.id];
-                              const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
-                              return (
-                                <MangaCard
-                                  key={manga.id}
-                                  id={manga.id}
-                                  index={idx}
-                                  width={124}
-                                  title={getMangaTitle(manga)}
-                                  coverUrl={getMangaCover(manga)}
-                                  author={extractAuthorName(manga)}
-                                  rating={ratingVal}
-                                  follows={stat?.follows ?? null}
-                                  onPress={navigateToManga}
-                                />
-                              );
-                            })}
-                          </ScrollView>
-                        )}
-                      </View>
+                          {isLoadingCarousels ? (
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
+                              {Array.from({ length: 4 }).map((_, i) => (
+                                <View key={i} style={{ width: 124 }}>
+                                  <Skeleton width={124} height={178} borderRadius={Radius.md} />
+                                  <View style={{ height: 6 }} />
+                                  <Skeleton width={100} height={14} borderRadius={Radius.xs} />
+                                </View>
+                              ))}
+                            </ScrollView>
+                          ) : (
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
+                              {topRatedManga.map((manga, idx) => {
+                                const stat = mangaStatsMap[manga.id];
+                                const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
+                                return (
+                                  <MangaCard
+                                    key={manga.id}
+                                    id={manga.id}
+                                    index={idx}
+                                    width={124}
+                                    title={getMangaTitle(manga)}
+                                    coverUrl={getMangaCover(manga)}
+                                    author={extractAuthorName(manga)}
+                                    rating={ratingVal}
+                                    follows={stat?.follows ?? null}
+                                    onPress={navigateToManga}
+                                  />
+                                );
+                              })}
+                            </ScrollView>
+                          )}
+                        </View>
+                      )}
 
                       {/* 2. Most Popular Carousel */}
-                      <View style={styles.carouselSection}>
-                        <View style={styles.carouselHeaderRow}>
-                          <View style={styles.carouselTitleLeft}>
-                            <Text style={[styles.carouselTitle, { color: colors.text }]}>Most Popular</Text>
+                      {(isLoadingCarousels || mostPopularManga.length > 0) && (
+                        <View style={styles.carouselSection}>
+                          <View style={styles.carouselHeaderRow}>
+                            <View style={styles.carouselTitleLeft}>
+                              <Text style={[styles.carouselTitle, { color: colors.text }]}>Most Popular</Text>
+                            </View>
+                            <Pressable
+                              onPress={() => handleOpenSeeAll('most_popular')}
+                              style={({ pressed }) => [styles.seeAllBtn, pressed && { opacity: 0.6 }]}
+                              hitSlop={8}
+                              accessibilityRole="button"
+                              accessibilityLabel="See all most popular manga"
+                            >
+                              <Text style={[styles.seeAllBtnText, { color: colors.accent }]}>See All</Text>
+                              <Ionicons name="chevron-forward" size={14} color={colors.accent} />
+                            </Pressable>
                           </View>
-                          <Pressable
-                            onPress={() => handleOpenSeeAll('most_popular')}
-                            style={({ pressed }) => [styles.seeAllBtn, pressed && { opacity: 0.6 }]}
-                            hitSlop={8}
-                            accessibilityRole="button"
-                            accessibilityLabel="See all most popular manga"
-                          >
-                            <Text style={[styles.seeAllBtnText, { color: colors.accent }]}>See All</Text>
-                            <Ionicons name="chevron-forward" size={14} color={colors.accent} />
-                          </Pressable>
+
+                          {isLoadingCarousels ? (
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
+                              {Array.from({ length: 4 }).map((_, i) => (
+                                <View key={i} style={{ width: 124 }}>
+                                  <Skeleton width={124} height={178} borderRadius={Radius.md} />
+                                  <View style={{ height: 6 }} />
+                                  <Skeleton width={100} height={14} borderRadius={Radius.xs} />
+                                </View>
+                              ))}
+                            </ScrollView>
+                          ) : (
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
+                              {mostPopularManga.map((manga, idx) => {
+                                const stat = mangaStatsMap[manga.id];
+                                const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
+                                return (
+                                  <MangaCard
+                                    key={manga.id}
+                                    id={manga.id}
+                                    index={idx}
+                                    width={124}
+                                    title={getMangaTitle(manga)}
+                                    coverUrl={getMangaCover(manga)}
+                                    author={extractAuthorName(manga)}
+                                    rating={ratingVal}
+                                    follows={stat?.follows ?? null}
+                                    onPress={navigateToManga}
+                                  />
+                                );
+                              })}
+                            </ScrollView>
+                          )}
                         </View>
-
-                        {isLoadingCarousels ? (
-                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
-                            {Array.from({ length: 4 }).map((_, i) => (
-                              <View key={i} style={{ width: 124 }}>
-                                <Skeleton width={124} height={178} borderRadius={Radius.md} />
-                                <View style={{ height: 6 }} />
-                                <Skeleton width={100} height={14} borderRadius={Radius.xs} />
-                              </View>
-                            ))}
-                          </ScrollView>
-                        ) : (
-                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
-                            {mostPopularManga.map((manga, idx) => {
-                              const stat = mangaStatsMap[manga.id];
-                              const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
-                              return (
-                                <MangaCard
-                                  key={manga.id}
-                                  id={manga.id}
-                                  index={idx}
-                                  width={124}
-                                  title={getMangaTitle(manga)}
-                                  coverUrl={getMangaCover(manga)}
-                                  author={extractAuthorName(manga)}
-                                  rating={ratingVal}
-                                  follows={stat?.follows ?? null}
-                                  onPress={navigateToManga}
-                                />
-                              );
-                            })}
-                          </ScrollView>
-                        )}
-                      </View>
-
+                      )}
                       {/* 3. Recently Added Carousel */}
-                      <View style={styles.carouselSection}>
-                        <View style={styles.carouselHeaderRow}>
-                          <View style={styles.carouselTitleLeft}>
-                            <Text style={[styles.carouselTitle, { color: colors.text }]}>Recently Added</Text>
+                      {(isLoadingCarousels || recentlyAddedManga.length > 0) && (
+                        <View style={styles.carouselSection}>
+                          <View style={styles.carouselHeaderRow}>
+                            <View style={styles.carouselTitleLeft}>
+                              <Text style={[styles.carouselTitle, { color: colors.text }]}>Recently Added</Text>
+                            </View>
+                            <Pressable
+                              onPress={() => handleOpenSeeAll('recently_added')}
+                              style={({ pressed }) => [styles.seeAllBtn, pressed && { opacity: 0.6 }]}
+                              hitSlop={8}
+                              accessibilityRole="button"
+                              accessibilityLabel="See all recently added manga"
+                            >
+                              <Text style={[styles.seeAllBtnText, { color: colors.accent }]}>See All</Text>
+                              <Ionicons name="chevron-forward" size={14} color={colors.accent} />
+                            </Pressable>
                           </View>
-                          <Pressable
-                            onPress={() => handleOpenSeeAll('recently_added')}
-                            style={({ pressed }) => [styles.seeAllBtn, pressed && { opacity: 0.6 }]}
-                            hitSlop={8}
-                            accessibilityRole="button"
-                            accessibilityLabel="See all recently added manga"
-                          >
-                            <Text style={[styles.seeAllBtnText, { color: colors.accent }]}>See All</Text>
-                            <Ionicons name="chevron-forward" size={14} color={colors.accent} />
-                          </Pressable>
-                        </View>
 
-                        {isLoadingCarousels ? (
-                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
-                            {Array.from({ length: 4 }).map((_, i) => (
-                              <View key={i} style={{ width: 124 }}>
-                                <Skeleton width={124} height={178} borderRadius={Radius.md} />
-                                <View style={{ height: 6 }} />
-                                <Skeleton width={100} height={14} borderRadius={Radius.xs} />
-                              </View>
-                            ))}
-                          </ScrollView>
-                        ) : (
-                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
-                            {recentlyAddedManga.map((manga, idx) => {
-                              const stat = mangaStatsMap[manga.id];
-                              const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
-                              return (
-                                <MangaCard
-                                  key={manga.id}
-                                  id={manga.id}
-                                  index={idx}
-                                  width={124}
-                                  title={getMangaTitle(manga)}
-                                  coverUrl={getMangaCover(manga)}
-                                  author={extractAuthorName(manga)}
-                                  rating={ratingVal}
-                                  follows={stat?.follows ?? null}
-                                  onPress={navigateToManga}
-                                />
-                              );
-                            })}
-                          </ScrollView>
-                        )}
-                      </View>
+                          {isLoadingCarousels ? (
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
+                              {Array.from({ length: 4 }).map((_, i) => (
+                                <View key={i} style={{ width: 124 }}>
+                                  <Skeleton width={124} height={178} borderRadius={Radius.md} />
+                                  <View style={{ height: 6 }} />
+                                  <Skeleton width={100} height={14} borderRadius={Radius.xs} />
+                                </View>
+                              ))}
+                            </ScrollView>
+                          ) : (
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
+                              {recentlyAddedManga.map((manga, idx) => {
+                                const stat = mangaStatsMap[manga.id];
+                                const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
+                                return (
+                                  <MangaCard
+                                    key={manga.id}
+                                    id={manga.id}
+                                    index={idx}
+                                    width={124}
+                                    title={getMangaTitle(manga)}
+                                    coverUrl={getMangaCover(manga)}
+                                    author={extractAuthorName(manga)}
+                                    rating={ratingVal}
+                                    follows={stat?.follows ?? null}
+                                    onPress={navigateToManga}
+                                  />
+                                );
+                              })}
+                            </ScrollView>
+                          )}
+                        </View>
+                      )}
 
                       {/* 4. Latest Updates Carousel */}
-                      <View style={styles.carouselSection}>
-                        <View style={styles.carouselHeaderRow}>
-                          <View style={styles.carouselTitleLeft}>
-                            <Text style={[styles.carouselTitle, { color: colors.text }]}>Latest Updates</Text>
+                      {(isLoadingCarousels || latestUpdatesManga.length > 0) && (
+                        <View style={styles.carouselSection}>
+                          <View style={styles.carouselHeaderRow}>
+                            <View style={styles.carouselTitleLeft}>
+                              <Text style={[styles.carouselTitle, { color: colors.text }]}>Latest Updates</Text>
+                            </View>
+                            <Pressable
+                              onPress={() => handleOpenSeeAll('latest')}
+                              style={({ pressed }) => [styles.seeAllBtn, pressed && { opacity: 0.6 }]}
+                              hitSlop={8}
+                              accessibilityRole="button"
+                              accessibilityLabel="See all latest updates"
+                            >
+                              <Text style={[styles.seeAllBtnText, { color: colors.accent }]}>See All</Text>
+                              <Ionicons name="chevron-forward" size={14} color={colors.accent} />
+                            </Pressable>
                           </View>
-                          <Pressable
-                            onPress={() => handleOpenSeeAll('latest')}
-                            style={({ pressed }) => [styles.seeAllBtn, pressed && { opacity: 0.6 }]}
-                            hitSlop={8}
-                            accessibilityRole="button"
-                            accessibilityLabel="See all latest updates"
-                          >
-                            <Text style={[styles.seeAllBtnText, { color: colors.accent }]}>See All</Text>
-                            <Ionicons name="chevron-forward" size={14} color={colors.accent} />
-                          </Pressable>
-                        </View>
 
-                        {isLoadingCarousels ? (
-                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
-                            {Array.from({ length: 4 }).map((_, i) => (
-                              <View key={i} style={{ width: 124 }}>
-                                <Skeleton width={124} height={178} borderRadius={Radius.md} />
-                                <View style={{ height: 6 }} />
-                                <Skeleton width={100} height={14} borderRadius={Radius.xs} />
-                              </View>
-                            ))}
-                          </ScrollView>
-                        ) : (
-                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
-                            {latestUpdatesManga.map((manga, idx) => {
-                              const stat = mangaStatsMap[manga.id];
-                              const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
-                              return (
-                                <MangaCard
-                                  key={manga.id}
-                                  id={manga.id}
-                                  index={idx}
-                                  width={124}
-                                  title={getMangaTitle(manga)}
-                                  coverUrl={getMangaCover(manga)}
-                                  author={extractAuthorName(manga)}
-                                  rating={ratingVal}
-                                  follows={stat?.follows ?? null}
-                                  onPress={navigateToManga}
-                                />
-                              );
-                            })}
-                          </ScrollView>
-                        )}
-                      </View>
+                          {isLoadingCarousels ? (
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
+                              {Array.from({ length: 4 }).map((_, i) => (
+                                <View key={i} style={{ width: 124 }}>
+                                  <Skeleton width={124} height={178} borderRadius={Radius.md} />
+                                  <View style={{ height: 6 }} />
+                                  <Skeleton width={100} height={14} borderRadius={Radius.xs} />
+                                </View>
+                              ))}
+                            </ScrollView>
+                          ) : (
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContent}>
+                              {latestUpdatesManga.map((manga, idx) => {
+                                const stat = mangaStatsMap[manga.id];
+                                const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
+                                return (
+                                  <MangaCard
+                                    key={manga.id}
+                                    id={manga.id}
+                                    index={idx}
+                                    width={124}
+                                    title={getMangaTitle(manga)}
+                                    coverUrl={getMangaCover(manga)}
+                                    author={extractAuthorName(manga)}
+                                    rating={ratingVal}
+                                    follows={stat?.follows ?? null}
+                                    onPress={navigateToManga}
+                                  />
+                                );
+                              })}
+                            </ScrollView>
+                          )}
+                        </View>
+                      )}
                     </View>
                   ) : (
                     <>
@@ -3127,6 +3336,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingTop: Spacing.sm,
     paddingBottom: Spacing.sm,
+  },
+  mobileSearchInputWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    height: 40,
+  },
+  mobileSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: 0,
   },
   stickySeeAllHeader: {
     position: 'absolute',

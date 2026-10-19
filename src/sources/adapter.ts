@@ -511,3 +511,108 @@ export async function getUniversalSimilarManga(
   }
   return finalResults;
 }
+
+export interface DiscoverSectionsData {
+  primarySourceId: string;
+  primarySourceName: string;
+  popular: Manga[];
+  topRated: Manga[];
+  mostPopular: Manga[];
+  recentlyAdded: Manga[];
+  latestUpdates: Manga[];
+}
+
+/**
+ * Universal Discover Sections Fetcher
+ * Loads Discover carousels (Popular, Top Rated, Most Popular, Recently Added, Latest Updates)
+ * from the user's selected primary source. Fallback to MangaDex if primary source has missing cards.
+ * If a section (e.g., Top Rated) has no cards, it returns empty array so UI hides it.
+ */
+export async function getUniversalDiscoverData(
+  overrideSourceId?: string,
+  isRefresh: boolean = false
+): Promise<DiscoverSectionsData> {
+  await SourceManager.init();
+  const sourceId = overrideSourceId || SourceManager.getDefaultDiscoverSourceId();
+  const defaultMeta = SourceManager.getDefaultDiscoverSource();
+  const sourceName = defaultMeta?.name || getSourceDisplayName(sourceId);
+
+  // 1. If MangaDex is primary source, fetch via native MangaDex API
+  if (sourceId === 'mangadex') {
+    const {
+      getPopularManga,
+      getTopRatedManga,
+      getMostPopularManga,
+      getRecentlyAdded,
+      getLatestUpdates,
+    } = await import('../api/mangadex');
+
+    const [pop, topRatedRes, mostPopRes, recentRes, latestRes] = await Promise.all([
+      getPopularManga(10, isRefresh),
+      getTopRatedManga(14, 0, isRefresh),
+      getMostPopularManga(14, 0, isRefresh),
+      getRecentlyAdded(14, 0, isRefresh),
+      getLatestUpdates(14, 0, isRefresh),
+    ]);
+
+    return {
+      primarySourceId: 'mangadex',
+      primarySourceName: 'MangaDex',
+      popular: pop || [],
+      topRated: topRatedRes?.data || [],
+      mostPopular: mostPopRes?.data || [],
+      recentlyAdded: recentRes?.data || [],
+      latestUpdates: latestRes?.data || [],
+    };
+  }
+
+  // 2. External Extension Source
+  const parser = SourceManager.getParser(sourceId);
+  if (!parser) {
+    // If parser not found, fallback to MangaDex
+    return getUniversalDiscoverData('mangadex', isRefresh);
+  }
+
+  const safeParserList = async (order: string, page: number = 1): Promise<Manga[]> => {
+    try {
+      const items = await parser.getList({ order: order as any, page });
+      if (items && items.length > 0) {
+        return items.map((sm) => sourceMangaToAppManga(sm));
+      }
+    } catch (e) {
+      console.warn(`[Discover] ${parser.metadata.name} list order='${order}' failed:`, e);
+    }
+    return [];
+  };
+
+  let [pop, topRated, mostPop, recent, latest] = await Promise.all([
+    safeParserList('popular', 1),
+    safeParserList('rating', 1),
+    safeParserList('popular', 1),
+    safeParserList('newest', 1),
+    safeParserList('latest', 1),
+  ]);
+
+  // If source completely failed or returned 0 items across ALL categories, fallback to MangaDex
+  const hasAnyData =
+    pop.length > 0 ||
+    topRated.length > 0 ||
+    mostPop.length > 0 ||
+    recent.length > 0 ||
+    latest.length > 0;
+
+  if (!hasAnyData) {
+    console.warn(`[Discover] Source ${sourceName} returned no categories. Falling back to MangaDex.`);
+    return getUniversalDiscoverData('mangadex', isRefresh);
+  }
+
+  return {
+    primarySourceId: sourceId,
+    primarySourceName: sourceName,
+    popular: pop,
+    topRated: topRated,
+    mostPopular: mostPop,
+    recentlyAdded: recent,
+    latestUpdates: latest,
+  };
+}

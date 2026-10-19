@@ -47,6 +47,7 @@ import { ToonkotsuParser } from './parsers/ToonkotsuParser';
 import rawCatalog from './catalog/sourcesCatalog.json';
 
 const STORAGE_KEY_ENABLED_SOURCES = '@mangaapp_enabled_sources_v2';
+const STORAGE_KEY_DEFAULT_SOURCE = '@mangaapp_default_discover_source_v1';
 
 export interface CatalogFilterOptions {
   query?: string;
@@ -68,6 +69,7 @@ export interface CatalogStats {
 class SourceManagerService {
   private parsers: Map<string, MangaParser> = new Map();
   private enabledSourceIds: Set<string> = new Set();
+  private defaultDiscoverSourceId: string = 'mangadex';
   private catalog: CatalogSourceItem[] = (rawCatalog as CatalogSourceItem[]) || [];
   private catalogById: Map<string, CatalogSourceItem> = new Map();
   private initialized = false;
@@ -429,6 +431,12 @@ class SourceManagerService {
   public async init(): Promise<void> {
     if (this.initialized) return;
     try {
+      // Restore default discover source preference
+      const storedDefault = await AsyncStorage.getItem(STORAGE_KEY_DEFAULT_SOURCE);
+      if (storedDefault) {
+        this.defaultDiscoverSourceId = storedDefault;
+      }
+
       const stored = await AsyncStorage.getItem(STORAGE_KEY_ENABLED_SOURCES);
       if (stored) {
         const ids: string[] = JSON.parse(stored);
@@ -462,8 +470,13 @@ class SourceManagerService {
         }
         this.enabledSourceIds = new Set(ids);
 
+        // Ensure default discover source is included if non-mangadex
+        if (this.defaultDiscoverSourceId !== 'mangadex') {
+          this.enabledSourceIds.add(this.defaultDiscoverSourceId);
+        }
+
         // Dynamically instantiate any enabled sources from the catalog
-        for (const id of ids) {
+        for (const id of Array.from(this.enabledSourceIds)) {
           if (!this.parsers.has(id)) {
             const catalogItem = this.catalogById.get(id);
             if (catalogItem) {
@@ -480,6 +493,90 @@ class SourceManagerService {
     } finally {
       this.initialized = true;
     }
+  }
+
+  /**
+   * Returns the currently configured default primary source ID for Discover page
+   */
+  public getDefaultDiscoverSourceId(): string {
+    return this.defaultDiscoverSourceId || 'mangadex';
+  }
+
+  /**
+   * Sets the default primary source for the Discover page
+   */
+  public async setDefaultDiscoverSourceId(sourceId: string): Promise<void> {
+    const targetId = (sourceId || 'mangadex').toLowerCase();
+    this.defaultDiscoverSourceId = targetId;
+    await AsyncStorage.setItem(STORAGE_KEY_DEFAULT_SOURCE, targetId);
+
+    // If external source, ensure enabled and instantiated
+    if (targetId !== 'mangadex') {
+      this.enabledSourceIds.add(targetId);
+      if (!this.parsers.has(targetId)) {
+        const catalogItem = this.catalogById.get(targetId);
+        if (catalogItem) {
+          const parser = this.createParserForCatalogSource(catalogItem);
+          if (parser) {
+            this.parsers.set(parser.metadata.id, parser);
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Returns metadata for the default discover source
+   */
+  public getDefaultDiscoverSource(): MangaSourceMetadata {
+    const currentId = this.getDefaultDiscoverSourceId();
+    if (currentId === 'mangadex') {
+      return {
+        id: 'mangadex',
+        name: 'MangaDex',
+        domain: 'mangadex.org',
+        baseUrl: 'https://mangadex.org',
+        locale: 'en',
+        isNsfw: false,
+        version: '5.0.0',
+        icon: 'https://mangadex.org/favicon.ico',
+        description: 'Official MangaDex API',
+        availableSortOrders: ['popular', 'latest', 'rating', 'newest'],
+        enabled: true,
+      };
+    }
+    const parser = this.getParser(currentId);
+    if (parser) {
+      return parser.metadata;
+    }
+    const catalogItem = this.catalogById.get(currentId);
+    if (catalogItem) {
+      return {
+        id: catalogItem.id,
+        name: catalogItem.title,
+        domain: catalogItem.domain,
+        baseUrl: catalogItem.baseUrl || `https://${catalogItem.domain}`,
+        locale: (catalogItem.locale as any) || 'en',
+        isNsfw: catalogItem.contentType === 'hentai',
+        version: '1.0.0',
+        icon: catalogItem.icon,
+        description: `${catalogItem.title} (${catalogItem.domain})`,
+        availableSortOrders: ['popular', 'latest', 'newest'],
+        enabled: true,
+      };
+    }
+    return {
+      id: 'mangadex',
+      name: 'MangaDex',
+      domain: 'mangadex.org',
+      baseUrl: 'https://mangadex.org',
+      locale: 'en',
+      isNsfw: false,
+      version: '5.0.0',
+      description: 'Fallback MangaDex API',
+      availableSortOrders: ['popular', 'latest'],
+      enabled: true,
+    };
   }
 
   /**

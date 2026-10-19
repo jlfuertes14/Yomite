@@ -72,7 +72,7 @@ function FlatRowItem({
     >
       <View style={styles.optionLeft}>
         <View style={[styles.iconSquare, { backgroundColor: colors.surfaceElevated }]}>
-          <Ionicons name={icon} size={18} color={colors.text} />
+          <Ionicons name={icon} size={22} color={colors.text} />
         </View>
         <View style={styles.optionTextCol}>
           <Text style={[styles.optionTitle, { color: colors.text }]} numberOfLines={1}>
@@ -94,7 +94,7 @@ function FlatRowItem({
         )}
         {rightElement}
         {showChevron && (
-          <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
         )}
       </View>
     </Pressable>
@@ -185,16 +185,14 @@ export default function MoreScreen() {
       edges={['top', 'left', 'right']}
     >
       <View style={styles.contentWrapper}>
-        {/* Header — Clean, borderless, matching Yomite Stitch */}
-        <View style={[styles.header, isDesktop && styles.headerDesktop]}>
-          <Text style={[styles.title, isDesktop && styles.titleDesktop, { color: colors.text }]}>
-            More
-          </Text>
-          {isDesktop && (
-            <Text style={[styles.desktopSubtitle, { color: colors.textSecondary }]}>
-              Secondary navigation and offline utilities.
-            </Text>
-          )}
+        {/* Header — Centered Yomite Transparent Logo */}
+        <View style={styles.headerCentered}>
+          <Image
+            source={require('../../assets/images/yomiite_transparent.png')}
+            style={styles.yomiteLogo}
+            contentFit="contain"
+            accessibilityLabel="Yomite Logo"
+          />
         </View>
 
         <ScrollView
@@ -280,7 +278,7 @@ export default function MoreScreen() {
               Yomite Manga Reader v1.2.6
             </Text>
             <Text style={[styles.footerSubtitle, { color: colors.textMuted }]}>
-              Powered by MangaDex API, Kotatsu and Supabase Cloud Sync
+              Powered by MangaDex API, Kotatsu
             </Text>
           </View>
         </ScrollView>
@@ -311,47 +309,35 @@ const styles = StyleSheet.create({
     maxWidth: 900,
     width: '100%',
   },
-  header: {
-    backgroundColor: 'transparent',
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-    paddingTop: 14,
-  },
-  headerDesktop: {
-    paddingBottom: 20,
-    paddingHorizontal: 24,
+  headerCentered: {
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingTop: 24,
+    paddingBottom: 16,
+    backgroundColor: 'transparent',
   },
-  title: {
-    fontSize: 30,
-    fontWeight: '700',
-    letterSpacing: -0.5,
-  },
-  titleDesktop: {
-    fontSize: 32,
-  },
-  desktopSubtitle: {
-    fontSize: 13,
-    marginTop: 2,
+  yomiteLogo: {
+    width: 290,
+    height: 96,
   },
   scrollContent: {
     gap: 28,
     paddingBottom: 120,
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 8,
   },
   scrollContentDesktop: {
     paddingHorizontal: 24,
-    paddingTop: 20,
+    paddingTop: 12,
   },
 
   /* Sections */
   section: {
-    gap: 8,
+    gap: 10,
   },
   sectionHeader: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
     letterSpacing: -0.1,
     paddingHorizontal: 4,
   },
@@ -362,12 +348,12 @@ const styles = StyleSheet.create({
   },
   flatRow: {
     alignItems: 'center',
-    borderRadius: 12,
+    borderRadius: 14,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    minHeight: 52,
-    paddingHorizontal: 6,
-    paddingVertical: 12,
+    minHeight: 60,
+    paddingHorizontal: 8,
+    paddingVertical: 14,
   },
   hairlineDivider: {
     height: StyleSheet.hairlineWidth,
@@ -377,26 +363,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
     flexDirection: 'row',
-    gap: 12,
+    gap: 14,
   },
   iconSquare: {
     alignItems: 'center',
-    borderRadius: 10,
-    height: 36,
+    borderRadius: 12,
+    height: 42,
     justifyContent: 'center',
-    width: 36,
+    width: 42,
   },
   optionTextCol: {
     flex: 1,
-    gap: 2,
+    gap: 3,
   },
   optionTitle: {
-    fontSize: 14.5,
+    fontSize: 16.5,
     fontWeight: '600',
     letterSpacing: 0.1,
   },
   optionSubtitle: {
-    fontSize: 12,
+    fontSize: 13.5,
   },
   optionRight: {
     alignItems: 'center',
@@ -409,7 +395,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   badgePillText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
   },
 
@@ -420,10 +406,10 @@ const styles = StyleSheet.create({
     marginTop: 28,
   },
   footerTitle: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
   },
   footerSubtitle: {
-    fontSize: 11,
+    fontSize: 12,
   },
 });
