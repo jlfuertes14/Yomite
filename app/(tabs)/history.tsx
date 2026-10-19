@@ -563,21 +563,24 @@ export default function HistoryScreen() {
         {/* Empty States */}
         {entries.length === 0 ? (
           <View style={styles.emptyState}>
-            <View style={styles.emptyIconBox}>
-              <Ionicons name="time-outline" size={38} color="#71717A" />
-            </View>
-            <Text style={styles.emptyTitle}>No reading history</Text>
-            <Text style={styles.emptySubtitle}>
+            <Image
+              source={require('../../assets/images/yomite_empty_history_icon.png')}
+              style={styles.emptyIllustration}
+              contentFit="contain"
+              transition={150}
+            />
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>No reading history</Text>
+            <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
               Chapters you read will appear here automatically
             </Text>
           </View>
         ) : filteredEntries.length === 0 ? (
           <View style={styles.emptyState}>
-            <View style={styles.emptyIconBox}>
-              <Ionicons name="search-outline" size={34} color="#71717A" />
+            <View style={[styles.emptyIconBox, { backgroundColor: colors.surfaceElevated }]}>
+              <Ionicons name="search-outline" size={34} color={colors.textMuted} />
             </View>
-            <Text style={styles.emptyTitle}>No matching titles</Text>
-            <Text style={styles.emptySubtitle}>
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>No matching titles</Text>
+            <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
               No reading history found matching "{searchQuery}"
             </Text>
           </View>
@@ -914,7 +917,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 12,
-    paddingTop: 60,
+    paddingBottom: 32,
+  },
+  emptyIllustration: {
+    width: 200,
+    height: 200,
+    marginBottom: 2,
   },
   emptyIconBox: {
     width: 68,

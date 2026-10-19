@@ -1105,13 +1105,18 @@ export default function LibraryScreen() {
             }
           >
             <View style={styles.emptyContent}>
-              <View style={[styles.emptyIconCircle, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}>
-                <Ionicons
-                  name={searchQuery ? 'search-outline' : activeCategoryObj.icon}
-                  size={36}
-                  color={colors.textMuted}
+              {searchQuery ? (
+                <View style={[styles.emptyIconCircle, { backgroundColor: colors.surfaceElevated, borderWidth: 0 }]}>
+                  <Ionicons name="search-outline" size={36} color={colors.textMuted} />
+                </View>
+              ) : (
+                <Image
+                  source={require('../../assets/images/yomite_empty_library_icon.png')}
+                  style={styles.emptyIllustration}
+                  contentFit="contain"
+                  transition={150}
                 />
-              </View>
+              )}
               <Text style={[styles.emptyTitle, { color: colors.text }]}>
                 {searchQuery ? 'No matching titles' : `No titles in ${activeCategoryObj.label}`}
               </Text>
@@ -1441,6 +1446,11 @@ const styles = StyleSheet.create({
   emptyContent: {
     alignItems: 'center',
     maxWidth: 380,
+  },
+  emptyIllustration: {
+    width: 200,
+    height: 200,
+    marginBottom: 4,
   },
   emptyIconCircle: {
     width: 68,

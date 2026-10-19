@@ -160,8 +160,8 @@ export function ShareCardModal({
               disabled={isSharing}
               style={[styles.shareBtn, { backgroundColor: colors.accent, opacity: isSharing ? 0.6 : 1 }]}
             >
-              <Ionicons name="share-social-outline" size={18} color="#FFF" />
-              <Text style={styles.shareBtnText}>{isSharing ? 'Generating Card...' : 'Share Card'}</Text>
+              <Ionicons name="share-social-outline" size={18} color={colors.accentForeground} />
+              <Text style={[styles.shareBtnText, { color: colors.accentForeground }]}>{isSharing ? 'Generating Card...' : 'Share Card'}</Text>
             </Pressable>
           </View>
         </MobileSheetPanel>

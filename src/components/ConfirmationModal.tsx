@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { getContrastTextColor } from '../../constants/Colors';
 import { useThemeColors } from '../hooks/useThemeColor';
 import { triggerHaptic } from '../utils/haptics';
 
@@ -273,7 +274,7 @@ export function ConfirmationModal({
                 Platform.OS === 'web' && { cursor: 'pointer' as any },
               ]}
             >
-              <Text style={styles.confirmBtnText}>{confirmText}</Text>
+              <Text style={[styles.confirmBtnText, { color: getContrastTextColor(getConfirmBgColor()) }]}>{confirmText}</Text>
             </Pressable>
           </View>
         </Animated.View>

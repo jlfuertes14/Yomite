@@ -6,7 +6,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useGlobalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -40,23 +40,23 @@ import {
   getRandomManga,
   getRecentlyAdded,
   getTopRatedManga,
-  MangaStatistics,
-  searchManga
+  MangaStatistics
 } from '../../src/api/mangadex';
-import { AdvancedSearchModal } from '../../src/components/AdvancedSearchModal';
 import { AuthModal } from '../../src/components/AuthModal';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
 import { CARD_GAP, MangaCard } from '../../src/components/MangaCard';
 import { OfflineState } from '../../src/components/OfflineState';
+import { SearchResultsModal } from '../../src/components/SearchResultsModal';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
 import { Skeleton } from '../../src/components/Skeleton';
 import { useColorScheme } from '../../src/hooks/useColorScheme';
 import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { syncUserDataWithCloud } from '../../src/services/cloudSync';
+import { useCatalogStore } from '../../src/store/catalogStore';
 import { useUIStore } from '../../src/store/uiStore';
 import { getUserAvatarUrl, getUserDisplayName, getUserHandle, useUserStore } from '../../src/store/userStore';
-import type { Manga, SearchFilters } from '../../src/types';
+import type { Manga } from '../../src/types';
 import { BannerCacheManager } from '../../src/utils/bannerCache';
 import { getUniversalDiscoverData, sourceMangaToAppManga } from '../../src/sources/adapter';
 import { SourceManager } from '../../src/sources/SourceManager';
@@ -131,7 +131,6 @@ interface WebHeaderProps {
   isWebDropdownVisible: boolean;
   setIsWebDropdownVisible: (v: boolean) => void;
   contractSearchBar: () => void;
-  setAdvancedSearchVisible: (v: boolean) => void;
   setActiveNavId: (id: string) => void;
   isSearching: boolean;
   searchResults: Manga[];
@@ -200,7 +199,6 @@ const WebHeader: React.FC<WebHeaderProps> = ({
   isWebDropdownVisible,
   setIsWebDropdownVisible,
   contractSearchBar,
-  setAdvancedSearchVisible,
   setActiveNavId,
   isSearching,
   searchResults,
@@ -549,21 +547,6 @@ const WebHeader: React.FC<WebHeaderProps> = ({
               )}
             </Animated.View>
 
-            <Pressable
-              onPress={() => setAdvancedSearchVisible(true)}
-              style={({ pressed }) => [
-                styles.webFilterBtn,
-                isMobile && { width: 34, height: 34, flexShrink: 0 },
-                {
-                  backgroundColor: isTransparentAtTop ? 'rgba(255, 255, 255, 0.12)' : colors.surfaceElevated,
-                  opacity: pressed ? 0.6 : 1,
-                },
-              ]}
-              hitSlop={8}
-            >
-              <Ionicons name="options-outline" size={isMobile ? 20 : 22} color={headerTextColor} />
-            </Pressable>
-
             {/* Get Mobile App Web Pill (Hidden on Mobile viewports where space is tight) */}
             {!isMobile && (
               <Pressable
@@ -653,7 +636,7 @@ const WebHeader: React.FC<WebHeaderProps> = ({
                             contentFit="cover"
                           />
                         ) : (
-                          <Text style={styles.dropdownAvatarText}>
+                          <Text style={[styles.dropdownAvatarText, { color: colors.accentForeground }]}>
                             {getUserDisplayName(user).charAt(0).toUpperCase()}
                           </Text>
                         )}
@@ -857,9 +840,36 @@ export default function DiscoverScreen() {
   // Retractable Sidebar states
   const [sidebarVisible, setSidebarVisible] = useState(false); // Inline desktop sidebar
   const [mobileDrawerVisible, setMobileDrawerVisible] = useState(false); // Mobile slide modal drawer
-  const [advancedSearchVisible, setAdvancedSearchVisible] = useState(false);
   const [authModalVisible, setAuthModalVisible] = useState(false);
-  const [activeFilters, setActiveFilters] = useState<SearchFilters | null>(null);
+  const [searchModalVisible, setSearchModalVisible] = useState(false);
+  const [searchInitialQuery, setSearchInitialQuery] = useState('');
+  // Restores from the source catalog appear instantly instead of sliding up
+  // (the sheet is an in-scene overlay; the catalog slides away to reveal it).
+  const [searchModalAnimateIn, setSearchModalAnimateIn] = useState(true);
+
+  // Returning from the Extensions source catalog reopens the search sheet
+  // with the query that was used to open the catalog.
+  const { searchQuery: routeSearchQuery, searchRequestId: routeSearchRequestId } =
+    useGlobalSearchParams<{ searchQuery?: string; searchRequestId?: string }>();
+  const handledSearchRequestRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!routeSearchRequestId) return;
+    const requestKey = String(routeSearchRequestId);
+    if (handledSearchRequestRef.current === requestKey) return;
+
+    const query = typeof routeSearchQuery === 'string' ? routeSearchQuery : '';
+    if (!query.trim()) return;
+
+    handledSearchRequestRef.current = requestKey;
+    setSearchInitialQuery(query);
+    setSearchModalAnimateIn(false);
+    setSearchModalVisible(true);
+  }, [routeSearchRequestId, routeSearchQuery]);
+
+  // `searchModalAnimateIn` is only ever changed while the sheet is hidden
+  // (openSearchModal restores it), so a restored sheet never replays the
+  // entrance on top of the catalog's slide-away.
 
   const refreshUser = useUserStore((s) => s.refreshUser);
 
@@ -886,7 +896,12 @@ export default function DiscoverScreen() {
 
   const fetchStatsForList = async (list: Manga[]) => {
     if (!list || list.length === 0) return;
-    const ids = list.map((m) => m.id);
+    const ids = list
+      .map((m) => m.id)
+      .filter((id) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+      );
+    if (ids.length === 0) return;
     const stats = await getBatchMangaStatistics(ids);
     setMangaStatsMap((prev) => ({ ...prev, ...stats }));
   };
@@ -1098,7 +1113,8 @@ export default function DiscoverScreen() {
     setIsWebDropdownVisible(false);
     contractSearchBar();
     setSearchResults([]);
-    setActiveFilters(null);
+    setGroupedExtensionResults([]);
+    setActiveSeeAllExtension(null);
     setCurrentPage(1);
     setActiveFeedTitle('Latest Updates');
     setActiveNavId('latest');
@@ -1295,13 +1311,16 @@ export default function DiscoverScreen() {
 
   const isShowingSearch =
     activeNavId === 'search_results' ||
-    activeFilters !== null ||
-    (Platform.OS !== 'web' && searchQuery.trim().length > 0);
+    searchQuery.trim().length > 0;
 
   // Android Hardware Back Button & Edge-Swipe Navigation Handler
   useFocusEffect(
     useCallback(() => {
       const onBackPress = () => {
+        if (searchModalVisible) {
+          setSearchModalVisible(false);
+          return true;
+        }
         if (activeSeeAllSection !== null) {
           triggerHaptic();
           showSeeAllChrome();
@@ -1326,7 +1345,7 @@ export default function DiscoverScreen() {
       return () => {
         subscription.remove();
       };
-    }, [activeSeeAllSection, isShowingSearch, activeNavId, showSeeAllChrome, handleResetToDiscover])
+    }, [activeSeeAllSection, isShowingSearch, activeNavId, searchModalVisible, showSeeAllChrome, handleResetToDiscover])
   );
 
   const handleRefresh = useCallback(async () => {
@@ -1372,13 +1391,12 @@ export default function DiscoverScreen() {
     }
   }, [activeSeeAllSection]);
 
-  const handleSearch = useCallback(async () => {
-    const query = searchQuery.trim();
+  const handleSearch = useCallback(async (overrideQuery?: string) => {
+    const query = (overrideQuery ?? searchQuery).trim();
     if (!query) {
-      if (activeFilters === null) {
-        setSearchResults([]);
-        setGroupedExtensionResults([]);
-      }
+      setSearchResults([]);
+      setGroupedExtensionResults([]);
+      setActiveSeeAllExtension(null);
       return;
     }
     try {
@@ -1386,77 +1404,45 @@ export default function DiscoverScreen() {
       setCurrentPage(1);
       setActiveFeedTitle('Search Results');
       setActiveNavId('search_results');
+      setActiveSeeAllExtension(null);
 
-      if (Platform.OS !== 'web') {
-        const rawResults = await SourceManager.searchAll(query);
-        const grouped = rawResults
-          .map((item) => ({
-            source: item.source,
-            mangaList: (item.results || []).map((sm) => sourceMangaToAppManga(sm)),
-          }))
-          .filter((item) => item.mangaList.length > 0);
+      const rawResults = await SourceManager.searchAll(query);
+      const grouped = rawResults
+        .map((item) => ({
+          source: item.source,
+          mangaList: (item.results || []).map((sm) => sourceMangaToAppManga(sm)),
+        }))
+        .filter((item) => item.mangaList.length > 0);
 
-        setGroupedExtensionResults(grouped);
-        const allFoundManga = grouped.flatMap((g) => g.mangaList);
-        setSearchResults(allFoundManga);
-        setTotalMangaCount(allFoundManga.length);
-        fetchStatsForList(allFoundManga);
-      } else {
-        const result = await searchManga({ title: query }, PAGE_SIZE, 0);
-        setSearchResults(result.data || []);
-        setTotalMangaCount(result.total || 0);
-        fetchStatsForList(result.data || []);
-      }
+      setGroupedExtensionResults(grouped);
+      const allFoundManga = grouped.flatMap((g) => g.mangaList);
+      setSearchResults(allFoundManga);
+      setTotalMangaCount(allFoundManga.length);
+      fetchStatsForList(allFoundManga);
     } catch (err) {
       console.error('Search failed:', err);
     } finally {
       setIsSearching(false);
     }
-  }, [searchQuery, activeFilters]);
+  }, [searchQuery]);
 
   useEffect(() => {
-    const timeout = setTimeout(handleSearch, 500);
+    const timeout = setTimeout(() => handleSearch(), 500);
     return () => clearTimeout(timeout);
   }, [searchQuery, handleSearch]);
 
-  const handleApplyAdvancedSearch = async (filters: SearchFilters) => {
-    try {
-      setIsSearching(true);
-      setCurrentPage(1);
-      setActiveFilters(filters);
-      setActiveFeedTitle('Search Results');
-      setActiveNavId('advanced_search');
-      setSidebarVisible(false);
-      const result = await searchManga(filters, PAGE_SIZE, 0);
-      setSearchResults(result.data);
-      setTotalMangaCount(result.total);
-      fetchStatsForList(result.data);
-    } catch (err) {
-      setConfirmModalConfig({
-        visible: true,
-        title: 'Search Failed',
-        message: 'Failed to execute search. Please check your internet connection and try again.',
-        iconName: 'search-outline',
-        confirmText: 'OK',
-        cancelText: '',
-        confirmVariant: 'primary',
-        onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
-      });
-    } finally {
-      setIsSearching(false);
-    }
+  const openSearchModal = () => {
+    triggerHaptic();
+    setSearchInitialQuery('');
+    setSearchModalAnimateIn(true);
+    setSearchModalVisible(true);
   };
 
   const clearSearchState = () => {
-    setActiveFilters(null);
     setSearchQuery('');
     setSearchResults([]);
-  };
-
-  const handleClearAdvancedSearch = () => {
-    clearSearchState();
-    setActiveFeedTitle('Recently Added');
-    setActiveNavId('recently_added');
+    setGroupedExtensionResults([]);
+    setActiveSeeAllExtension(null);
   };
 
   // Sidebar Actions
@@ -1530,27 +1516,19 @@ export default function DiscoverScreen() {
         mainScrollViewRef.current?.scrollTo({ y: 0, animated: true });
       }
 
-      if (searchResults.length > 0 || activeFilters || searchQuery.trim()) {
-        const filters: SearchFilters = activeFilters ?? (searchQuery.trim() ? { title: searchQuery.trim() } : {});
-        const result = await searchManga(filters, PAGE_SIZE, offset);
-        setSearchResults(result.data);
-        setTotalMangaCount(result.total);
-        fetchStatsForList(result.data);
+      let result: { data: Manga[]; total: number };
+      if (activeSeeAllSection === 'top_rated') {
+        result = await getTopRatedManga(PAGE_SIZE, offset);
+      } else if (activeSeeAllSection === 'most_popular') {
+        result = await getMostPopularManga(PAGE_SIZE, offset);
+      } else if (activeSeeAllSection === 'latest' || activeNavId === 'latest') {
+        result = await getLatestUpdates(PAGE_SIZE, offset);
       } else {
-        let result: { data: Manga[]; total: number };
-        if (activeSeeAllSection === 'top_rated') {
-          result = await getTopRatedManga(PAGE_SIZE, offset);
-        } else if (activeSeeAllSection === 'most_popular') {
-          result = await getMostPopularManga(PAGE_SIZE, offset);
-        } else if (activeSeeAllSection === 'latest' || activeNavId === 'latest') {
-          result = await getLatestUpdates(PAGE_SIZE, offset);
-        } else {
-          result = await getRecentlyAdded(PAGE_SIZE, offset);
-        }
-        setFeedManga(result.data);
-        setTotalMangaCount(result.total);
-        fetchStatsForList(result.data);
+        result = await getRecentlyAdded(PAGE_SIZE, offset);
       }
+      setFeedManga(result.data);
+      setTotalMangaCount(result.total);
+      fetchStatsForList(result.data);
     } catch (err) {
       console.error('Page change failed:', err);
     } finally {
@@ -1583,6 +1561,42 @@ export default function DiscoverScreen() {
   const navigateToManga = useCallback(
     (mangaId: string) => {
       router.push(`/manga/${mangaId}` as any);
+    },
+    [router]
+  );
+
+  const handleOpenSourceCatalog = useCallback(
+    (source: MangaSourceMetadata, query: string) => {
+      const { hostMounted, openCatalog } = useCatalogStore.getState();
+
+      if (hostMounted && Platform.OS !== 'ios') {
+        // The Extensions screen hosts the catalog as a native dialog and is
+        // kept mounted, so the catalog slides in directly over the search
+        // results — no tab switch, no intermediate renders. The sheet stays
+        // visible underneath and is revealed again when the catalog slides
+        // away.
+        //
+        // iOS is excluded: react-native-screens detaches inactive tab screens,
+        // so a modal presented from the blurred Extensions screen would have
+        // no view controller in the window hierarchy. There we fall back to
+        // the navigation flow below.
+        openCatalog({
+          sourceId: source.id,
+          name: source.name,
+          domain: source.domain,
+          query,
+        });
+        return;
+      }
+
+      // Fallback (iOS, or host not mounted yet): navigate to the Extensions
+      // tab and let its deep-link restore open the catalog.
+      setSearchModalVisible(false);
+      router.push(
+        `/(tabs)/extensions?reopenCatalog=${encodeURIComponent(source.id)}&catalogQuery=${encodeURIComponent(
+          query
+        )}&catalogRequestId=${Date.now()}&catalogFrom=search` as any
+      );
     },
     [router]
   );
@@ -1729,16 +1743,6 @@ export default function DiscoverScreen() {
 
   const navItems: SidebarNavItem[] = [
     {
-      id: 'advanced_search',
-      label: 'Advanced Search',
-      icon: 'options-outline',
-      action: () => {
-        setSidebarVisible(false);
-        setAdvancedSearchVisible(true);
-      },
-      badge: 'Filter',
-    },
-    {
       id: 'popular',
       label: 'Popular New Titles',
       icon: 'trending-up-outline',
@@ -1765,6 +1769,7 @@ export default function DiscoverScreen() {
   ];
 
   return (
+    <>
     <SafeAreaView
       style={[
         styles.container,
@@ -1790,7 +1795,6 @@ export default function DiscoverScreen() {
               isWebDropdownVisible={isWebDropdownVisible}
               setIsWebDropdownVisible={setIsWebDropdownVisible}
               contractSearchBar={contractSearchBar}
-              setAdvancedSearchVisible={setAdvancedSearchVisible}
               setActiveNavId={setActiveNavId}
               isSearching={isSearching}
               searchResults={searchResults}
@@ -1840,15 +1844,6 @@ export default function DiscoverScreen() {
                     ({totalMangaCount.toLocaleString()} titles)
                   </Text>
                 </View>
-                <Pressable
-                  onPress={() => setAdvancedSearchVisible(true)}
-                  style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1, padding: 6 }]}
-                  hitSlop={8}
-                  accessibilityRole="button"
-                  accessibilityLabel="Search titles"
-                >
-                  <Ionicons name="search-outline" size={22} color={colors.text} />
-                </Pressable>
               </Animated.View>
             ) : (
               <View style={styles.header}>
@@ -1866,13 +1861,13 @@ export default function DiscoverScreen() {
 
                 <View style={styles.headerRight}>
                   <Pressable
-                    onPress={() => setAdvancedSearchVisible(true)}
+                    onPress={openSearchModal}
                     style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1, padding: 6 }]}
                     hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel="Search titles"
                   >
-                    <Ionicons name="search-outline" size={22} color={colors.text} />
+                    <Ionicons name="search-outline" size={24} color={colors.text} />
                   </Pressable>
                 </View>
               </View>
@@ -1980,6 +1975,11 @@ export default function DiscoverScreen() {
                                   {Array.from({ length: 4 }).map((_, j) => (
                                     <View key={j} style={{ width: 124 }}>
                                       <Skeleton width={124} height={178} borderRadius={Radius.md} />
+                                      <View style={{ marginTop: 8, gap: 5 }}>
+                                        <Skeleton width={112} height={12} borderRadius={Radius.xs} />
+                                        <Skeleton width={80} height={12} borderRadius={Radius.xs} />
+                                        <Skeleton width={50} height={10} borderRadius={Radius.xs} />
+                                      </View>
                                     </View>
                                   ))}
                                 </ScrollView>
@@ -2031,13 +2031,15 @@ export default function DiscoverScreen() {
                                       triggerHaptic();
                                       setActiveSeeAllExtension(group);
                                     }}
-                                    style={({ pressed }) => [styles.seeAllBtn, pressed && { opacity: 0.6 }]}
+                                    style={({ pressed }) => [
+                                      styles.carouselArrowBtn,
+                                      pressed && { opacity: 0.6 },
+                                    ]}
                                     hitSlop={8}
                                     accessibilityRole="button"
                                     accessibilityLabel={`See all search results for ${group.source.name}`}
                                   >
-                                    <Text style={[styles.seeAllBtnText, { color: colors.accent }]}>See All</Text>
-                                    <Ionicons name="chevron-forward" size={16} color={colors.accent} />
+                                    <Ionicons name="arrow-forward" size={16} color={colors.accent} />
                                   </Pressable>
                                 </View>
 
@@ -3131,21 +3133,12 @@ export default function DiscoverScreen() {
         <SidebarDrawer
           visible={mobileDrawerVisible}
           onClose={() => setMobileDrawerVisible(false)}
-          onSelectAdvancedSearch={() => setAdvancedSearchVisible(true)}
           onSelectLatest={handleSelectLatest}
           onSelectRecentlyAdded={handleSelectRecentlyAdded}
           onSelectRandom={handleSelectRandom}
           onSelectPopular={handleSelectPopular}
         />
       )}
-
-      {/* Advanced Search Filter Modal */}
-      <AdvancedSearchModal
-        visible={advancedSearchVisible}
-        onClose={() => setAdvancedSearchVisible(false)}
-        onApplyFilters={handleApplyAdvancedSearch}
-        onRandomManga={handleSelectRandom}
-      />
 
       {/* Auth Modal for Unauthenticated Users */}
       <AuthModal
@@ -3166,6 +3159,22 @@ export default function DiscoverScreen() {
         onCancel={() => setConfirmModalConfig((prev) => ({ ...prev, visible: false }))}
       />
     </SafeAreaView>
+
+      {/* Cross-extension search — rendered as an overlay above the whole
+          Discover scene (incl. the floating tab bar) so the source catalog
+          can slide away on top of it and reveal the restored results. */}
+      <SearchResultsModal
+        visible={searchModalVisible}
+        onClose={() => setSearchModalVisible(false)}
+        onSelectManga={(id) => {
+          setSearchModalVisible(false);
+          navigateToManga(id);
+        }}
+        onViewAll={handleOpenSourceCatalog}
+        initialQuery={searchInitialQuery}
+        animateIn={searchModalAnimateIn}
+      />
+    </>
   );
 }
 
@@ -3209,6 +3218,12 @@ const styles = StyleSheet.create({
   seeAllBtnText: {
     fontSize: Typography.sizes.caption,
     fontWeight: Typography.weights.semibold,
+  },
+  carouselArrowBtn: {
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   carouselContent: {
     paddingHorizontal: Spacing.md,

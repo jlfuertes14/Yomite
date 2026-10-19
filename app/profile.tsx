@@ -411,7 +411,7 @@ export default function ProfileScreen() {
                         cachePolicy="memory-disk"
                       />
                     ) : (
-                      <Text style={styles.avatarInitials}>
+                      <Text style={[styles.avatarInitials, { color: colors.accentForeground }]}>
                         {displayName.charAt(0).toUpperCase()}
                       </Text>
                     )}

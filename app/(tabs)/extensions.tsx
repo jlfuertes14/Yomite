@@ -38,6 +38,7 @@ import {
   getPopularManga,
   searchManga,
 } from '../../src/api/mangadex';
+import { AdvancedSearchModal } from '../../src/components/AdvancedSearchModal';
 import { BridgedImage } from '../../src/components/BridgedImage';
 import { GridColumnsIcon } from '../../src/components/GridColumnsIcon';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
@@ -50,7 +51,8 @@ import { webViewBridge } from '../../src/sources/network/webViewBridge';
 import { computeTitleMatchScore } from '../../src/sources/parsers/MangaDotParser';
 import { SourceManager } from '../../src/sources/SourceManager';
 import { CatalogSourceItem, SourceSortOption, SourceTag } from '../../src/sources/types';
-import type { Manga } from '../../src/types';
+import { useCatalogStore } from '../../src/store/catalogStore';
+import type { Manga, SearchFilters } from '../../src/types';
 import { triggerHaptic } from '../../src/utils/haptics';
 import { detectMangaLanguage, getLanguageInfo } from '../../src/utils/language';
 import { normalizeRatingToTen } from '../../src/utils/rating';
@@ -1130,12 +1132,28 @@ export default function ExtensionsScreen() {
   const insets = useSafeAreaInsets();
   const safeTop = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const { reopenCatalog } = useLocalSearchParams<{ reopenCatalog?: string }>();
+  const { reopenCatalog, catalogQuery, catalogRequestId, catalogFrom } = useLocalSearchParams<{
+    reopenCatalog?: string;
+    catalogQuery?: string;
+    catalogRequestId?: string;
+    catalogFrom?: string;
+  }>();
 
   // State preservation when navigating to manga details and returning
   const isViewingMangaFromCatalogRef = useRef(false);
   const isRestoringFromDetailRef = useRef(false);
   const isSolvingCloudflareRef = useRef(false);
+  const handledCatalogRequestRef = useRef<string | null>(null);
+  const catalogOpenedFromSearchRef = useRef(false);
+  const catalogSearchQueryRef = useRef('');
+  const catalogSlideX = useRef(new Animated.Value(0)).current;
+  const isCatalogClosingRef = useRef(false);
+  // True when the catalog was opened through the store (Discover search sheet)
+  // rather than through the Extensions route params.
+  const catalogFromStoreRef = useRef(false);
+  const handledCatalogStoreRequestRef = useRef<string | null>(null);
+  const catalogRequest = useCatalogStore((s) => s.request);
+  const setCatalogHostMounted = useCatalogStore((s) => s.setHostMounted);
 
   const [drawerVisible, setDrawerVisible] = useState(false);
 
@@ -1143,6 +1161,7 @@ export default function ExtensionsScreen() {
   const [installedIds, setInstalledIds] = useState<string[]>(DEFAULT_INSTALLED_IDS);
   const [defaultSourceId, setDefaultSourceId] = useState<string>('mangadex');
   const [advancedSearchVisible, setAdvancedSearchVisible] = useState(false);
+  const [catalogFilters, setCatalogFilters] = useState<SearchFilters | null>(null);
 
   // Source Card Action Floating Bar state (Long Press on Grid Card)
   const [sourceActionModalVisible, setSourceActionModalVisible] = useState(false);
@@ -1231,6 +1250,9 @@ export default function ExtensionsScreen() {
 
   // Manga Browser Modal state (Image 2)
   const [mangaModalVisible, setMangaModalVisible] = useState(false);
+  // When opened from the Discover search carousel we slide the catalog
+  // horizontally (like a pushed screen) instead of using the vertical curtain.
+  const [catalogSlidesHorizontally, setCatalogSlidesHorizontally] = useState(false);
   const [activeMangaSource, setActiveMangaSource] = useState<{ id: string; name: string; domain?: string }>({
     id: 'mangadex',
     name: 'MangaDex',
@@ -1447,10 +1469,12 @@ export default function ExtensionsScreen() {
                   JSON.stringify(merged)
                 );
                 setInstalledIds(merged);
+                await SourceManager.syncInstalledSources(merged);
                 return;
               }
             }
             setInstalledIds(parsed);
+            await SourceManager.syncInstalledSources(parsed);
             return;
           }
         }
@@ -1459,6 +1483,7 @@ export default function ExtensionsScreen() {
           STORAGE_KEY_INSTALLED_SOURCES,
           JSON.stringify(DEFAULT_INSTALLED_IDS)
         );
+        await SourceManager.syncInstalledSources(DEFAULT_INSTALLED_IDS);
       } catch {
         // Fallback to default
       }
@@ -1625,7 +1650,13 @@ export default function ExtensionsScreen() {
 
   // Load mangas when Manga Browser Modal (Image 2) opens or changes
   const loadModalMangas = useCallback(
-    async (pageToLoad: number, append = false) => {
+    async (
+      pageToLoad: number,
+      append = false,
+      filtersOverride?: SearchFilters | null
+    ) => {
+      const activeCatalogFilters =
+        filtersOverride !== undefined ? filtersOverride : catalogFilters;
       if (pageToLoad === 1) {
         setIsModalLoading(true);
         setModalError(null);
@@ -1653,12 +1684,15 @@ export default function ExtensionsScreen() {
           else if (selectedSort === 'rating') orders = { rating: 'desc' };
           else if (selectedSort === 'alphabetical') orders = { title: 'asc' };
 
-          if (debouncedMangaQuery.trim() || selectedGenre) {
+          if (debouncedMangaQuery.trim() || selectedGenre || activeCatalogFilters) {
             const searchRes = await searchManga(
               {
-                title: debouncedMangaQuery.trim() || undefined,
-                includedTags: selectedGenre ? [selectedGenre] : undefined,
-                orders,
+                ...(activeCatalogFilters ?? {}),
+                title: debouncedMangaQuery.trim() || activeCatalogFilters?.title || undefined,
+                includedTags: selectedGenre
+                  ? [selectedGenre]
+                  : activeCatalogFilters?.includedTags,
+                orders: activeCatalogFilters?.orders ?? orders,
               },
               24,
               offset
@@ -1783,7 +1817,7 @@ export default function ExtensionsScreen() {
         setIsModalLoadingMore(false);
       }
     },
-    [activeMangaSource, selectedSort, selectedGenre, debouncedMangaQuery, allCatalog]
+    [activeMangaSource, selectedSort, selectedGenre, debouncedMangaQuery, allCatalog, catalogFilters]
   );
 
   const handleOpenActiveSourceWebsite = useCallback(async () => {
@@ -1924,36 +1958,167 @@ export default function ExtensionsScreen() {
     }
   }, [allCatalog, selectedSort]);
 
-  // Restore catalog from deep link or browser refresh with reopenCatalog parameter
+  // Restore catalog from deep link / Discover "view all" (reopenCatalog + catalogQuery)
   useEffect(() => {
     if (reopenCatalog) {
+      const requestKey = `${reopenCatalog}|${catalogQuery ?? ''}|${catalogRequestId ?? ''}`;
+      if (handledCatalogRequestRef.current === requestKey) return;
+
       const src =
         displayGridSources.find((s) => s.id === reopenCatalog) ||
         allCatalog.find((c) => c.id === reopenCatalog);
       if (src) {
-        isRestoringFromDetailRef.current = true;
+        handledCatalogRequestRef.current = requestKey;
+        const query = typeof catalogQuery === 'string' ? catalogQuery : '';
+        const hasQuery = query.trim().length > 0;
+
+        // Remember where the catalog was opened from so the back arrow can
+        // return to the Discover search sheet instead of just closing.
+        const fromSearch = catalogFrom === 'search' && hasQuery;
+        catalogOpenedFromSearchRef.current = fromSearch;
+        catalogSearchQueryRef.current = query;
+        isCatalogClosingRef.current = false;
+        catalogFromStoreRef.current = false;
+
+        // A query means "fresh search from Discover"; without one we are
+        // returning from a manga detail page and must keep the current state.
+        isRestoringFromDetailRef.current = !hasQuery;
+
         setActiveMangaSource({
           id: src.id,
           name: src.name || (src as any).title,
           domain: (src as any).domain,
         });
-        setMangaModalVisible(true);
+        setSelectedGenre('');
+        setCatalogFilters(null);
+        setMangaSearchQuery(query);
+        setDebouncedMangaQuery(query.trim());
+        setIsMangaSearchOpen(hasQuery);
+        setModalCfUrl('');
+        setCatalogSlidesHorizontally(fromSearch);
+
+        if (fromSearch) {
+          // Push-in from the right, matching the navigation screen transition.
+          catalogSlideX.setValue(windowWidth);
+          setMangaModalVisible(true);
+          requestAnimationFrame(() => {
+            Animated.timing(catalogSlideX, {
+              toValue: 0,
+              duration: 260,
+              easing: Easing.bezier(0.23, 1, 0.32, 1),
+              useNativeDriver: Platform.OS !== 'web',
+            }).start();
+          });
+        } else {
+          setMangaModalVisible(true);
+        }
+
         loadSourceFilters(src.id);
       }
     }
-  }, [reopenCatalog, displayGridSources, allCatalog, loadSourceFilters]);
+  }, [
+    reopenCatalog,
+    catalogQuery,
+    catalogRequestId,
+    catalogFrom,
+    displayGridSources,
+    allCatalog,
+    loadSourceFilters,
+  ]);
+
+  // Let the Discover search sheet know the catalog host is available.
+  useEffect(() => {
+    setCatalogHostMounted(true);
+    return () => setCatalogHostMounted(false);
+  }, [setCatalogHostMounted]);
+
+  // Direct open from the Discover search sheet (via the store). The sheet stays
+  // mounted underneath, so the catalog slides in over the results and slides
+  // away again to reveal them — no tab switch, no intermediate renders.
+  useEffect(() => {
+    if (!catalogRequest) return;
+    if (handledCatalogStoreRequestRef.current === catalogRequest.requestId) return;
+    handledCatalogStoreRequestRef.current = catalogRequest.requestId;
+
+    catalogFromStoreRef.current = true;
+    catalogOpenedFromSearchRef.current = true;
+    catalogSearchQueryRef.current = catalogRequest.query;
+    isCatalogClosingRef.current = false;
+    isRestoringFromDetailRef.current = false;
+
+    setActiveMangaSource({
+      id: catalogRequest.sourceId,
+      name: catalogRequest.name,
+      domain: catalogRequest.domain,
+    });
+    setSelectedGenre('');
+    setCatalogFilters(null);
+    setMangaSearchQuery(catalogRequest.query);
+    setDebouncedMangaQuery(catalogRequest.query.trim());
+    setIsMangaSearchOpen(catalogRequest.query.trim().length > 0);
+    setModalCfUrl('');
+    setCatalogSlidesHorizontally(true);
+    catalogSlideX.setValue(windowWidth);
+    setMangaModalVisible(true);
+    requestAnimationFrame(() => {
+      Animated.timing(catalogSlideX, {
+        toValue: 0,
+        duration: 260,
+        easing: Easing.bezier(0.23, 1, 0.32, 1),
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
+    });
+
+    loadSourceFilters(catalogRequest.sourceId);
+  }, [catalogRequest, windowWidth, catalogSlideX, loadSourceFilters]);
+
+  const handleCloseCatalogFromSearch = useCallback(() => {
+    if (isCatalogClosingRef.current) return;
+    isCatalogClosingRef.current = true;
+
+    catalogOpenedFromSearchRef.current = false;
+    isViewingMangaFromCatalogRef.current = false;
+    isRestoringFromDetailRef.current = false;
+
+    // Pop out to the right like a navigation screen. When the catalog was
+    // opened directly from the search sheet (store), the sheet is still
+    // mounted underneath and is simply revealed as the catalog slides away.
+    Animated.timing(catalogSlideX, {
+      toValue: windowWidth,
+      duration: 240,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: Platform.OS !== 'web',
+    }).start(() => {
+      isCatalogClosingRef.current = false;
+      setMangaModalVisible(false);
+      setCatalogSlidesHorizontally(false);
+
+      if (catalogFromStoreRef.current) {
+        catalogFromStoreRef.current = false;
+        useCatalogStore.getState().clearCatalog();
+      } else {
+        router.navigate(
+          `/(tabs)?searchQuery=${encodeURIComponent(catalogSearchQueryRef.current)}&searchRequestId=${Date.now()}` as any
+        );
+      }
+    });
+  }, [router, catalogSlideX, windowWidth]);
 
   // Handle Android hardware back press when catalog is open
   useEffect(() => {
     if (!mangaModalVisible) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (catalogOpenedFromSearchRef.current) {
+        handleCloseCatalogFromSearch();
+        return true;
+      }
       isViewingMangaFromCatalogRef.current = false;
       isRestoringFromDetailRef.current = false;
       setMangaModalVisible(false);
       return true;
     });
     return () => sub.remove();
-  }, [mangaModalVisible]);
+  }, [mangaModalVisible, handleCloseCatalogFromSearch]);
 
   useEffect(() => {
     if (mangaModalVisible) {
@@ -1971,6 +2136,10 @@ export default function ExtensionsScreen() {
     triggerHaptic();
     isRestoringFromDetailRef.current = false;
     isViewingMangaFromCatalogRef.current = false;
+    catalogOpenedFromSearchRef.current = false;
+    isCatalogClosingRef.current = false;
+    catalogSlideX.setValue(0);
+    setCatalogSlidesHorizontally(false);
     setActiveMangaSource(source);
     setSelectedGenre('');
     setMangaSearchQuery('');
@@ -2118,8 +2287,8 @@ export default function ExtensionsScreen() {
                 style={[styles.emptyGridCatalogBtn, { backgroundColor: colors.accent }]}
                 aria-label="Open Sources Catalog"
               >
-                <Ionicons name="compass-outline" size={18} color="#FFFFFF" />
-                <Text style={styles.emptyGridCatalogBtnText}>Open Catalog</Text>
+                <Ionicons name="compass-outline" size={18} color={colors.accentForeground} />
+                <Text style={[styles.emptyGridCatalogBtnText, { color: colors.accentForeground }]}>Open Catalog</Text>
               </Pressable>
             </View>
           ) : (
@@ -2626,8 +2795,18 @@ export default function ExtensionsScreen() {
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
         <Modal
           visible={mangaModalVisible}
-          animationType="slide"
-          presentationStyle="fullScreen"
+          animationType={catalogSlidesHorizontally ? 'none' : 'slide'}
+          transparent={catalogSlidesHorizontally}
+          // The sliding catalog already owns its safe-area padding (header
+          // `paddingTop: safeTop`, list `paddingBottom: insets.bottom + 24`).
+          // On Android the dialog content wrapper is inset by the system bars
+          // unless statusBarTranslucent is set (`fitsSystemWindows`), and the
+          // window only spans the full screen when navigationBarTranslucent is
+          // set — without both, a strip of the search sheet shows through at
+          // the bottom of the sliding catalog.
+          statusBarTranslucent={catalogSlidesHorizontally}
+          navigationBarTranslucent={catalogSlidesHorizontally}
+          presentationStyle={catalogSlidesHorizontally ? undefined : 'fullScreen'}
           onRequestClose={() => {
             if (isMangaSearchOpen) {
               setIsMangaSearchOpen(false);
@@ -2637,13 +2816,23 @@ export default function ExtensionsScreen() {
               setSortPickerVisible(false);
               return;
             }
+            if (catalogOpenedFromSearchRef.current) {
+              handleCloseCatalogFromSearch();
+              return;
+            }
             isRestoringFromDetailRef.current = false;
             isViewingMangaFromCatalogRef.current = false;
             setMangaModalVisible(false);
           }}
         >
-          <View
-            style={[styles.modalContainer, { backgroundColor: colors.background }]}
+          <Animated.View
+            style={[
+              styles.modalContainer,
+              { backgroundColor: colors.background },
+              catalogSlidesHorizontally && {
+                transform: [{ translateX: catalogSlideX }],
+              },
+            ]}
           >
             {/* Curtain Sticky Header in Source Catalog Modal */}
             <Animated.View
@@ -2667,6 +2856,10 @@ export default function ExtensionsScreen() {
                 <Pressable
                   onPress={() => {
                     triggerHaptic();
+                    if (catalogOpenedFromSearchRef.current) {
+                      handleCloseCatalogFromSearch();
+                      return;
+                    }
                     isRestoringFromDetailRef.current = false;
                     isViewingMangaFromCatalogRef.current = false;
                     setMangaModalVisible(false);
@@ -2675,7 +2868,7 @@ export default function ExtensionsScreen() {
                   style={styles.modalBackBtn}
                   aria-label="Back"
                 >
-                  <Ionicons name="arrow-back" size={24} color={colors.text} />
+                  <Ionicons name="arrow-back" size={28} color={colors.text} />
                 </Pressable>
 
                 <View style={styles.modalTopBarRight}>
@@ -2952,8 +3145,8 @@ export default function ExtensionsScreen() {
                         }}
                         aria-label="Verify with Source"
                       >
-                        <Ionicons name="shield-checkmark-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-                        <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>
+                        <Ionicons name="shield-checkmark-outline" size={16} color={colors.accentForeground} style={{ marginRight: 6 }} />
+                        <Text style={{ color: colors.accentForeground, fontSize: 13, fontWeight: '700' }}>
                           Verify
                         </Text>
                       </Pressable>
@@ -3024,8 +3217,8 @@ export default function ExtensionsScreen() {
                         }}
                         aria-label="Retry loading mangas"
                       >
-                        <Ionicons name="refresh" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-                        <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>
+                        <Ionicons name="refresh" size={16} color={colors.accentForeground} style={{ marginRight: 6 }} />
+                        <Text style={{ color: colors.accentForeground, fontSize: 13, fontWeight: '700' }}>
                           Retry
                         </Text>
                       </Pressable>
@@ -3089,8 +3282,20 @@ export default function ExtensionsScreen() {
                     <Pressable
                       onPress={() => {
                         triggerHaptic();
-                        isRestoringFromDetailRef.current = true;
-                        isViewingMangaFromCatalogRef.current = true;
+                        if (catalogOpenedFromSearchRef.current) {
+                          // Opened from the Discover search sheet: returning
+                          // from the manga should land back on the results
+                          // instead of reopening the catalog on the Extensions
+                          // tab.
+                          catalogOpenedFromSearchRef.current = false;
+                          catalogFromStoreRef.current = false;
+                          useCatalogStore.getState().clearCatalog();
+                          catalogSlideX.setValue(0);
+                          setCatalogSlidesHorizontally(false);
+                        } else {
+                          isRestoringFromDetailRef.current = true;
+                          isViewingMangaFromCatalogRef.current = true;
+                        }
                         setMangaModalVisible(false);
                         const params = new URLSearchParams();
                         if (activeMangaSource?.id) params.set('fromCatalog', activeMangaSource.id);
@@ -3546,18 +3751,29 @@ export default function ExtensionsScreen() {
                           backgroundColor: colors.accent,
                         }}
                       >
-                        <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>Done</Text>
+                        <Text style={{ color: colors.accentForeground, fontWeight: '700' }}>Done</Text>
                       </Pressable>
                     </View>
                   )}
                 </SafeAreaView>
               </Modal>
             )}
-          </View>
+          </Animated.View>
         </Modal>
 
         {/* Navigation Drawer */}
         <SidebarDrawer visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
+
+        {/* MangaDex advanced filters (catalog only) */}
+        <AdvancedSearchModal
+          visible={advancedSearchVisible}
+          onClose={() => setAdvancedSearchVisible(false)}
+          onApplyFilters={(filters) => {
+            setAdvancedSearchVisible(false);
+            setCatalogFilters(filters);
+            loadModalMangas(1, false, filters);
+          }}
+        />
 
         {/* Persistent Background Cloudflare & Network Bridge */}
         {Platform.OS !== 'web' && (

@@ -764,15 +764,18 @@ export default function DownloadsScreen() {
           data={groupedManga}
           keyExtractor={(group) => group.mangaId}
           renderItem={renderMangaGroup}
-          contentContainerStyle={styles.listContainer}
+          contentContainerStyle={[
+            styles.listContainer,
+            groupedManga.length === 0 && styles.listContainerEmpty,
+          ]}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Ionicons
-                name="cloud-download-outline"
-                size={52}
-                color={colors.textMuted}
-                style={styles.emptyIcon}
+              <Image
+                source={require('../../assets/images/yomite_empty_download_icon.png')}
+                style={styles.emptyIllustration}
+                contentFit="contain"
+                transition={150}
               />
 
               {/* Title & Description */}
@@ -1063,6 +1066,12 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.xs,
     paddingBottom: 100,
   },
+  listContainerEmpty: {
+    flexGrow: 1,
+    paddingTop: 0,
+    paddingBottom: 0,
+    justifyContent: 'center',
+  },
 
   /* Group Card */
   groupCard: {
@@ -1182,12 +1191,13 @@ const styles = StyleSheet.create({
   emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 70,
     paddingBottom: 40,
     paddingHorizontal: 24,
   },
-  emptyIcon: {
-    marginBottom: 16,
+  emptyIllustration: {
+    width: 200,
+    height: 200,
+    marginBottom: 4,
   },
   emptyTitle: {
     fontSize: 20,

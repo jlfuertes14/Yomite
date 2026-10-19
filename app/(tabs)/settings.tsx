@@ -101,7 +101,7 @@ function CustomSwitch({
         false: isDark ? '#3F3F46' : colors.surfaceElevated,
         true: activeColor,
       }}
-      thumbColor="#FFFFFF"
+      thumbColor={value ? getContrastTextColor(activeColor) : '#FFFFFF'}
       ios_backgroundColor={isDark ? '#3F3F46' : colors.surfaceElevated}
     />
   );
@@ -667,7 +667,7 @@ export default function SettingsScreen() {
                   isSelected && styles.schemeSwatchSelected,
                 ]}
               >
-                {isSelected && <Ionicons name="checkmark" size={18} color={preset.id === 'kanade' ? '#1C1B1C' : '#FFFFFF'} />}
+                {isSelected && <Ionicons name="checkmark" size={18} color={getContrastTextColor(preset.color)} />}
               </View>
               <Text style={[styles.schemeChipText, { color: isSelected ? colors.text : colors.textSecondary }]}>
                 {preset.name}
@@ -847,7 +847,7 @@ export default function SettingsScreen() {
                       <Text
                         style={[
                           styles.intervalChipText,
-                          { color: isSelected ? '#FFFFFF' : colors.textMuted },
+                          { color: isSelected ? getContrastTextColor(accentColor) : colors.textMuted },
                         ]}
                       >
                         {item.label}
@@ -1136,7 +1136,7 @@ export default function SettingsScreen() {
 
           {/* App Info Footer */}
           <View style={styles.footer}>
-            <Text style={[styles.footerTitle, { color: colors.textMuted }]}>Yomite Manga Reader v1.2.6</Text>
+            <Text style={[styles.footerTitle, { color: colors.textMuted }]}>Yomite Manga Reader v1.2.7</Text>
             <Text style={[styles.footerSubtitle, { color: colors.textMuted }]}>
               Powered by MangaDex API, Kotatsu and Supabase Cloud Sync
             </Text>

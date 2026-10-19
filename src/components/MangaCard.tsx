@@ -1,7 +1,7 @@
 /**
  * MangaCard — Edge-to-edge full width responsive grid card with Micro-Interaction Spring Scale
  */
-import React, { memo } from 'react';
+import React, { memo, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -53,6 +53,17 @@ function MangaCardComponent({
   const colors = useThemeColors();
   const { width: windowWidth } = useWindowDimensions();
 
+  // Wire the cover + title to the skeleton until the artwork resolves
+  const [isCoverLoaded, setIsCoverLoaded] = useState(false);
+  const [isCoverErrored, setIsCoverErrored] = useState(false);
+
+  useEffect(() => {
+    setIsCoverLoaded(false);
+    setIsCoverErrored(false);
+  }, [coverUrl, id]);
+
+  const showSkeleton = !!coverUrl && !isCoverLoaded && !isCoverErrored;
+
   const isDesktop = windowWidth >= 1024;
   const isMobile = windowWidth < 600;
 
@@ -92,14 +103,18 @@ function MangaCardComponent({
           },
         ]}
       >
-        <Skeleton width="100%" height="100%" style={StyleSheet.absoluteFill as any} />
-        {coverUrl ? (
+        {showSkeleton && (
+          <Skeleton width="100%" height="100%" style={StyleSheet.absoluteFill as any} />
+        )}
+        {coverUrl && !isCoverErrored ? (
           <BridgedImage
             source={{ uri: coverUrl }}
             style={styles.coverImage}
             contentFit="cover"
             transition={300}
             recyclingKey={id}
+            onLoad={() => setIsCoverLoaded(true)}
+            onError={() => setIsCoverErrored(true)}
           />
         ) : (
           <View style={[styles.placeholder, { backgroundColor: colors.surfaceElevated }]}>
@@ -118,37 +133,60 @@ function MangaCardComponent({
         {/* Unread badge */}
         {unreadCount && unreadCount > 0 ? (
           <View style={[styles.badge, { backgroundColor: colors.accent }]}>
-            <Text style={styles.badgeText}>{unreadCount}</Text>
+            <Text style={[styles.badgeText, { color: colors.accentForeground }]}>{unreadCount}</Text>
           </View>
         ) : null}
       </View>
 
       {/* Title & Author below cover */}
       <View style={styles.textMetaContainer}>
-        <Text
-          style={[styles.title, { color: colors.text }]}
-          numberOfLines={2}
-        >
-          {title}
-        </Text>
-        <View style={styles.subMetaRow}>
-          {author ? (
+        {showSkeleton ? (
+          <View style={styles.titleSkeletonWrap}>
+            <Skeleton
+              width={typeof cardWidth === 'number' ? Math.floor(cardWidth * 0.92) : '92%'}
+              height={12}
+              borderRadius={Radius.xs}
+            />
+            <Skeleton
+              width={typeof cardWidth === 'number' ? Math.floor(cardWidth * 0.66) : '66%'}
+              height={12}
+              borderRadius={Radius.xs}
+            />
+            <Skeleton
+              width={typeof cardWidth === 'number' ? Math.floor(cardWidth * 0.4) : '40%'}
+              height={10}
+              borderRadius={Radius.xs}
+              style={styles.titleSkeletonLastLine}
+            />
+          </View>
+        ) : (
+          <>
             <Text
-              style={[styles.author, { color: colors.textSecondary, flex: 1 }]}
-              numberOfLines={1}
+              style={[styles.title, { color: colors.text }]}
+              numberOfLines={2}
             >
-              {author}
+              {title}
             </Text>
-          ) : null}
-          {formattedFollows ? (
-            <View style={styles.followsRow}>
-              <Ionicons name="bookmark" size={9} color={colors.accent} />
-              <Text style={[styles.statText, { color: colors.textSecondary }]}>
-                {formattedFollows}
-              </Text>
+            <View style={styles.subMetaRow}>
+              {author ? (
+                <Text
+                  style={[styles.author, { color: colors.textSecondary, flex: 1 }]}
+                  numberOfLines={1}
+                >
+                  {author}
+                </Text>
+              ) : null}
+              {formattedFollows ? (
+                <View style={styles.followsRow}>
+                  <Ionicons name="bookmark" size={9} color={colors.accent} />
+                  <Text style={[styles.statText, { color: colors.textSecondary }]}>
+                    {formattedFollows}
+                  </Text>
+                </View>
+              ) : null}
             </View>
-          ) : null}
-        </View>
+          </>
+        )}
       </View>
     </AnimatedCard>
   );
@@ -181,6 +219,13 @@ const styles = StyleSheet.create({
   textMetaContainer: {
     marginTop: 6,
     gap: 2,
+  },
+  titleSkeletonWrap: {
+    gap: 5,
+    paddingTop: 1,
+  },
+  titleSkeletonLastLine: {
+    marginTop: 1,
   },
   title: {
     fontSize: Platform.OS === 'web' ? 14 : Typography.sizes.footnote,

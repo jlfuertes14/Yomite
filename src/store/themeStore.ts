@@ -21,7 +21,7 @@ export interface ThemeSchemePreset {
 }
 
 export const THEME_SCHEME_PRESETS: ThemeSchemePreset[] = [
-  { id: 'default', name: 'Default', color: '#F59E0B' },
+  { id: 'default', name: 'Default', color: '#EFC84A' },
   { id: 'dynamic', name: 'Dynamic', color: '#0059C8' },
   { id: 'miku', name: 'Miku', color: '#6FDDE2' },
   { id: 'asuka', name: 'Asuka', color: '#FFB4A8' },

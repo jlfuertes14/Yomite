@@ -39,9 +39,7 @@ import {
   getRandomManga,
   getRecentlyAdded,
   MangaStatistics,
-  searchManga,
 } from '../../src/api/mangadex';
-import { AdvancedSearchModal } from '../../src/components/AdvancedSearchModal';
 import { AuthModal } from '../../src/components/AuthModal';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
 import { CARD_GAP, MangaCard } from '../../src/components/MangaCard';
@@ -50,10 +48,13 @@ import { SidebarDrawer } from '../../src/components/SidebarDrawer';
 import { Skeleton } from '../../src/components/Skeleton';
 import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
+import { SourceManager } from '../../src/sources/SourceManager';
+import { sourceMangaToAppManga } from '../../src/sources/adapter';
+import type { MangaSourceMetadata } from '../../src/sources/types';
 import { useUserStore, getUserDisplayName, getUserHandle, getUserAvatarUrl } from '../../src/store/userStore';
 import { syncUserDataWithCloud } from '../../src/services/cloudSync';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
-import type { Manga, SearchFilters } from '../../src/types';
+import type { Manga } from '../../src/types';
 import { formatChapterDate } from '../../src/utils/date';
 
 type VectorIcon = React.ComponentProps<typeof Ionicons>['name'];
@@ -109,7 +110,6 @@ interface WebHeaderProps {
   isWebDropdownVisible: boolean;
   setIsWebDropdownVisible: (v: boolean) => void;
   contractSearchBar: () => void;
-  setAdvancedSearchVisible: (v: boolean) => void;
   setActiveNavId: (id: string) => void;
   isSearching: boolean;
   searchResults: Manga[];
@@ -137,7 +137,6 @@ const WebHeader: React.FC<WebHeaderProps> = ({
   isWebDropdownVisible,
   setIsWebDropdownVisible,
   contractSearchBar,
-  setAdvancedSearchVisible,
   setActiveNavId,
   isSearching,
   searchResults,
@@ -486,21 +485,6 @@ const WebHeader: React.FC<WebHeaderProps> = ({
               )}
             </Animated.View>
 
-            <Pressable
-              onPress={() => setAdvancedSearchVisible(true)}
-              style={({ pressed }) => [
-                styles.webFilterBtn,
-                isMobile && { width: 34, height: 34, flexShrink: 0 },
-                {
-                  backgroundColor: isTransparentAtTop ? 'rgba(255, 255, 255, 0.12)' : colors.surfaceElevated,
-                  opacity: pressed ? 0.6 : 1,
-                },
-              ]}
-              hitSlop={8}
-            >
-              <Ionicons name="options-outline" size={isMobile ? 20 : 22} color={headerTextColor} />
-            </Pressable>
-
             {/* Get Mobile App Web Pill (Hidden on Mobile viewports where space is tight) */}
             {!isMobile && (
               <Pressable
@@ -590,7 +574,7 @@ const WebHeader: React.FC<WebHeaderProps> = ({
                           contentFit="cover"
                         />
                       ) : (
-                        <Text style={styles.dropdownAvatarText}>
+                        <Text style={[styles.dropdownAvatarText, { color: colors.accentForeground }]}>
                           {getUserDisplayName(user).charAt(0).toUpperCase()}
                         </Text>
                       )}
@@ -744,6 +728,13 @@ export default function DiscoverScreen() {
   // Search & Navigation Feed States
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Manga[]>([]);
+  const [groupedExtensionResults, setGroupedExtensionResults] = useState<
+    { source: MangaSourceMetadata; mangaList: Manga[] }[]
+  >([]);
+  const [activeSeeAllExtension, setActiveSeeAllExtension] = useState<{
+    source: MangaSourceMetadata;
+    mangaList: Manga[];
+  } | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [isChangingPage, setIsChangingPage] = useState(false);
   const [activeFeedTitle, setActiveFeedTitle] = useState('Recently Added');
@@ -752,9 +743,7 @@ export default function DiscoverScreen() {
   // Retractable Sidebar states
   const [sidebarVisible, setSidebarVisible] = useState(false); // Inline desktop sidebar
   const [mobileDrawerVisible, setMobileDrawerVisible] = useState(false); // Mobile slide modal drawer
-  const [advancedSearchVisible, setAdvancedSearchVisible] = useState(false);
   const [authModalVisible, setAuthModalVisible] = useState(false);
-  const [activeFilters, setActiveFilters] = useState<SearchFilters | null>(null);
 
   const refreshUser = useUserStore((s) => s.refreshUser);
 
@@ -781,7 +770,12 @@ export default function DiscoverScreen() {
 
   const fetchStatsForList = async (list: Manga[]) => {
     if (!list || list.length === 0) return;
-    const ids = list.map((m) => m.id);
+    const ids = list
+      .map((m) => m.id)
+      .filter((id) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+      );
+    if (ids.length === 0) return;
     const stats = await getBatchMangaStatistics(ids);
     setMangaStatsMap((prev) => ({ ...prev, ...stats }));
   };
@@ -892,7 +886,8 @@ export default function DiscoverScreen() {
     setIsWebDropdownVisible(false);
     contractSearchBar();
     setSearchResults([]);
-    setActiveFilters(null);
+    setGroupedExtensionResults([]);
+    setActiveSeeAllExtension(null);
     setCurrentPage(1);
     setActiveFeedTitle('Latest Updates');
     setActiveNavId('latest');
@@ -993,8 +988,7 @@ export default function DiscoverScreen() {
 
   const isShowingSearch =
     activeNavId === 'search_results' ||
-    activeFilters !== null ||
-    (Platform.OS !== 'web' && searchQuery.trim().length > 0);
+    searchQuery.trim().length > 0;
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -1020,70 +1014,50 @@ export default function DiscoverScreen() {
   }, [activeNavId, isShowingSearch]);
 
   const handleSearch = useCallback(async () => {
-    if (!searchQuery.trim()) {
-      if (activeFilters === null) {
-        setSearchResults([]);
-      }
+    const query = searchQuery.trim();
+    if (!query) {
+      setSearchResults([]);
+      setGroupedExtensionResults([]);
+      setActiveSeeAllExtension(null);
       return;
     }
     try {
       setIsSearching(true);
       setCurrentPage(1);
       setActiveFeedTitle('Search Results');
-      const result = await searchManga({ title: searchQuery.trim() }, PAGE_SIZE, 0);
-      setSearchResults(result.data);
-      setTotalMangaCount(result.total);
-      fetchStatsForList(result.data);
+      setActiveNavId('search_results');
+      setActiveSeeAllExtension(null);
+
+      const rawResults = await SourceManager.searchAll(query);
+      const grouped = rawResults
+        .map((item) => ({
+          source: item.source,
+          mangaList: (item.results || []).map((sm) => sourceMangaToAppManga(sm)),
+        }))
+        .filter((item) => item.mangaList.length > 0);
+
+      setGroupedExtensionResults(grouped);
+      const allFoundManga = grouped.flatMap((g) => g.mangaList);
+      setSearchResults(allFoundManga);
+      setTotalMangaCount(allFoundManga.length);
+      fetchStatsForList(allFoundManga);
     } catch (err) {
       console.error('Search failed:', err);
     } finally {
       setIsSearching(false);
     }
-  }, [searchQuery, activeFilters]);
+  }, [searchQuery]);
 
   useEffect(() => {
     const timeout = setTimeout(handleSearch, 500);
     return () => clearTimeout(timeout);
   }, [searchQuery, handleSearch]);
 
-  const handleApplyAdvancedSearch = async (filters: SearchFilters) => {
-    try {
-      setIsSearching(true);
-      setCurrentPage(1);
-      setActiveFilters(filters);
-      setActiveFeedTitle('Search Results');
-      setActiveNavId('advanced_search');
-      setSidebarVisible(false);
-      const result = await searchManga(filters, PAGE_SIZE, 0);
-      setSearchResults(result.data);
-      setTotalMangaCount(result.total);
-      fetchStatsForList(result.data);
-    } catch (err) {
-      setConfirmModalConfig({
-        visible: true,
-        title: 'Search Failed',
-        message: 'Failed to execute search. Please check your internet connection and try again.',
-        iconName: 'search-outline',
-        confirmText: 'OK',
-        cancelText: '',
-        confirmVariant: 'primary',
-        onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
-      });
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
   const clearSearchState = () => {
-    setActiveFilters(null);
     setSearchQuery('');
     setSearchResults([]);
-  };
-
-  const handleClearAdvancedSearch = () => {
-    clearSearchState();
-    setActiveFeedTitle('Recently Added');
-    setActiveNavId('recently_added');
+    setGroupedExtensionResults([]);
+    setActiveSeeAllExtension(null);
   };
 
   // Sidebar Actions
@@ -1155,23 +1129,15 @@ export default function DiscoverScreen() {
         }
       }
 
-      if (searchResults.length > 0 || activeFilters || searchQuery.trim()) {
-        const filters: SearchFilters = activeFilters ?? (searchQuery.trim() ? { title: searchQuery.trim() } : {});
-        const result = await searchManga(filters, PAGE_SIZE, offset);
-        setSearchResults(result.data);
-        setTotalMangaCount(result.total);
-        fetchStatsForList(result.data);
+      let result: { data: Manga[]; total: number };
+      if (activeNavId === 'latest') {
+        result = await getLatestUpdates(PAGE_SIZE, offset);
       } else {
-        let result: { data: Manga[]; total: number };
-        if (activeNavId === 'latest') {
-          result = await getLatestUpdates(PAGE_SIZE, offset);
-        } else {
-          result = await getRecentlyAdded(PAGE_SIZE, offset);
-        }
-        setFeedManga(result.data);
-        setTotalMangaCount(result.total);
-        fetchStatsForList(result.data);
+        result = await getRecentlyAdded(PAGE_SIZE, offset);
       }
+      setFeedManga(result.data);
+      setTotalMangaCount(result.total);
+      fetchStatsForList(result.data);
     } catch (err) {
       console.error('Page change failed:', err);
     } finally {
@@ -1281,16 +1247,6 @@ export default function DiscoverScreen() {
 
   const navItems: SidebarNavItem[] = [
     {
-      id: 'advanced_search',
-      label: 'Advanced Search',
-      icon: 'options-outline',
-      action: () => {
-        setSidebarVisible(false);
-        setAdvancedSearchVisible(true);
-      },
-      badge: 'Filter',
-    },
-    {
       id: 'popular',
       label: 'Popular New Titles',
       icon: 'trending-up-outline',
@@ -1342,7 +1298,6 @@ export default function DiscoverScreen() {
               isWebDropdownVisible={isWebDropdownVisible}
               setIsWebDropdownVisible={setIsWebDropdownVisible}
               contractSearchBar={contractSearchBar}
-              setAdvancedSearchVisible={setAdvancedSearchVisible}
               setActiveNavId={setActiveNavId}
               isSearching={isSearching}
               searchResults={searchResults}
@@ -1377,15 +1332,6 @@ export default function DiscoverScreen() {
                   <Text style={[styles.appTitle, { color: colors.text }]}>Discover</Text>
                 </Pressable>
 
-                <View style={styles.headerRight}>
-                  <Pressable
-                    onPress={() => setAdvancedSearchVisible(true)}
-                    style={({ pressed }) => [styles.plainIconButton, { opacity: pressed ? 0.6 : 1 }]}
-                    hitSlop={8}
-                  >
-                    <Ionicons name="options-outline" size={24} color={colors.text} />
-                  </Pressable>
-                </View>
               </View>
 
               {/* Search Input Bar */}
@@ -1436,25 +1382,35 @@ export default function DiscoverScreen() {
               }
             >
               {isShowingSearch ? (
-                /* ─── Search Results ─── */
+                /* ─── Search Results grouped by extension ─── */
                 <View style={[styles.section, Platform.OS === 'web' && styles.webCenteredContent]}>
-
-                  <View style={styles.sectionHeader}>
-                    <Text style={[styles.sectionTitle, { color: colors.text }]}>Search Results</Text>
-                  </View>
-                  {isSearching ? (
-                    <ActivityIndicator color={colors.accent} style={{ marginTop: 40 }} />
-                  ) : searchResults.length === 0 ? (
-                    <View style={styles.emptyState}>
-                      <Ionicons name="search-outline" size={40} color={colors.textMuted} />
-                      <Text style={[styles.emptyText, { color: colors.textMuted }]}>
-                        No titles match your search filters
-                      </Text>
-                    </View>
-                  ) : (
+                  {activeSeeAllExtension ? (
                     <>
+                      <View style={styles.carouselHeaderRow}>
+                        <Pressable
+                          onPress={() => setActiveSeeAllExtension(null)}
+                          style={({ pressed }) => [
+                            styles.carouselArrowBtn,
+                            pressed && { opacity: 0.6 },
+                          ]}
+                          hitSlop={8}
+                          accessibilityRole="button"
+                          accessibilityLabel="Back to search results"
+                        >
+                          <Ionicons name="arrow-back" size={16} color={colors.accent} />
+                        </Pressable>
+                        <View style={styles.carouselTitleWrap}>
+                          <Text style={[styles.carouselTitle, { color: colors.text }]}>
+                            {activeSeeAllExtension.source.name}
+                          </Text>
+                          <Text style={[styles.carouselCount, { color: colors.textMuted }]}>
+                            ({activeSeeAllExtension.mangaList.length})
+                          </Text>
+                        </View>
+                      </View>
+
                       <View style={styles.mangaGrid}>
-                        {searchResults.map((manga, idx) => {
+                        {activeSeeAllExtension.mangaList.map((manga, idx) => {
                           const stat = mangaStatsMap[manga.id];
                           const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
                           return (
@@ -1472,47 +1428,101 @@ export default function DiscoverScreen() {
                           );
                         })}
                       </View>
+                    </>
+                  ) : (
+                    <>
+                      <View style={styles.sectionHeader}>
+                        <Text style={[styles.sectionTitle, { color: colors.text }]}>Search Results</Text>
+                        {searchResults.length > 0 && (
+                          <Text style={[styles.carouselCount, { color: colors.textMuted }]}>
+                            ({searchResults.length})
+                          </Text>
+                        )}
+                      </View>
 
-                      {/* Search Results Pagination */}
-                      {searchResults.length > 0 && totalMangaCount > PAGE_SIZE && (
-                        <View style={styles.paginationRow}>
-                          <Pressable
-                            disabled={currentPage <= 1 || isSearching}
-                            onPress={() => handlePageChange(currentPage - 1)}
-                            style={({ pressed }) => [
-                              styles.pageBtn,
-                              { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
-                              (currentPage <= 1 || isSearching) && { opacity: 0.3 },
-                              pressed && { opacity: 0.7 },
-                            ]}
-                          >
-                            <Ionicons name="chevron-back" size={16} color={colors.text} />
-                            <Text style={[styles.pageBtnText, { color: colors.text }]}>Prev</Text>
-                          </Pressable>
-
-                          <View style={styles.pageIndicatorPill}>
-                            <Text style={[styles.pageIndicatorText, { color: colors.text }]}>
-                              Page {currentPage} of {Math.ceil(totalMangaCount / PAGE_SIZE)}
-                            </Text>
-                            <Text style={[styles.pageTotalCountText, { color: colors.textMuted }]}>
-                              ({totalMangaCount.toLocaleString()} titles)
-                            </Text>
-                          </View>
-
-                          <Pressable
-                            disabled={currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isSearching}
-                            onPress={() => handlePageChange(currentPage + 1)}
-                            style={({ pressed }) => [
-                              styles.pageBtn,
-                              { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
-                              (currentPage >= Math.ceil(totalMangaCount / PAGE_SIZE) || isSearching) && { opacity: 0.3 },
-                              pressed && { opacity: 0.7 },
-                            ]}
-                          >
-                            <Text style={[styles.pageBtnText, { color: colors.text }]}>Next</Text>
-                            <Ionicons name="chevron-forward" size={16} color={colors.text} />
-                          </Pressable>
+                      {isSearching ? (
+                        <View style={{ gap: 20 }}>
+                          {Array.from({ length: 3 }).map((_, i) => (
+                            <View key={i} style={{ gap: 10 }}>
+                              <Skeleton width={140} height={18} borderRadius={Radius.xs} />
+                              <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                contentContainerStyle={styles.carouselContent}
+                              >
+                                {Array.from({ length: 4 }).map((_, j) => (
+                                  <View key={j} style={{ width: 140 }}>
+                                    <Skeleton width={140} height={202} borderRadius={Radius.md} />
+                                    <View style={{ marginTop: 8, gap: 5 }}>
+                                      <Skeleton width={126} height={12} borderRadius={Radius.xs} />
+                                      <Skeleton width={90} height={12} borderRadius={Radius.xs} />
+                                      <Skeleton width={56} height={10} borderRadius={Radius.xs} />
+                                    </View>
+                                  </View>
+                                ))}
+                              </ScrollView>
+                            </View>
+                          ))}
                         </View>
+                      ) : groupedExtensionResults.length === 0 ? (
+                        <View style={styles.emptyState}>
+                          <Ionicons name="search-outline" size={40} color={colors.textMuted} />
+                          <Text style={[styles.emptyText, { color: colors.textMuted }]}>
+                            No titles found across your installed extensions
+                          </Text>
+                        </View>
+                      ) : (
+                        groupedExtensionResults.map((group) => (
+                          <View key={group.source.id} style={styles.carouselSection}>
+                            <View style={styles.carouselHeaderRow}>
+                              <View style={styles.carouselTitleWrap}>
+                                <Text style={[styles.carouselTitle, { color: colors.text }]}>
+                                  {group.source.name}
+                                </Text>
+                                <Text style={[styles.carouselCount, { color: colors.textMuted }]}>
+                                  ({group.mangaList.length})
+                                </Text>
+                              </View>
+                              <Pressable
+                                onPress={() => setActiveSeeAllExtension(group)}
+                                style={({ pressed }) => [
+                                  styles.carouselArrowBtn,
+                                  pressed && { opacity: 0.6 },
+                                ]}
+                                hitSlop={8}
+                                accessibilityRole="button"
+                                accessibilityLabel={`See all results from ${group.source.name}`}
+                              >
+                                <Ionicons name="arrow-forward" size={16} color={colors.accent} />
+                              </Pressable>
+                            </View>
+
+                            <ScrollView
+                              horizontal
+                              showsHorizontalScrollIndicator={false}
+                              contentContainerStyle={styles.carouselContent}
+                            >
+                              {group.mangaList.map((manga, idx) => {
+                                const stat = mangaStatsMap[manga.id];
+                                const ratingVal = stat?.rating?.bayesian || stat?.rating?.average || null;
+                                return (
+                                  <MangaCard
+                                    key={manga.id}
+                                    id={manga.id}
+                                    index={idx}
+                                    width={140}
+                                    title={getMangaTitle(manga)}
+                                    coverUrl={getMangaCover(manga)}
+                                    author={extractAuthorName(manga)}
+                                    rating={ratingVal}
+                                    follows={stat?.follows ?? null}
+                                    onPress={navigateToManga}
+                                  />
+                                );
+                              })}
+                            </ScrollView>
+                          </View>
+                        ))
                       )}
                     </>
                   )}
@@ -1881,19 +1891,10 @@ export default function DiscoverScreen() {
       <SidebarDrawer
         visible={mobileDrawerVisible}
         onClose={() => setMobileDrawerVisible(false)}
-        onSelectAdvancedSearch={() => setAdvancedSearchVisible(true)}
         onSelectLatest={handleSelectLatest}
         onSelectRecentlyAdded={handleSelectRecentlyAdded}
         onSelectRandom={handleSelectRandom}
         onSelectPopular={handleSelectPopular}
-      />
-
-      {/* Advanced Search Filter Modal */}
-      <AdvancedSearchModal
-        visible={advancedSearchVisible}
-        onClose={() => setAdvancedSearchVisible(false)}
-        onApplyFilters={handleApplyAdvancedSearch}
-        onRandomManga={handleSelectRandom}
       />
 
       {/* Auth Modal for Unauthenticated Users */}
@@ -2609,6 +2610,41 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: Platform.OS === 'web' ? 20 : Typography.sizes.headline,
     fontWeight: Typography.weights.bold,
+  },
+  carouselSection: {
+    marginBottom: Spacing.xl,
+  },
+  carouselHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.md,
+    marginBottom: Spacing.sm,
+    gap: Spacing.sm,
+  },
+  carouselTitleWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  carouselTitle: {
+    fontSize: 16,
+    fontWeight: Typography.weights.bold,
+  },
+  carouselCount: {
+    fontSize: Typography.sizes.caption,
+    fontWeight: Typography.weights.medium,
+  },
+  carouselContent: {
+    paddingHorizontal: Spacing.md,
+    gap: CARD_GAP,
+  },
+  carouselArrowBtn: {
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   popularListHeader: {
     paddingHorizontal: Spacing.lg,

@@ -27,7 +27,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
-import { Colors } from '../../constants/Colors';
+import { Colors, getContrastTextColor } from '../../constants/Colors';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { useUIStore } from '../../src/store/uiStore';
 import { triggerHaptic } from '../../src/utils/haptics';
@@ -90,22 +90,6 @@ function hexToRgba(hex: string, alpha: number): string {
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
   return `rgba(5, 5, 5, ${alpha})`;
-}
-
-/** Determines contrasting text/icon color for oval backdrop background */
-function getContrastColor(hexColor: string): string {
-  if (!hexColor || typeof hexColor !== 'string') return '#FFFFFF';
-  const cleanHex = hexColor.replace('#', '');
-  if (cleanHex.length === 6) {
-    const r = parseInt(cleanHex.substring(0, 2), 16);
-    const g = parseInt(cleanHex.substring(2, 4), 16);
-    const b = parseInt(cleanHex.substring(4, 6), 16);
-    const yiq = (r * 299 + g * 587 + b * 114) / 1000;
-    if (yiq >= 170) {
-      return '#0F172A';
-    }
-  }
-  return '#FFFFFF';
 }
 
 function AnimatedTabIcon({ focused, tab, colors, selectedColor, defaultColor }: AnimatedTabIconProps) {
@@ -190,7 +174,7 @@ function AnimatedTabItem({
   onLongPress: () => void;
   options: any;
 }) {
-  const contrastColor = getContrastColor(navigationAccent);
+  const contrastColor = getContrastTextColor(navigationAccent);
 
   // Tighter active width for lesser text padding
   const targetActiveWidth =
@@ -502,7 +486,17 @@ export default function TabLayout() {
       }}
     >
       {ALL_TABS.map((tab) => (
-        <Tabs.Screen key={tab.name} name={tab.name} options={{ title: tab.title }} />
+        <Tabs.Screen
+          key={tab.name}
+          name={tab.name}
+          options={{
+            title: tab.title,
+            // The Extensions screen hosts the source catalog dialog, which the
+            // Discover search sheet opens directly — so it must already be
+            // mounted before its tab is ever focused.
+            ...(tab.name === 'extensions' ? { lazy: false } : null),
+          }}
+        />
       ))}
     </Tabs>
   );

@@ -109,7 +109,7 @@ export function OfflineState({ onRetry, style, compact = false }: OfflineStatePr
           onPress={handleGoToDownloads}
           style={[styles.compactBtn, { backgroundColor: colors.accent }]}
         >
-          <Text style={styles.compactBtnText}>Downloads</Text>
+          <Text style={[styles.compactBtnText, { color: colors.accentForeground }]}>Downloads</Text>
         </AnimatedPressable>
       </View>
     );
@@ -145,8 +145,8 @@ export function OfflineState({ onRetry, style, compact = false }: OfflineStatePr
           onPress={handleGoToDownloads}
           style={[styles.primaryBtn, { backgroundColor: colors.accent }]}
         >
-          <Ionicons name="download-outline" size={18} color="#FFFFFF" />
-          <Text style={styles.primaryBtnText}>View Downloaded Chapters</Text>
+          <Ionicons name="download-outline" size={18} color={colors.accentForeground} />
+          <Text style={[styles.primaryBtnText, { color: colors.accentForeground }]}>View Downloaded Chapters</Text>
         </AnimatedPressable>
 
         {onRetry ? (

@@ -20,7 +20,7 @@ export default function NotFoundScreen() {
         onPress={() => router.replace('/(tabs)' as any)}
         style={[styles.button, { backgroundColor: colors.accent }]}
       >
-        <Text style={styles.buttonText}>Go Home</Text>
+        <Text style={[styles.buttonText, { color: colors.accentForeground }]}>Go Home</Text>
       </Pressable>
     </View>
   );

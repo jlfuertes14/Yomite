@@ -1214,8 +1214,8 @@ export default function MangaDetailScreen() {
                 accessibilityRole="button"
                 aria-label="Verify with Source"
               >
-                <Ionicons name="shield-checkmark-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-                <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>
+                <Ionicons name="shield-checkmark-outline" size={16} color={colors.accentForeground} style={{ marginRight: 6 }} />
+                <Text style={{ color: colors.accentForeground, fontSize: 13, fontWeight: '700' }}>
                   Verify
                 </Text>
               </Pressable>
@@ -1478,11 +1478,11 @@ export default function MangaDetailScreen() {
                   accessibilityLabel={lastProgress ? 'Continue reading' : 'Start reading'}
                 >
                   {isStartingReading ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <ActivityIndicator size="small" color={colors.accentForeground} />
                   ) : (
                     <>
-                      <Ionicons name="play" size={14} color="#FFFFFF" />
-                      <Text style={styles.heroCtaText} numberOfLines={1}>
+                      <Ionicons name="play" size={14} color={colors.accentForeground} />
+                      <Text style={[styles.heroCtaText, { color: colors.accentForeground }]} numberOfLines={1}>
                         {lastProgress
                           ? `Continue${lastProgress.chapterTitle ? ` Ch. ${parseChapterNumber(lastProgress.chapterTitle) ?? ''}` : ''}`
                           : 'Start Reading'}
@@ -2126,8 +2126,8 @@ export default function MangaDetailScreen() {
                 accessibilityRole="button"
                 aria-label="Verify with Source"
               >
-                <Ionicons name="shield-checkmark-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-                <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>
+                <Ionicons name="shield-checkmark-outline" size={16} color={colors.accentForeground} style={{ marginRight: 6 }} />
+                <Text style={{ color: colors.accentForeground, fontSize: 13, fontWeight: '700' }}>
                   Verify
                 </Text>
               </Pressable>
@@ -2850,7 +2850,7 @@ export default function MangaDetailScreen() {
                     size={14}
                     color={
                       selectedDownloadIds.size === undownloadedChaptersCount && undownloadedChaptersCount > 0
-                        ? '#FFFFFF'
+                        ? colors.accentForeground
                         : colors.text
                     }
                   />
@@ -2860,7 +2860,7 @@ export default function MangaDetailScreen() {
                       {
                         color:
                           selectedDownloadIds.size === undownloadedChaptersCount && undownloadedChaptersCount > 0
-                            ? '#FFFFFF'
+                            ? colors.accentForeground
                             : colors.text,
                       },
                     ]}
@@ -2993,7 +2993,7 @@ export default function MangaDetailScreen() {
                       {isDownloaded ? (
                         <Ionicons name="checkmark" size={13} color={colors.emerald} />
                       ) : isSelected ? (
-                        <Ionicons name="checkmark" size={13} color="#FFFFFF" />
+                        <Ionicons name="checkmark" size={13} color={colors.accentForeground} />
                       ) : null}
                     </View>
 
@@ -3065,8 +3065,8 @@ export default function MangaDetailScreen() {
                 accessibilityRole="button"
                 accessibilityLabel={`Download ${selectedDownloadIds.size} chapters`}
               >
-                <Ionicons name="arrow-down" size={17} color="#FFFFFF" />
-                <Text style={styles.downloadActionBtnText}>
+                <Ionicons name="arrow-down" size={17} color={colors.accentForeground} />
+                <Text style={[styles.downloadActionBtnText, { color: colors.accentForeground }]}>
                   Download {selectedDownloadIds.size > 0 ? `(${selectedDownloadIds.size})` : ''}
                 </Text>
               </Pressable>
@@ -3167,7 +3167,7 @@ export default function MangaDetailScreen() {
                   accessibilityRole="button"
                   aria-label="Close Verification"
                 >
-                  <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>Done</Text>
+                  <Text style={{ color: colors.accentForeground, fontSize: 12, fontWeight: '700' }}>Done</Text>
                 </Pressable>
 
                 <Pressable
@@ -3304,7 +3304,7 @@ export default function MangaDetailScreen() {
                   accessibilityRole="button"
                   aria-label="Done Verification"
                 >
-                  <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>Done</Text>
+                  <Text style={{ color: colors.accentForeground, fontWeight: '700' }}>Done</Text>
                 </Pressable>
               </View>
             )}

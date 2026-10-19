@@ -129,7 +129,7 @@ export function ChapterCommentsModal({
               onPress={handleAddComment}
               style={[styles.sendBtn, { backgroundColor: colors.accent, opacity: newCommentText.trim() ? 1 : 0.5 }]}
             >
-              <Ionicons name="send" size={16} color="#FFF" />
+              <Ionicons name="send" size={16} color={colors.accentForeground} />
             </Pressable>
           </View>
         </MobileSheetPanel>

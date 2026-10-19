@@ -40,7 +40,6 @@ interface FilterItem {
 interface SidebarDrawerProps {
   visible: boolean;
   onClose: () => void;
-  onSelectAdvancedSearch?: () => void;
   onSelectLatest?: () => void;
   onSelectRecentlyAdded?: () => void;
   onSelectRandom?: () => void;
@@ -50,7 +49,6 @@ interface SidebarDrawerProps {
 export function SidebarDrawer({
   visible,
   onClose,
-  onSelectAdvancedSearch,
   onSelectLatest,
   onSelectRecentlyAdded,
   onSelectRandom,
@@ -79,20 +77,6 @@ export function SidebarDrawer({
   ];
 
   const filterItems: FilterItem[] = [
-    {
-      id: 'advanced_search',
-      label: 'Advanced Search',
-      icon: 'options-outline',
-      action: () => {
-        onClose();
-        if (onSelectAdvancedSearch) {
-          onSelectAdvancedSearch();
-        } else {
-          router.push('/(tabs)' as any);
-        }
-      },
-      badge: 'Filter',
-    },
     {
       id: 'popular',
       label: 'Popular New Titles',

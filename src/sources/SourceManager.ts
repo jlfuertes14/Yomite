@@ -47,7 +47,9 @@ import { ToonkotsuParser } from './parsers/ToonkotsuParser';
 import rawCatalog from './catalog/sourcesCatalog.json';
 
 const STORAGE_KEY_ENABLED_SOURCES = '@mangaapp_enabled_sources_v2';
+const STORAGE_KEY_INSTALLED_SOURCES = '@mangaapp_installed_sources_v3';
 const STORAGE_KEY_DEFAULT_SOURCE = '@mangaapp_default_discover_source_v1';
+const SEARCH_SOURCE_TIMEOUT_MS = 12000;
 
 export interface CatalogFilterOptions {
   query?: string;
@@ -469,21 +471,45 @@ class SourceManagerService {
           }
         }
         this.enabledSourceIds = new Set(ids);
+      }
 
-        // Ensure default discover source is included if non-mangadex
-        if (this.defaultDiscoverSourceId !== 'mangadex') {
-          this.enabledSourceIds.add(this.defaultDiscoverSourceId);
+      // The Extensions screen keeps its own installed list. Merge it so
+      // cross-extension search always covers every installed/added source.
+      const installedRaw = await AsyncStorage.getItem(STORAGE_KEY_INSTALLED_SOURCES);
+      if (installedRaw) {
+        try {
+          const installedIds: string[] = JSON.parse(installedRaw);
+          if (Array.isArray(installedIds)) {
+            for (const id of installedIds) {
+              if (typeof id === 'string' && id) this.enabledSourceIds.add(id);
+            }
+          }
+        } catch {
+          // Ignore malformed persisted list
         }
+      }
 
-        // Dynamically instantiate any enabled sources from the catalog
-        for (const id of Array.from(this.enabledSourceIds)) {
-          if (!this.parsers.has(id)) {
-            const catalogItem = this.catalogById.get(id);
-            if (catalogItem) {
-              const parser = this.createParserForCatalogSource(catalogItem);
-              if (parser) {
-                this.parsers.set(parser.metadata.id, parser);
-              }
+      // First launch: no persisted lists yet, so search the built-in parsers
+      if (!stored && !installedRaw) {
+        for (const id of this.parsers.keys()) {
+          this.enabledSourceIds.add(id);
+        }
+      }
+
+      // Ensure the primary discover source and MangaDex are searchable
+      if (this.defaultDiscoverSourceId !== 'mangadex') {
+        this.enabledSourceIds.add(this.defaultDiscoverSourceId);
+      }
+      this.enabledSourceIds.add('mangadex');
+
+      // Dynamically instantiate any enabled or installed sources from the catalog
+      for (const id of Array.from(this.enabledSourceIds)) {
+        if (!this.parsers.has(id)) {
+          const catalogItem = this.catalogById.get(id);
+          if (catalogItem) {
+            const parser = this.createParserForCatalogSource(catalogItem);
+            if (parser) {
+              this.parsers.set(parser.metadata.id, parser);
             }
           }
         }
@@ -794,10 +820,21 @@ class SourceManagerService {
    * Returns list of all installed / active sources
    */
   public getSources(): MangaSourceMetadata[] {
-    return Array.from(this.parsers.values()).map((p) => ({
-      ...p.metadata,
-      enabled: this.enabledSourceIds.has(p.metadata.id),
-    }));
+    // The same parser can be registered under alias keys (id + domain), so
+    // de-duplicate by metadata id to keep one entry per extension.
+    const seenSourceIds = new Set<string>();
+    const sources: MangaSourceMetadata[] = [];
+
+    for (const parser of this.parsers.values()) {
+      if (seenSourceIds.has(parser.metadata.id)) continue;
+      seenSourceIds.add(parser.metadata.id);
+      sources.push({
+        ...parser.metadata,
+        enabled: this.enabledSourceIds.has(parser.metadata.id),
+      });
+    }
+
+    return sources;
   }
 
   /**
@@ -861,6 +898,40 @@ class SourceManagerService {
       );
     } catch {
       // Silent error on persistence
+    }
+  }
+
+  /**
+   * Ensures every installed source is enabled and instantiated for search.
+   * Used after the Extensions screen migrates/initializes its installed list.
+   */
+  public async syncInstalledSources(sourceIds: string[]): Promise<void> {
+    let changed = false;
+
+    for (const id of sourceIds) {
+      if (!id) continue;
+      if (!this.enabledSourceIds.has(id)) {
+        this.enabledSourceIds.add(id);
+        changed = true;
+      }
+      if (!this.parsers.has(id)) {
+        const item = this.catalogById.get(id);
+        if (item) {
+          const parser = this.createParserForCatalogSource(item);
+          if (parser) this.parsers.set(parser.metadata.id, parser);
+        }
+      }
+    }
+
+    if (changed) {
+      try {
+        await AsyncStorage.setItem(
+          STORAGE_KEY_ENABLED_SOURCES,
+          JSON.stringify(Array.from(this.enabledSourceIds))
+        );
+      } catch {
+        // Silent error on persistence
+      }
     }
   }
 
@@ -958,33 +1029,85 @@ class SourceManagerService {
   }
 
   /**
-   * Search across all enabled sources concurrently
+   * Searches a single parser with a hard timeout so one slow/stuck extension
+   * cannot block the entire cross-extension search.
+   */
+  private async searchParserSafely(
+    parser: MangaParser,
+    query: string,
+    filter: Omit<SourceFilter, 'query'>
+  ): Promise<SourceManga[]> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const timeout = new Promise<SourceManga[]>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Search timed out for ${parser.metadata.id}`)),
+          SEARCH_SOURCE_TIMEOUT_MS
+        );
+      });
+      return await Promise.race([
+        parser.getList({ ...filter, query }),
+        timeout,
+      ]);
+    } catch {
+      return [];
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Progressive variant of `searchAll`: `onSourceResult` fires as soon as each
+   * source resolves so the UI can render its carousel immediately instead of
+   * waiting for the slowest extension. The returned promise settles once every
+   * source has finished (or timed out).
+   */
+  public async searchAllProgressive(
+    query: string,
+    onSourceResult: (result: { source: MangaSourceMetadata; results: SourceManga[] }) => void,
+    filter: Omit<SourceFilter, 'query'> = {}
+  ): Promise<void> {
+    await this.init();
+    const seenSourceIds = new Set<string>();
+    const searchableParsers = Array.from(this.parsers.values()).filter((p) => {
+      if (!this.enabledSourceIds.has(p.metadata.id)) return false;
+      if (seenSourceIds.has(p.metadata.id)) return false;
+      seenSourceIds.add(p.metadata.id);
+      return true;
+    });
+
+    await Promise.all(
+      searchableParsers.map(async (parser) => {
+        const results = await this.searchParserSafely(parser, query, filter);
+        onSourceResult({ source: { ...parser.metadata, enabled: true }, results });
+      })
+    );
+  }
+
+  /**
+   * Search across every installed/enabled source concurrently
    */
   public async searchAll(
     query: string,
     filter: Omit<SourceFilter, 'query'> = {}
   ): Promise<{ source: MangaSourceMetadata; results: SourceManga[] }[]> {
     await this.init();
-    const enabledParsers = Array.from(this.parsers.values()).filter((p) =>
-      this.enabledSourceIds.has(p.metadata.id)
-    );
+    // A single parser instance can be registered under several keys (e.g. its id
+    // and its domain), so de-duplicate by metadata id to avoid duplicate groups.
+    const seenSourceIds = new Set<string>();
+    const searchableParsers = Array.from(this.parsers.values()).filter((p) => {
+      if (!this.enabledSourceIds.has(p.metadata.id)) return false;
+      if (seenSourceIds.has(p.metadata.id)) return false;
+      seenSourceIds.add(p.metadata.id);
+      return true;
+    });
 
-    const promises = enabledParsers.map(async (parser) => {
-      try {
-        const results = await parser.getList({
-          ...filter,
-          query,
-        });
-        return {
-          source: { ...parser.metadata, enabled: true },
-          results,
-        };
-      } catch (err) {
-        return {
-          source: { ...parser.metadata, enabled: true },
-          results: [],
-        };
-      }
+    const promises = searchableParsers.map(async (parser) => {
+      const results = await this.searchParserSafely(parser, query, filter);
+      return {
+        source: { ...parser.metadata, enabled: true },
+        results,
+      };
     });
 
     return Promise.all(promises);
