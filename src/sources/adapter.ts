@@ -39,6 +39,25 @@ export function isExternalSource(idOrUrl: string): boolean {
 }
 
 /**
+ * Removes duplicate manga (same id) while preserving order.
+ * Parser list endpoints (e.g. "latest updates" on Madara/HeanCMS sites) can
+ * repeat the same title once per new chapter, which breaks React list keys.
+ */
+export function dedupeMangaList(items: Manga[]): Manga[] {
+  const seen = new Set<string>();
+  const result: Manga[] = [];
+  for (const manga of items || []) {
+    if (!manga) continue;
+    if (manga.id) {
+      if (seen.has(manga.id)) continue;
+      seen.add(manga.id);
+    }
+    result.push(manga);
+  }
+  return result;
+}
+
+/**
  * Converts a SourceManga into the app's standard Manga type
  */
 export function sourceMangaToAppManga(s: SourceManga): Manga {
@@ -307,6 +326,8 @@ export async function getUniversalChapterPages(
       reconstructedUrl = `/chapter-detail/${rawParts[1]}`;
     } else if (sourceId === 'atsumaru' && rawParts.length >= 2) {
       reconstructedUrl = `/read/${rawParts[0]}/${rawParts[1]}`;
+    } else if (sourceId === 'templescan' && rawParts.length >= 2) {
+      reconstructedUrl = `/comic/${rawParts[0]}/${rawParts[rawParts.length - 1]}`;
     } else if (sourceId === 'mangago' && rawParts.length >= 2) {
       const slug = rawParts[0];
       if (rawParts.length >= 3) {
@@ -558,11 +579,11 @@ export async function getUniversalDiscoverData(
     return {
       primarySourceId: 'mangadex',
       primarySourceName: 'MangaDex',
-      popular: pop || [],
-      topRated: topRatedRes?.data || [],
-      mostPopular: mostPopRes?.data || [],
-      recentlyAdded: recentRes?.data || [],
-      latestUpdates: latestRes?.data || [],
+      popular: dedupeMangaList(pop || []),
+      topRated: dedupeMangaList(topRatedRes?.data || []),
+      mostPopular: dedupeMangaList(mostPopRes?.data || []),
+      recentlyAdded: dedupeMangaList(recentRes?.data || []),
+      latestUpdates: dedupeMangaList(latestRes?.data || []),
     };
   }
 
@@ -577,7 +598,7 @@ export async function getUniversalDiscoverData(
     try {
       const items = await parser.getList({ order: order as any, page });
       if (items && items.length > 0) {
-        return items.map((sm) => sourceMangaToAppManga(sm));
+        return dedupeMangaList(items.map((sm) => sourceMangaToAppManga(sm)));
       }
     } catch (e) {
       console.warn(`[Discover] ${parser.metadata.name} list order='${order}' failed:`, e);

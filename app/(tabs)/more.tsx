@@ -275,7 +275,7 @@ export default function MoreScreen() {
           {/* Clean App Info Footer */}
           <View style={styles.footer}>
             <Text style={[styles.footerTitle, { color: colors.textMuted }]}>
-              Yomite Manga Reader v1.2.7
+              Yomite Manga Reader v1.2.8
             </Text>
             <Text style={[styles.footerSubtitle, { color: colors.textMuted }]}>
               Powered by MangaDex API, Kotatsu

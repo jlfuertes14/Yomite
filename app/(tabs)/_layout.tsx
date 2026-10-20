@@ -568,6 +568,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
+  tabItemPressed: {
+    opacity: 0.9,
+    transform: [{ scale: 0.97 }],
+  },
   activeOvalPill: {
     width: '100%',
     height: 48, // Wammy exact item height (48.dp)

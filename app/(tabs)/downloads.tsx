@@ -783,20 +783,6 @@ export default function DownloadsScreen() {
               <Text style={[styles.emptySub, { color: colors.textMuted }]}>
                 Downloaded chapters will appear here for offline reading.
               </Text>
-
-              {/* Primary Explore CTA */}
-              <AnimatedPressable
-                onPress={() => {
-                  triggerHaptic();
-                  router.push('/' as any);
-                }}
-                style={[styles.emptyExploreBtn, { backgroundColor: colors.accent }]}
-                accessibilityRole="button"
-                accessibilityLabel="Explore Manga"
-              >
-                <Ionicons name="compass-outline" size={17} color={colors.accentForeground} />
-                <Text style={[styles.emptyExploreBtnText, { color: colors.accentForeground }]}>Explore Manga</Text>
-              </AnimatedPressable>
             </View>
           }
         />
@@ -1211,25 +1197,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     textAlign: 'center',
     maxWidth: 270,
-    marginBottom: 24,
-  },
-  emptyExploreBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    paddingHorizontal: 22,
-    paddingVertical: 11,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  emptyExploreBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 0.2,
   },
 
   /* Curtain Bottom Sheet Modal Styles */

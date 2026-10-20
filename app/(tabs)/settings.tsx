@@ -1136,7 +1136,7 @@ export default function SettingsScreen() {
 
           {/* App Info Footer */}
           <View style={styles.footer}>
-            <Text style={[styles.footerTitle, { color: colors.textMuted }]}>Yomite Manga Reader v1.2.7</Text>
+            <Text style={[styles.footerTitle, { color: colors.textMuted }]}>Yomite Manga Reader v1.2.8</Text>
             <Text style={[styles.footerSubtitle, { color: colors.textMuted }]}>
               Powered by MangaDex API, Kotatsu and Supabase Cloud Sync
             </Text>

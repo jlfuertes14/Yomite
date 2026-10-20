@@ -23,6 +23,7 @@ import { NHentaiParser } from './parsers/NHentaiParser';
 import { GalleryAdultsParser } from './parsers/GalleryAdultsParser';
 import { MangaReaderParser } from './parsers/MangaReaderParser';
 import { HeanCmsParser } from './parsers/HeanCmsParser';
+import { TempleScansParser } from './parsers/TempleScansParser';
 import { IkenParser } from './parsers/IkenParser';
 import { HitomiLaParser } from './parsers/HitomiLaParser';
 import { MangaPillParser } from './parsers/MangaPillParser';
@@ -51,6 +52,42 @@ const STORAGE_KEY_INSTALLED_SOURCES = '@mangaapp_installed_sources_v3';
 const STORAGE_KEY_DEFAULT_SOURCE = '@mangaapp_default_discover_source_v1';
 const SEARCH_SOURCE_TIMEOUT_MS = 12000;
 
+/**
+ * Sources shown in the Extensions grid on a fresh install. Cross-extension
+ * search is scoped to the installed list only, so any source the user adds or
+ * removes there is immediately reflected in the Discover search sheet.
+ */
+export const DEFAULT_INSTALLED_SOURCE_IDS: string[] = [
+  'comick-fun',
+  'mangadex',
+  'asurascans',
+  'vortexscans',
+  'hitomila',
+  'toonily',
+  'comix-to',
+  'manganato',
+  'reimanga',
+  'flamecomics',
+  'philiascans',
+  'ravenscans',
+  'mangadot',
+  'mangapill',
+  'omegascans',
+  'hivetoon',
+  'toonz',
+  'kagane',
+  'mangafire',
+  'projectsuki',
+  'mangaball',
+  'atsumaru',
+  'mangago',
+  'weebcentral',
+  'mangak',
+  'onisaga',
+  'toonkotsu',
+  'templescan',
+];
+
 export interface CatalogFilterOptions {
   query?: string;
   locale?: string;
@@ -71,6 +108,7 @@ export interface CatalogStats {
 class SourceManagerService {
   private parsers: Map<string, MangaParser> = new Map();
   private enabledSourceIds: Set<string> = new Set();
+  private installedSourceIds: Set<string> | null = null;
   private defaultDiscoverSourceId: string = 'mangadex';
   private catalog: CatalogSourceItem[] = (rawCatalog as CatalogSourceItem[]) || [];
   private catalogById: Map<string, CatalogSourceItem> = new Map();
@@ -473,16 +511,18 @@ class SourceManagerService {
         this.enabledSourceIds = new Set(ids);
       }
 
-      // The Extensions screen keeps its own installed list. Merge it so
-      // cross-extension search always covers every installed/added source.
+      // The Extensions screen keeps its own installed list. It is the source of
+      // truth for cross-extension search, so only added extensions are queried.
       const installedRaw = await AsyncStorage.getItem(STORAGE_KEY_INSTALLED_SOURCES);
       if (installedRaw) {
         try {
-          const installedIds: string[] = JSON.parse(installedRaw);
+          const installedIds: unknown = JSON.parse(installedRaw);
           if (Array.isArray(installedIds)) {
-            for (const id of installedIds) {
-              if (typeof id === 'string' && id) this.enabledSourceIds.add(id);
-            }
+            const validIds = installedIds.filter(
+              (id): id is string => typeof id === 'string' && id.length > 0
+            );
+            this.installedSourceIds = new Set(validIds);
+            for (const id of validIds) this.enabledSourceIds.add(id);
           }
         } catch {
           // Ignore malformed persisted list
@@ -639,7 +679,15 @@ class SourceManagerService {
       return new HitomiLaParser(baseMetadata);
     }
 
-    // 3. HeanCMS Engine (OmegaScans, ReaperScans, TempleScan, etc.)
+    if (
+      item.engine === 'templescan' ||
+      item.domain === 'templetoons.com' ||
+      item.id === 'templescan'
+    ) {
+      return new TempleScansParser(baseMetadata);
+    }
+
+    // 3. HeanCMS Engine (OmegaScans, ReaperScans, etc.)
     if (
       item.engine === 'heancms' ||
       item.domain === 'omegascans.org' ||
@@ -877,6 +925,7 @@ class SourceManagerService {
   public async setSourceEnabled(sourceId: string, enabled: boolean): Promise<void> {
     if (enabled) {
       this.enabledSourceIds.add(sourceId);
+      this.installedSourceIds?.add(sourceId);
       // Ensure parser is instantiated if it was from catalog
       if (!this.parsers.has(sourceId)) {
         const item = this.catalogById.get(sourceId);
@@ -889,6 +938,7 @@ class SourceManagerService {
       }
     } else {
       this.enabledSourceIds.delete(sourceId);
+      this.installedSourceIds?.delete(sourceId);
     }
 
     try {
@@ -902,14 +952,17 @@ class SourceManagerService {
   }
 
   /**
-   * Ensures every installed source is enabled and instantiated for search.
-   * Used after the Extensions screen migrates/initializes its installed list.
+   * Sets the installed (added) source list from the Extensions screen. This is
+   * the search scope for cross-extension search; every installed source is also
+   * enabled and instantiated.
    */
   public async syncInstalledSources(sourceIds: string[]): Promise<void> {
     let changed = false;
 
-    for (const id of sourceIds) {
-      if (!id) continue;
+    const validIds = sourceIds.filter((id) => typeof id === 'string' && id.length > 0);
+    this.installedSourceIds = new Set(validIds);
+
+    for (const id of validIds) {
       if (!this.enabledSourceIds.has(id)) {
         this.enabledSourceIds.add(id);
         changed = true;
@@ -1057,6 +1110,15 @@ class SourceManagerService {
   }
 
   /**
+   * Source IDs that cross-extension search is allowed to query. Only the
+   * extensions added on the Extensions screen are searched; a fresh install
+   * falls back to the default installed set until that list is persisted.
+   */
+  private getSearchableSourceIds(): Set<string> {
+    return this.installedSourceIds ?? new Set(DEFAULT_INSTALLED_SOURCE_IDS);
+  }
+
+  /**
    * Progressive variant of `searchAll`: `onSourceResult` fires as soon as each
    * source resolves so the UI can render its carousel immediately instead of
    * waiting for the slowest extension. The returned promise settles once every
@@ -1068,9 +1130,10 @@ class SourceManagerService {
     filter: Omit<SourceFilter, 'query'> = {}
   ): Promise<void> {
     await this.init();
+    const searchableIds = this.getSearchableSourceIds();
     const seenSourceIds = new Set<string>();
     const searchableParsers = Array.from(this.parsers.values()).filter((p) => {
-      if (!this.enabledSourceIds.has(p.metadata.id)) return false;
+      if (!searchableIds.has(p.metadata.id)) return false;
       if (seenSourceIds.has(p.metadata.id)) return false;
       seenSourceIds.add(p.metadata.id);
       return true;
@@ -1085,7 +1148,7 @@ class SourceManagerService {
   }
 
   /**
-   * Search across every installed/enabled source concurrently
+   * Search across every installed (added) extension source concurrently
    */
   public async searchAll(
     query: string,
@@ -1094,9 +1157,10 @@ class SourceManagerService {
     await this.init();
     // A single parser instance can be registered under several keys (e.g. its id
     // and its domain), so de-duplicate by metadata id to avoid duplicate groups.
+    const searchableIds = this.getSearchableSourceIds();
     const seenSourceIds = new Set<string>();
     const searchableParsers = Array.from(this.parsers.values()).filter((p) => {
-      if (!this.enabledSourceIds.has(p.metadata.id)) return false;
+      if (!searchableIds.has(p.metadata.id)) return false;
       if (seenSourceIds.has(p.metadata.id)) return false;
       seenSourceIds.add(p.metadata.id);
       return true;

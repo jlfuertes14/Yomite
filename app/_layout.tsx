@@ -133,6 +133,7 @@ export default function RootLayout() {
   const authSuccessMessage = useUserStore((s) => s.authSuccessMessage);
   const clearAuthSuccessMessage = useUserStore((s) => s.clearAuthSuccessMessage);
   const globalBridgeRef = useRef<any>(null);
+  const templetoonsBridgeRef = useRef<any>(null);
 
   const [fontsLoaded] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
@@ -184,12 +185,20 @@ export default function RootLayout() {
         globalBridgeRef.current?.injectJavaScript(script);
       });
 
-      const unsubscribe = webViewBridge.onCloudflareSolved(() => {
+      webViewBridge.registerDomainSender('templetoons.com', (script: string) => {
+        templetoonsBridgeRef.current?.injectJavaScript(script);
+      });
+
+      const unsubscribe = webViewBridge.onCloudflareSolved((domain) => {
         globalBridgeRef.current?.reload();
+        if (domain === 'templetoons.com') {
+          templetoonsBridgeRef.current?.reload();
+        }
       });
 
       return () => {
         unsubscribe();
+        webViewBridge.unregisterDomainSender('templetoons.com');
       };
     }
   }, []);
@@ -293,6 +302,41 @@ export default function RootLayout() {
               <WebView
                 ref={globalBridgeRef}
                 source={{ uri: 'https://mangadot.net/' }}
+                userAgent={
+                  Platform.OS === 'android'
+                    ? 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
+                    : DEFAULT_USER_AGENT
+                }
+                javaScriptEnabled={true}
+                domStorageEnabled={true}
+                sharedCookiesEnabled={true}
+                thirdPartyCookiesEnabled={true}
+                onMessage={(event) => {
+                  try {
+                    const parsed = JSON.parse(event.nativeEvent.data);
+                    webViewBridge.handleMessage(parsed);
+                  } catch {}
+                }}
+              />
+            </View>
+          )}
+
+          {/* Persistent TempleToons session for same-origin requests after Cloudflare verification */}
+          {Platform.OS !== 'web' && (
+            <View
+              style={{
+                position: 'absolute',
+                top: -9999,
+                left: -9999,
+                width: 1,
+                height: 1,
+                opacity: 0,
+                pointerEvents: 'none',
+              }}
+            >
+              <WebView
+                ref={templetoonsBridgeRef}
+                source={{ uri: 'https://templetoons.com/' }}
                 userAgent={
                   Platform.OS === 'android'
                     ? 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'

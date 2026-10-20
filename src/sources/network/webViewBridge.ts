@@ -53,6 +53,7 @@ class WebViewBridgeService {
   private pendingRequests: Map<string, BridgeRequest> = new Map();
   private activeSender: ((script: string) => void) | null = null;
   private globalSender: ((script: string) => void) | null = null;
+  private domainSenders: Map<string, (script: string) => void> = new Map();
   private cfSolvedListeners: Set<(domain: string) => void> = new Set();
   private inFlightImages: Map<string, Promise<string>> = new Map();
   private imageQueue: Array<() => void> = [];
@@ -152,8 +153,27 @@ class WebViewBridgeService {
     return this.activeSender !== null || this.globalSender !== null;
   }
 
+  public hasSenderForUrl(url: string): boolean {
+    const domain = this.normalizeDomain(url);
+    return this.domainSenders.has(domain) || this.hasSender();
+  }
+
+  public registerDomainSender(domainOrUrl: string, sender: (script: string) => void): void {
+    const domain = this.normalizeDomain(domainOrUrl);
+    if (!domain) return;
+    this.domainSenders.set(domain, sender);
+  }
+
+  public unregisterDomainSender(domainOrUrl: string): void {
+    this.domainSenders.delete(this.normalizeDomain(domainOrUrl));
+  }
+
   private get sender(): ((script: string) => void) | null {
     return this.activeSender || this.globalSender;
+  }
+
+  private senderForUrl(url: string): ((script: string) => void) | null {
+    return this.domainSenders.get(this.normalizeDomain(url)) || this.sender;
   }
 
   /**
@@ -199,14 +219,14 @@ class WebViewBridgeService {
    * Native browser cookies (including HttpOnly cf_clearance) are automatically attached.
    */
   public async fetchJson<T = any>(url: string, timeoutMs = 15000): Promise<T> {
-    if (!this.hasSender()) {
+    if (!this.hasSenderForUrl(url)) {
       const ready = await this.waitForSender(4000);
       if (!ready) {
         throw new Error('WebView bridge is not currently mounted or connected.');
       }
     }
 
-    const currentSender = this.sender;
+    const currentSender = this.senderForUrl(url);
     if (!currentSender) {
       throw new Error('WebView bridge is not currently mounted or connected.');
     }
@@ -274,14 +294,14 @@ class WebViewBridgeService {
    * Dispatches a text/html fetch inside the active WebView session.
    */
   public async fetchText(url: string, timeoutMs = 15000): Promise<string> {
-    if (!this.hasSender()) {
+    if (!this.hasSenderForUrl(url)) {
       const ready = await this.waitForSender(4000);
       if (!ready) {
         throw new Error('WebView bridge is not currently mounted or connected.');
       }
     }
 
-    const currentSender = this.sender;
+    const currentSender = this.senderForUrl(url);
     if (!currentSender) {
       throw new Error('WebView bridge is not currently mounted or connected.');
     }
@@ -412,14 +432,14 @@ class WebViewBridgeService {
   }
 
   private async executeFetchImageBase64(url: string, timeoutMs: number): Promise<string> {
-    if (!this.hasSender()) {
+    if (!this.hasSenderForUrl(url)) {
       const ready = await this.waitForSender(5000);
       if (!ready) {
         throw new Error('WebView bridge is not currently mounted or connected.');
       }
     }
 
-    const currentSender = this.sender;
+    const currentSender = this.senderForUrl(url);
     if (!currentSender) {
       throw new Error('WebView bridge is not currently mounted or connected.');
     }

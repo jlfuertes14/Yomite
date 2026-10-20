@@ -58,7 +58,7 @@ import { useUIStore } from '../../src/store/uiStore';
 import { getUserAvatarUrl, getUserDisplayName, getUserHandle, useUserStore } from '../../src/store/userStore';
 import type { Manga } from '../../src/types';
 import { BannerCacheManager } from '../../src/utils/bannerCache';
-import { getUniversalDiscoverData, sourceMangaToAppManga } from '../../src/sources/adapter';
+import { dedupeMangaList, getUniversalDiscoverData, sourceMangaToAppManga } from '../../src/sources/adapter';
 import { SourceManager } from '../../src/sources/SourceManager';
 import type { MangaSourceMetadata } from '../../src/sources/types';
 import { triggerHaptic } from '../../src/utils/haptics';
@@ -1410,7 +1410,7 @@ export default function DiscoverScreen() {
       const grouped = rawResults
         .map((item) => ({
           source: item.source,
-          mangaList: (item.results || []).map((sm) => sourceMangaToAppManga(sm)),
+          mangaList: dedupeMangaList((item.results || []).map((sm) => sourceMangaToAppManga(sm))),
         }))
         .filter((item) => item.mangaList.length > 0);
 

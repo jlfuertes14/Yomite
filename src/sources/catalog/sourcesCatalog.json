@@ -1605,9 +1605,8 @@
     "baseUrl": "https://templetoons.com",
     "locale": "en",
     "contentType": "manga",
-    "engine": "heancms",
-    "isBroken": true,
-    "brokenReason": "Not dead, changed template",
+    "engine": "templescan",
+    "isBroken": false,
     "icon": "https://www.google.com/s2/favicons?domain=templetoons.com&sz=64"
   },
   {

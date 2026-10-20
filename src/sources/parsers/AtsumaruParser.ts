@@ -67,6 +67,19 @@ export class AtsumaruParser extends BaseParser {
     };
   }
 
+  /**
+   * Typesense returns poster paths like "/static/posters/xxx.jpg"; the CDN root
+   * already includes /static, so avoid doubling it.
+   */
+  private resolvePosterUrl(posterPath?: string | null): string | null {
+    if (!posterPath) return null;
+    if (posterPath.startsWith('http')) return posterPath;
+    if (posterPath.startsWith('//')) return `https:${posterPath}`;
+    const clean = posterPath.replace(/^\/+/, '');
+    if (clean.startsWith('static/')) return `https://cdn.atsu.moe/${clean}`;
+    return `https://cdn.atsu.moe/static/${clean}`;
+  }
+
   public override async getAvailableTags(): Promise<SourceTag[]> {
     return [
       { id: 'action', label: 'Action', group: 'Genre' },
@@ -101,8 +114,11 @@ export class AtsumaruParser extends BaseParser {
             const slug = doc.id || '';
             let coverUrl: string | null = null;
             if (doc.poster) {
-              const posterPath = typeof doc.poster === 'string' ? doc.poster : doc.poster.smallImage || doc.poster.image;
-              coverUrl = posterPath.startsWith('http') ? posterPath : `https://cdn.atsu.moe/static/${posterPath.replace(/^\/+/, '')}`;
+              const posterPath =
+                typeof doc.poster === 'string'
+                  ? doc.poster
+                  : doc.poster.smallImage || doc.poster.image;
+              coverUrl = this.resolvePosterUrl(posterPath);
             }
 
             return {

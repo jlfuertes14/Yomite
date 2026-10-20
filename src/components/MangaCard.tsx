@@ -22,6 +22,7 @@ interface MangaCardProps {
   id: string;
   title: string;
   coverUrl: string | null;
+  coverHeaders?: Record<string, string>;
   author?: string;
   rating?: number | null;
   follows?: number | null;
@@ -42,6 +43,7 @@ function MangaCardComponent({
   id,
   title,
   coverUrl,
+  coverHeaders,
   author,
   rating,
   follows,
@@ -109,6 +111,7 @@ function MangaCardComponent({
         {coverUrl && !isCoverErrored ? (
           <BridgedImage
             source={{ uri: coverUrl }}
+            headers={coverHeaders}
             style={styles.coverImage}
             contentFit="cover"
             transition={300}

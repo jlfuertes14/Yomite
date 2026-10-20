@@ -95,6 +95,41 @@ function getDefaultHeadersForUri(uri: string): Record<string, string> | undefine
       Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
     };
   }
+  if (lower.includes('mangapill')) {
+    return {
+      Referer: 'https://mangapill.com/',
+      'User-Agent': defaultUA,
+      Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+    };
+  }
+  if (lower.includes('manganato') || lower.includes('2xstorage')) {
+    return {
+      Referer: 'https://www.manganato.gg/',
+      'User-Agent': defaultUA,
+      Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+    };
+  }
+  if (lower.includes('mangadot')) {
+    return {
+      Referer: 'https://mangadot.net/',
+      'User-Agent': defaultUA,
+      Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+    };
+  }
+  if (lower.includes('hivetoons')) {
+    return {
+      Referer: 'https://hivetoons.org/',
+      'User-Agent': defaultUA,
+      Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+    };
+  }
+  if (lower.includes('flamecomics')) {
+    return {
+      Referer: 'https://flamecomics.xyz/',
+      'User-Agent': defaultUA,
+      Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+    };
+  }
   return undefined;
 }
 

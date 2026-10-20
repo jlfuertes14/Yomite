@@ -96,7 +96,7 @@ export class SourceHttpClient {
     const domain = this.extractDomain(url);
 
     // If domain has an active verified WebView session, route through the bridge
-    if (webViewBridge.isDomainVerified(domain) && webViewBridge.hasSender()) {
+    if (webViewBridge.isDomainVerified(domain) && webViewBridge.hasSenderForUrl(url)) {
       try {
         const html = await webViewBridge.fetchText(url);
         if (!options.silent) {
@@ -219,7 +219,7 @@ export class SourceHttpClient {
     const domain = this.extractDomain(url);
 
     // If domain has an active verified WebView session, route through the bridge
-    if (webViewBridge.isDomainVerified(domain) && webViewBridge.hasSender()) {
+    if (webViewBridge.isDomainVerified(domain) && webViewBridge.hasSenderForUrl(url)) {
       try {
         const json = await webViewBridge.fetchJson<T>(url);
         if (!options.silent) {

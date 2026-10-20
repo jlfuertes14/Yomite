@@ -645,6 +645,8 @@ export default function MangaDetailScreen() {
             ? 'manganato.gg'
             : id?.includes('mangadot')
             ? 'mangadot.net'
+            : id?.includes('templescan')
+            ? 'templetoons.com'
             : id?.includes('comix')
             ? 'comix.to'
             : id?.includes('comick')
@@ -767,6 +769,8 @@ export default function MangaDetailScreen() {
             ? 'manganato.gg'
             : id?.includes('mangadot')
             ? 'mangadot.net'
+            : id?.includes('templescan')
+            ? 'templetoons.com'
             : id?.includes('comix')
             ? 'comix.to'
             : id?.includes('comick')
@@ -806,6 +810,8 @@ export default function MangaDetailScreen() {
         ? 'manganato.gg'
         : id?.includes('mangadot')
         ? 'mangadot.net'
+        : id?.includes('templescan')
+        ? 'templetoons.com'
         : id?.includes('comick')
         ? 'comick.dev'
         : 'comix.to');
@@ -814,6 +820,10 @@ export default function MangaDetailScreen() {
       (sourceDomain.startsWith('http') ? sourceDomain : `https://${sourceDomain}`);
     if (targetUrl.includes('/api/')) {
       targetUrl = sourceDomain.startsWith('http') ? sourceDomain : `https://${sourceDomain}/`;
+    }
+    if (id?.startsWith('templescan:')) {
+      const slug = id.slice('templescan:'.length).split(':')[0];
+      if (slug) targetUrl = `https://templetoons.com/comic/${slug}`;
     }
     if (id?.includes('reimanga')) {
       const cleanSlug = id.replace(/^reimanga:/, '').replace(/^\/+/, '');
@@ -1706,12 +1716,6 @@ export default function MangaDetailScreen() {
             <View>
               {/* Chapter List Header / Toolbar */}
               <View style={styles.chapterHeader}>
-                <View style={styles.chapterHeaderLeft}>
-                  <Text style={[styles.chapterHeaderTitle, { color: colors.text }]}>
-                    Chapters ({displayedChapters.length})
-                  </Text>
-                </View>
-
                 <View style={styles.chapterHeaderRight}>
                   {/* Multi-Language Selector Dropdown (When 2 or more available) */}
             {availableLanguages.length > 1 && (
@@ -3149,9 +3153,15 @@ export default function MangaDetailScreen() {
                         ? 'toonkotsu.com'
                         : id?.includes('weebcentral')
                         ? 'weebcentral.com'
+                        : id?.includes('templescan')
+                        ? 'templetoons.com'
                         : 'reimanga.net');
                     if (domain) {
-                      webViewBridge.setDomainVerified(domain, true);
+                      if (domain === 'templetoons.com') {
+                        webViewBridge.notifyCloudflareSolved(domain);
+                      } else {
+                        webViewBridge.setDomainVerified(domain, true);
+                      }
                     }
                     setIsCfInAppModalOpen(false);
                     setChaptersIsCloudflare(false);
@@ -3209,10 +3219,13 @@ export default function MangaDetailScreen() {
                     var interval = setInterval(function() {
                       var href = window.location.href || '';
                       var title = (document.title || '').toLowerCase();
+                      var bodyText = ((document.body && document.body.innerText) || '').toLowerCase();
                       var isChallenge = title.includes('just a moment') ||
                                         title.includes('turnstile') ||
                                         title.includes('security check') ||
                                         title.includes('attention required') ||
+                                        href.includes('/challenge') ||
+                                        bodyText.includes('cloudflare turnstile') ||
                                         href.includes('challenges.cloudflare.com') ||
                                         document.querySelector('#challenge-running') ||
                                         document.querySelector('.cf-turnstile') ||
@@ -3263,9 +3276,15 @@ export default function MangaDetailScreen() {
                           ? 'toonkotsu.com'
                           : id?.includes('weebcentral')
                           ? 'weebcentral.com'
+                          : id?.includes('templescan')
+                          ? 'templetoons.com'
                           : 'reimanga.net');
                       if (domain) {
-                        webViewBridge.setDomainVerified(domain, true);
+                        if (domain === 'templetoons.com') {
+                          webViewBridge.notifyCloudflareSolved(domain);
+                        } else {
+                          webViewBridge.setDomainVerified(domain, true);
+                        }
                       }
                       if (parsed.cookie && domain) {
                         const match = parsed.cookie.match(/cf_clearance=([^;]+)/);
@@ -3632,27 +3651,18 @@ const styles = StyleSheet.create({
   chapterHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     paddingHorizontal: Spacing.lg,
     marginTop: Platform.OS === 'web' ? Spacing.sm : 6,
     marginBottom: Platform.OS === 'web' ? Spacing.xs : 4,
     gap: Spacing.sm,
     zIndex: 100,
   },
-  chapterHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
   chapterHeaderRight: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
     zIndex: 100,
-  },
-  chapterHeaderTitle: {
-    fontSize: Platform.OS === 'web' ? 14 : 11,
-    fontWeight: Typography.weights.bold,
-    letterSpacing: 1.2,
   },
   languagePickerContainer: {
     position: 'relative',

@@ -1125,21 +1125,6 @@ export default function LibraryScreen() {
                   ? `No manga found matching "${searchQuery}" in this category.`
                   : `Explore Discover to find and bookmark manga to your ${activeCategoryObj.label} shelf.`}
               </Text>
-              <Pressable
-                onPress={() => {
-                  triggerHaptic();
-                  router.push('/' as any);
-                }}
-                style={({ pressed }) => [
-                  styles.emptyCtaButton,
-                  { backgroundColor: colors.accent, opacity: pressed ? 0.85 : 1 },
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="Explore Discover"
-              >
-                <Ionicons name="compass-outline" size={18} color={colors.accentForeground} />
-                <Text style={[styles.emptyCtaText, { color: colors.accentForeground }]}>Browse Discover</Text>
-              </Pressable>
             </View>
           </ScrollView>
         ) : (
@@ -1474,20 +1459,6 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     textAlign: 'center',
     lineHeight: 19,
-    marginBottom: 20,
-  },
-  emptyCtaButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 999,
-  },
-  emptyCtaText: {
-    color: '#090A0F',
-    fontSize: 13.5,
-    fontWeight: '700',
   },
 
   /* Mode 1: Grid Mode Styles */

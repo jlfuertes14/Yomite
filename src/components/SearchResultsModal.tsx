@@ -29,9 +29,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Radius, Spacing, Typography } from '../../constants/Colors';
 import {
   extractAuthorName,
-  extractCoverFileName,
   getBatchMangaStatistics,
-  getCoverUrl,
   getMangaTitle,
 } from '../api/mangadex';
 import { useThemeColors } from '../hooks/useThemeColor';
@@ -52,6 +50,7 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 interface GroupedExtensionResult {
   source: MangaSourceMetadata;
   mangaList: Manga[];
+  coverMap: Record<string, SourceCoverInfo>;
 }
 
 export interface SearchResultsModalProps {
@@ -66,10 +65,15 @@ export interface SearchResultsModalProps {
   animateIn?: boolean;
 }
 
-function getMangaCover(manga: Manga): string | null {
-  const fileName = extractCoverFileName(manga);
-  if (!fileName) return null;
-  return getCoverUrl(manga.id, fileName, '256');
+interface SourceCoverInfo {
+  url: string | null;
+  headers?: Record<string, string>;
+}
+
+function resolveCoverInfo(sm: { coverUrl?: string | null; coverHeaders?: Record<string, string> }): SourceCoverInfo {
+  let url = sm.coverUrl || null;
+  if (url && url.startsWith('//')) url = `https:${url}`;
+  return { url, headers: sm.coverHeaders };
 }
 
 export function SearchResultsModal({
@@ -187,18 +191,20 @@ export function SearchResultsModal({
           // One group per source, duplicate manga ids dropped.
           const seenMangaIds = new Set<string>();
           const mangaList: Manga[] = [];
+          const coverMap: Record<string, SourceCoverInfo> = {};
           for (const sm of results || []) {
             const manga = sourceMangaToAppManga(sm);
             if (!manga?.id || seenMangaIds.has(manga.id)) continue;
             seenMangaIds.add(manga.id);
             mangaList.push(manga);
+            coverMap[manga.id] = resolveCoverInfo(sm);
           }
           if (mangaList.length === 0) return;
 
           setGroups((prev) =>
             prev.some((group) => group.source.id === source.id)
               ? prev
-              : [...prev, { source, mangaList }]
+              : [...prev, { source, mangaList, coverMap }]
           );
           fetchStatsForList(mangaList);
         });
@@ -474,6 +480,7 @@ export function SearchResultsModal({
             >
               {group.mangaList.map((manga, index) => {
                 const stat = statsMap[manga.id];
+                const cover = group.coverMap[manga.id];
                 return (
                   <MangaCard
                     key={manga.id}
@@ -481,7 +488,8 @@ export function SearchResultsModal({
                     index={index}
                     width={124}
                     title={getMangaTitle(manga)}
-                    coverUrl={getMangaCover(manga)}
+                    coverUrl={cover?.url ?? null}
+                    coverHeaders={cover?.headers}
                     author={extractAuthorName(manga)}
                     rating={renderRating(manga)}
                     follows={stat?.follows ?? null}

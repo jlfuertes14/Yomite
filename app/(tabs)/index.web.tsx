@@ -49,7 +49,7 @@ import { Skeleton } from '../../src/components/Skeleton';
 import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { SourceManager } from '../../src/sources/SourceManager';
-import { sourceMangaToAppManga } from '../../src/sources/adapter';
+import { dedupeMangaList, sourceMangaToAppManga } from '../../src/sources/adapter';
 import type { MangaSourceMetadata } from '../../src/sources/types';
 import { useUserStore, getUserDisplayName, getUserHandle, getUserAvatarUrl } from '../../src/store/userStore';
 import { syncUserDataWithCloud } from '../../src/services/cloudSync';
@@ -1032,7 +1032,7 @@ export default function DiscoverScreen() {
       const grouped = rawResults
         .map((item) => ({
           source: item.source,
-          mangaList: (item.results || []).map((sm) => sourceMangaToAppManga(sm)),
+          mangaList: dedupeMangaList((item.results || []).map((sm) => sourceMangaToAppManga(sm))),
         }))
         .filter((item) => item.mangaList.length > 0);
 

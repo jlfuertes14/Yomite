@@ -49,7 +49,7 @@ import { CloudFlareCookieManager } from '../../src/sources/network/cloudflare';
 import { DEFAULT_USER_AGENT } from '../../src/sources/network/httpClient';
 import { webViewBridge } from '../../src/sources/network/webViewBridge';
 import { computeTitleMatchScore } from '../../src/sources/parsers/MangaDotParser';
-import { SourceManager } from '../../src/sources/SourceManager';
+import { DEFAULT_INSTALLED_SOURCE_IDS, SourceManager } from '../../src/sources/SourceManager';
 import { CatalogSourceItem, SourceSortOption, SourceTag } from '../../src/sources/types';
 import { useCatalogStore } from '../../src/store/catalogStore';
 import type { Manga, SearchFilters } from '../../src/types';
@@ -59,36 +59,9 @@ import { normalizeRatingToTen } from '../../src/utils/rating';
 
 const STORAGE_KEY_INSTALLED_SOURCES = '@mangaapp_installed_sources_v3';
 
-// Initial default sources displayed in the 4-column grid (Image 1)
-const DEFAULT_INSTALLED_IDS = [
-  'comick-fun',   // 1. Comick
-  'mangadex',     // 2. Mangadex
-  'asurascans',   // 3. AsuraScans
-  'vortexscans',  // 4. VortexSCANS
-  'hitomila',     // 5. Hitomi
-  'toonily',      // 6. Toonily
-  'comix-to',     // 7. COMIX
-  'manganato',    // 8. Manganato
-  'reimanga',     // 9. ReiManga
-  'flamecomics',  // 10. FlameComics
-  'philiascans',  // 11. PhiliaScans
-  'ravenscans',   // 12. RavenScans
-  'mangadot',     // 13. MangaDot
-  'mangapill',    // 14. MangaPill
-  'omegascans',   // 15. OmegaScans
-  'hivetoon',     // 16. Hivetoon
-  'toonz',        // 17. Toonz
-  'kagane',       // 18. Kagane
-  'mangafire',    // 19. MangaFire
-  'projectsuki',  // 20. Project Suki
-  'mangaball',    // 21. MangaBall
-  'atsumaru',     // 22. Atsumaru
-  'mangago',      // 23. MangaGo
-  'weebcentral',  // 24. Weeb Central
-  'mangak',       // 25. MangaK
-  'onisaga',      // 26. OniSaga
-  'toonkotsu',    // 27. Toonkotsu
-];
+// Sources shown in the 4-column grid on first install (shared with SourceManager
+// so cross-extension search and the grid always agree).
+const DEFAULT_INSTALLED_IDS = DEFAULT_INSTALLED_SOURCE_IDS;
 
 interface CuratedSourceMeta {
   id: string;
@@ -1436,7 +1409,13 @@ export default function ExtensionsScreen() {
         const stored = await AsyncStorage.getItem(STORAGE_KEY_INSTALLED_SOURCES);
         if (stored) {
           const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) {
+          if (Array.isArray(parsed)) {
+            // An explicitly emptied grid is respected: no sources, no search.
+            if (parsed.length === 0) {
+              setInstalledIds([]);
+              await SourceManager.syncInstalledSources([]);
+              return;
+            }
             // Auto-migration to ensure new curated sources appear for existing users
             const MIGRATION_KEY_V5 = '@mangaapp_catalog_v5_migrated';
             const migrated = await AsyncStorage.getItem(MIGRATION_KEY_V5);
@@ -3876,6 +3855,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
+  },
+  primaryBadgeContainer: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(24, 24, 27, 0.9)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.24)',
   },
   sourceGridFavicon: {
     width: 36,
