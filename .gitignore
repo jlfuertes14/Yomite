@@ -43,6 +43,7 @@ GoogleService-Info.plist
 .env
 .env*
 .env*.local
+credentials/
 
 # Logs & Debug Output
 *.log
@@ -72,6 +73,8 @@ yomite-promo/
 snapshots-test/
 snapshots-test2/
 snapshots-zoom/
+assets/images/Yomite Daily Streaks Icons
+.cache/
 
 # Reference Repositories
 kotatsu-app/

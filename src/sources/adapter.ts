@@ -3,7 +3,7 @@
  * Converts SourceManga / SourceChapter into the app's internal domain models
  * and routes data loading to either MangaDex API or Kotatsu Extension Parsers.
  */
-import { SourceManga, SourceChapter, SourcePage } from './types';
+import { SourceManga, SourceChapter, SourcePage, MangaParser } from './types';
 import { SourceManager } from './SourceManager';
 import {
   getMangaDetails as getMangaDexDetails,
@@ -543,6 +543,49 @@ export interface DiscoverSectionsData {
   latestUpdates: Manga[];
 }
 
+function hasDiscoverSections(data: DiscoverSectionsData): boolean {
+  return (
+    data.popular.length > 0 ||
+    data.topRated.length > 0 ||
+    data.mostPopular.length > 0 ||
+    data.recentlyAdded.length > 0 ||
+    data.latestUpdates.length > 0
+  );
+}
+
+async function getParserDiscoverSections(parser: MangaParser): Promise<DiscoverSectionsData> {
+  const safeParserList = async (order: string, page: number = 1): Promise<Manga[]> => {
+    try {
+      const items = await parser.getList({ order: order as any, page });
+      if (items && items.length > 0) {
+        return dedupeMangaList(items.map((sm) => sourceMangaToAppManga(sm)));
+      }
+    } catch (e) {
+      console.warn(`[Discover] ${parser.metadata.name} list order='${order}' failed:`, e);
+    }
+    return [];
+  };
+
+  const isAsura = parser.metadata.id === 'asurascans';
+  const [pop, topRated, mostPop, recent, latest] = await Promise.all([
+    safeParserList(isAsura ? 'trending-weekly' : 'popular', 1),
+    safeParserList('rating', 1),
+    safeParserList(isAsura ? 'most-popular' : 'popular', 1),
+    isAsura ? Promise.resolve([] as Manga[]) : safeParserList('newest', 1),
+    safeParserList('latest', 1),
+  ]);
+
+  return {
+    primarySourceId: parser.metadata.id,
+    primarySourceName: parser.metadata.name,
+    popular: pop,
+    topRated,
+    mostPopular: mostPop,
+    recentlyAdded: recent,
+    latestUpdates: latest,
+  };
+}
+
 /**
  * Universal Discover Sections Fetcher
  * Loads Discover carousels (Popular, Top Rated, Most Popular, Recently Added, Latest Updates)
@@ -556,35 +599,52 @@ export async function getUniversalDiscoverData(
   await SourceManager.init();
   const sourceId = overrideSourceId || SourceManager.getDefaultDiscoverSourceId();
   const defaultMeta = SourceManager.getDefaultDiscoverSource();
-  const sourceName = defaultMeta?.name || getSourceDisplayName(sourceId);
+  const sourceName =
+    sourceId === 'mangadex'
+      ? 'MangaDex'
+      : SourceManager.getParser(sourceId)?.metadata.name ||
+        defaultMeta?.name ||
+        getSourceDisplayName(sourceId);
 
   // 1. If MangaDex is primary source, fetch via native MangaDex API
   if (sourceId === 'mangadex') {
-    const {
-      getPopularManga,
-      getTopRatedManga,
-      getMostPopularManga,
-      getRecentlyAdded,
-      getLatestUpdates,
-    } = await import('../api/mangadex');
+    try {
+      const {
+        getPopularManga,
+        getTopRatedManga,
+        getMostPopularManga,
+        getRecentlyAdded,
+        getLatestUpdates,
+      } = await import('../api/mangadex');
 
-    const [pop, topRatedRes, mostPopRes, recentRes, latestRes] = await Promise.all([
-      getPopularManga(10, isRefresh),
-      getTopRatedManga(14, 0, isRefresh),
-      getMostPopularManga(14, 0, isRefresh),
-      getRecentlyAdded(14, 0, isRefresh),
-      getLatestUpdates(14, 0, isRefresh),
-    ]);
+      const [pop, topRatedRes, mostPopRes, recentRes, latestRes] = await Promise.all([
+        getPopularManga(10, isRefresh),
+        getTopRatedManga(14, 0, isRefresh),
+        getMostPopularManga(14, 0, isRefresh),
+        getRecentlyAdded(14, 0, isRefresh),
+        getLatestUpdates(14, 0, isRefresh),
+      ]);
 
-    return {
-      primarySourceId: 'mangadex',
-      primarySourceName: 'MangaDex',
-      popular: dedupeMangaList(pop || []),
-      topRated: dedupeMangaList(topRatedRes?.data || []),
-      mostPopular: dedupeMangaList(mostPopRes?.data || []),
-      recentlyAdded: dedupeMangaList(recentRes?.data || []),
-      latestUpdates: dedupeMangaList(latestRes?.data || []),
-    };
+      return {
+        primarySourceId: 'mangadex',
+        primarySourceName: 'MangaDex',
+        popular: dedupeMangaList(pop || []),
+        topRated: dedupeMangaList(topRatedRes?.data || []),
+        mostPopular: dedupeMangaList(mostPopRes?.data || []),
+        recentlyAdded: dedupeMangaList(recentRes?.data || []),
+        latestUpdates: dedupeMangaList(latestRes?.data || []),
+      };
+    } catch (error) {
+      console.warn('[Discover] MangaDex unavailable. Falling back to AsuraScans.', error);
+      const fallbackParser = SourceManager.getParser('asurascans');
+      if (fallbackParser) {
+        const fallback = await getParserDiscoverSections(fallbackParser);
+        if (hasDiscoverSections(fallback)) {
+          return fallback;
+        }
+      }
+      throw error;
+    }
   }
 
   // 2. External Extension Source
@@ -594,46 +654,21 @@ export async function getUniversalDiscoverData(
     return getUniversalDiscoverData('mangadex', isRefresh);
   }
 
-  const safeParserList = async (order: string, page: number = 1): Promise<Manga[]> => {
-    try {
-      const items = await parser.getList({ order: order as any, page });
-      if (items && items.length > 0) {
-        return dedupeMangaList(items.map((sm) => sourceMangaToAppManga(sm)));
-      }
-    } catch (e) {
-      console.warn(`[Discover] ${parser.metadata.name} list order='${order}' failed:`, e);
-    }
-    return [];
-  };
+  const data = await getParserDiscoverSections(parser);
 
-  let [pop, topRated, mostPop, recent, latest] = await Promise.all([
-    safeParserList('popular', 1),
-    safeParserList('rating', 1),
-    safeParserList('popular', 1),
-    safeParserList('newest', 1),
-    safeParserList('latest', 1),
-  ]);
-
-  // If source completely failed or returned 0 items across ALL categories, fallback to MangaDex
-  const hasAnyData =
-    pop.length > 0 ||
-    topRated.length > 0 ||
-    mostPop.length > 0 ||
-    recent.length > 0 ||
-    latest.length > 0;
-
-  if (!hasAnyData) {
-    console.warn(`[Discover] Source ${sourceName} returned no categories. Falling back to MangaDex.`);
-    return getUniversalDiscoverData('mangadex', isRefresh);
+  if (hasDiscoverSections(data)) {
+    return data;
   }
 
-  return {
-    primarySourceId: sourceId,
-    primarySourceName: sourceName,
-    popular: pop,
-    topRated: topRated,
-    mostPopular: mostPop,
-    recentlyAdded: recent,
-    latestUpdates: latest,
-  };
+  console.warn(`[Discover] Source ${sourceName} returned no categories.`);
+
+  if (sourceId !== 'asurascans') {
+    try {
+      return await getUniversalDiscoverData('mangadex', isRefresh);
+    } catch (error) {
+      console.warn('[Discover] MangaDex fallback also failed.', error);
+    }
+  }
+
+  return data;
 }

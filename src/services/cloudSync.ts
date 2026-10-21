@@ -38,6 +38,15 @@ function formatSupabaseError(err: any): string {
  */
 let isSyncInProgress = false;
 
+async function getAuthenticatedUserId(): Promise<string | null> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    return data?.session?.user?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function syncUserDataWithCloud(userId: string): Promise<{ success: boolean; message: string }> {
   if (!userId) {
     ApiLogger.logSupabase('SYNC', 'Aborted: User not authenticated', 0, 'No userId provided');
@@ -93,6 +102,12 @@ export async function syncUserDataWithCloud(userId: string): Promise<{ success: 
       }
     } catch {
       // Ignore session check error and proceed
+    }
+
+    const activeUserId = await getAuthenticatedUserId();
+    if (!activeUserId || activeUserId !== userId) {
+      console.log('☁️ [Supabase Sync] Skipped: no matching authenticated session.');
+      return { success: false, message: 'User not authenticated' };
     }
 
     const historyStore = useHistoryStore.getState();
@@ -215,21 +230,25 @@ export async function syncUserDataWithCloud(userId: string): Promise<{ success: 
 
         // Push newer/missing local entries to cloud
         if (rowsToPushToCloud.length > 0) {
-          const pushStart = Date.now();
-          let { error: pushErr } = await supabase
-            .from('user_history')
-            .upsert(rowsToPushToCloud, { onConflict: 'user_id,manga_id' });
-
-          if (pushErr) {
-            const fallback = await supabase.from('user_history').upsert(rowsToPushToCloud);
-            pushErr = fallback.error;
-          }
-
-          const pushDuration = Date.now() - pushStart;
-          if (pushErr) {
-            ApiLogger.logSupabase('PUSH_HISTORY', `Failed pushing ${rowsToPushToCloud.length} entries`, pushDuration, formatSupabaseError(pushErr));
+          if ((await getAuthenticatedUserId()) !== userId) {
+            console.log('☁️ [Supabase Sync] Skipped history push: session ended.');
           } else {
-            ApiLogger.logSupabase('PUSH_HISTORY', `Pushed ${rowsToPushToCloud.length} newer local records to Supabase`, pushDuration);
+            const pushStart = Date.now();
+            let { error: pushErr } = await supabase
+              .from('user_history')
+              .upsert(rowsToPushToCloud, { onConflict: 'user_id,manga_id' });
+
+            if (pushErr) {
+              const fallback = await supabase.from('user_history').upsert(rowsToPushToCloud);
+              pushErr = fallback.error;
+            }
+
+            const pushDuration = Date.now() - pushStart;
+            if (pushErr) {
+              ApiLogger.logSupabase('PUSH_HISTORY', `Failed pushing ${rowsToPushToCloud.length} entries`, pushDuration, formatSupabaseError(pushErr));
+            } else {
+              ApiLogger.logSupabase('PUSH_HISTORY', `Pushed ${rowsToPushToCloud.length} newer local records to Supabase`, pushDuration);
+            }
           }
         }
       }
@@ -321,21 +340,25 @@ export async function syncUserDataWithCloud(userId: string): Promise<{ success: 
         );
 
         if (rowsToPushToCloud.length > 0) {
-          const pushLibStart = Date.now();
-          let { error: pushLibErr } = await supabase
-            .from('user_library')
-            .upsert(rowsToPushToCloud, { onConflict: 'user_id,manga_id' });
-
-          if (pushLibErr) {
-            const fallback = await supabase.from('user_library').upsert(rowsToPushToCloud);
-            pushLibErr = fallback.error;
-          }
-
-          const pushDuration = Date.now() - pushLibStart;
-          if (pushLibErr) {
-            ApiLogger.logSupabase('PUSH_LIBRARY', `Failed to push ${rowsToPushToCloud.length} bookmarks`, pushDuration, formatSupabaseError(pushLibErr));
+          if ((await getAuthenticatedUserId()) !== userId) {
+            console.log('☁️ [Supabase Sync] Skipped library push: session ended.');
           } else {
-            ApiLogger.logSupabase('PUSH_LIBRARY', `Pushed ${rowsToPushToCloud.length} local bookmarks to Supabase`, pushDuration);
+            const pushLibStart = Date.now();
+            let { error: pushLibErr } = await supabase
+              .from('user_library')
+              .upsert(rowsToPushToCloud, { onConflict: 'user_id,manga_id' });
+
+            if (pushLibErr) {
+              const fallback = await supabase.from('user_library').upsert(rowsToPushToCloud);
+              pushLibErr = fallback.error;
+            }
+
+            const pushDuration = Date.now() - pushLibStart;
+            if (pushLibErr) {
+              ApiLogger.logSupabase('PUSH_LIBRARY', `Failed to push ${rowsToPushToCloud.length} bookmarks`, pushDuration, formatSupabaseError(pushLibErr));
+            } else {
+              ApiLogger.logSupabase('PUSH_LIBRARY', `Pushed ${rowsToPushToCloud.length} local bookmarks to Supabase`, pushDuration);
+            }
           }
         }
       }
@@ -371,6 +394,7 @@ export function pushHistoryEntryToCloud(userId: string, entry: HistoryEntry): vo
 
   const timeout = setTimeout(async () => {
     pushTimeoutMap.delete(entry.mangaId);
+    if ((await getAuthenticatedUserId()) !== userId) return;
     const start = Date.now();
     const historyRow = {
       user_id: userId,
@@ -427,6 +451,7 @@ export function pushHistoryEntryToCloud(userId: string, entry: HistoryEntry): vo
  */
 export async function deleteCloudHistoryEntry(userId: string, mangaId: string): Promise<void> {
   if (!userId || !mangaId) return;
+  if ((await getAuthenticatedUserId()) !== userId) return;
   const start = Date.now();
   try {
     const { error } = await supabase
@@ -450,6 +475,7 @@ export async function deleteCloudHistoryEntry(userId: string, mangaId: string): 
  */
 export async function clearCloudHistory(userId: string): Promise<void> {
   if (!userId) return;
+  if ((await getAuthenticatedUserId()) !== userId) return;
   const start = Date.now();
   try {
     const { error } = await supabase
@@ -472,6 +498,7 @@ export async function clearCloudHistory(userId: string): Promise<void> {
  */
 export async function deleteCloudLibraryEntry(userId: string, mangaId: string): Promise<void> {
   if (!userId || !mangaId) return;
+  if ((await getAuthenticatedUserId()) !== userId) return;
   const start = Date.now();
   try {
     const { error } = await supabase

@@ -1,0 +1,364 @@
+name: Android Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - app.json
+      - package.json
+      - plugins/**
+      - .github/workflows/android-release.yml
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the GitHub Release
+        type: boolean
+        default: false
+      force_build:
+        description: Build even if the version tag already exists (never publishes)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+
+jobs:
+  meta:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      version_code: ${{ steps.meta.outputs.version_code }}
+      tag: ${{ steps.meta.outputs.tag }}
+      skip: ${{ steps.meta.outputs.skip }}
+      publish: ${{ steps.meta.outputs.publish }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release metadata
+        id: meta
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_PUBLISH: ${{ inputs.publish }}
+          INPUT_FORCE_BUILD: ${{ inputs.force_build }}
+          AUTO_PUBLISH: ${{ vars.AUTO_PUBLISH || 'true' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          VERSION="$(jq -r '.expo.version // empty' app.json)"
+          VERSION_CODE="$(jq -r '.expo.android.versionCode // empty' app.json)"
+          PKG_VERSION="$(jq -r '.version // empty' package.json)"
+
+          if [[ ! "$VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "::error::app.json expo.version is not valid semver: '$VERSION'"
+            exit 1
+          fi
+
+          MAJOR="${BASH_REMATCH[1]}"
+          MINOR="${BASH_REMATCH[2]}"
+          PATCH="${BASH_REMATCH[3]}"
+
+          if (( 10#$MINOR > 99 || 10#$PATCH > 99 )); then
+            echo "::error::minor and patch must be below 100 for the versionCode formula"
+            exit 1
+          fi
+
+          EXPECTED_CODE=$((10#$MAJOR * 10000 + 10#$MINOR * 100 + 10#$PATCH))
+          if [[ ! "$VERSION_CODE" =~ ^[0-9]+$ ]] || (( 10#$VERSION_CODE != EXPECTED_CODE )); then
+            echo "::error::app.json expo.android.versionCode must be $EXPECTED_CODE (got '$VERSION_CODE')"
+            exit 1
+          fi
+
+          if [[ "$PKG_VERSION" != "$VERSION" ]]; then
+            echo "::error::package.json version ($PKG_VERSION) must equal app.json version ($VERSION)"
+            exit 1
+          fi
+
+          TAG="v$VERSION"
+          LATEST_TAG="$(git tag --list 'v*' --sort=-v:refname | head -n 1 || true)"
+
+          if [[ -n "$LATEST_TAG" ]]; then
+            LATEST_VERSION="${LATEST_TAG#v}"
+            HIGHEST_VERSION="$(printf '%s\n%s\n' "$LATEST_VERSION" "$VERSION" | sort -V | tail -n 1)"
+            if [[ "$HIGHEST_VERSION" != "$VERSION" ]]; then
+              echo "::error::Version $VERSION is not greater than the latest tag $LATEST_TAG"
+              exit 1
+            fi
+          fi
+
+          TAG_EXISTS=false
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            TAG_EXISTS=true
+          fi
+
+          DRAFT="missing"
+          if [[ "$TAG_EXISTS" == "true" ]]; then
+            DRAFT="$(gh release view "$TAG" --json isDraft -q '.isDraft' 2>/dev/null || echo missing)"
+          fi
+
+          SKIP=false
+          if [[ "$TAG_EXISTS" == "true" ]]; then
+            if [[ "$DRAFT" == "true" ]]; then
+              TAG_SHA="$(git rev-list -n 1 "$TAG" 2>/dev/null || true)"
+              if [[ -n "$TAG_SHA" && "$TAG_SHA" != "$GITHUB_SHA" ]]; then
+                echo "::error::Draft tag $TAG points to $TAG_SHA, not $GITHUB_SHA. Delete the draft and tag, or bump the patch version."
+                exit 1
+              fi
+              echo "Draft release $TAG exists; resuming it."
+            elif [[ "$INPUT_FORCE_BUILD" == "true" ]]; then
+              echo "Tag $TAG exists; building without publishing."
+            else
+              SKIP=true
+              echo "Release $TAG already exists; skipping build."
+            fi
+          fi
+
+          PUBLISH=false
+          if [[ "$AUTO_PUBLISH" == "true" && "$GITHUB_REF" == "refs/heads/main" ]]; then
+            if [[ "$SKIP" == "false" && "$TAG_EXISTS" == "false" ]]; then
+              if [[ "$EVENT_NAME" == "push" || "$INPUT_PUBLISH" == "true" ]]; then
+                PUBLISH=true
+              fi
+            elif [[ "$SKIP" == "false" && "$DRAFT" == "true" ]]; then
+              if [[ "$EVENT_NAME" == "push" || "$INPUT_PUBLISH" == "true" ]]; then
+                PUBLISH=true
+              fi
+            fi
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
+          echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build APKs
+    needs: meta
+    if: needs.meta.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      CI: "true"
+      EXPO_NO_TELEMETRY: "1"
+      EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+      EXPO_PUBLIC_MANGADEX_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_MANGADEX_CLIENT_ID }}
+      EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      EXPECTED_CERT_SHA256: ${{ secrets.ANDROID_CERT_SHA256 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate build environment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for name in \
+            EXPO_PUBLIC_SUPABASE_URL \
+            EXPO_PUBLIC_SUPABASE_ANON_KEY \
+            EXPO_PUBLIC_MANGADEX_CLIENT_ID \
+            EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID \
+            ANDROID_KEYSTORE_BASE64 \
+            ANDROID_KEYSTORE_PASSWORD \
+            ANDROID_KEY_ALIAS \
+            ANDROID_KEY_PASSWORD; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing required secret: $name"
+              exit 1
+            fi
+          done
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006" "cmake;3.22.1"
+
+      - name: Install npm dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Decode release keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          KEYSTORE_PATH="$RUNNER_TEMP/release.keystore"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          chmod 600 "$KEYSTORE_PATH"
+          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+          keytool -list -keystore "$KEYSTORE_PATH" -alias "$ANDROID_KEY_ALIAS" -storepass "$ANDROID_KEYSTORE_PASSWORD" >/dev/null
+          echo "Keystore alias validated."
+
+      - name: Generate Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          npx expo prebuild --platform android --clean --no-install
+          grep -q "versionName \"${{ needs.meta.outputs.version }}\"" android/app/build.gradle
+          grep -q "versionCode ${{ needs.meta.outputs.version_code }}" android/app/build.gradle
+          grep -q "signingConfigs.release" android/app/build.gradle
+          grep -q "signingConfig signingConfigs.release" android/app/build.gradle
+
+      - name: Build APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd android
+          ./gradlew :app:assembleRelease --console=plain -PreactNativeArchitectures=arm64-v8a
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/Yomite-${{ needs.meta.outputs.version }}-arm64-v8a.apk"
+          ./gradlew :app:assembleRelease --console=plain -PreactNativeArchitectures=armeabi-v7a,arm64-v8a,x86,x86_64
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/Yomite-${{ needs.meta.outputs.version }}-universal.apk"
+
+      - name: Verify APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ needs.meta.outputs.version }}"
+          VERSION_CODE="${{ needs.meta.outputs.version_code }}"
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+
+          for APK in "$RUNNER_TEMP"/Yomite-*.apk; do
+            echo "Verifying $APK"
+            BADGING="$("$AAPT" dump badging "$APK")"
+            echo "$BADGING" | grep -q "package: name='com.yomite.mangaapp' versionCode='$VERSION_CODE' versionName='$VERSION'"
+
+            CERTS="$("$APKSIGNER" verify --print-certs "$APK")"
+            if echo "$CERTS" | grep -q "CN=Android Debug"; then
+              echo "::error::$APK is signed with the Android debug key"
+              exit 1
+            fi
+
+            ACTUAL_CERT="$(echo "$CERTS" | sed -n 's/.*SHA-256 digest: //p' | head -n 1 | tr -d '\r')"
+            if [[ -n "${EXPECTED_CERT_SHA256:-}" ]]; then
+              EXPECTED_LOWER="$(echo "$EXPECTED_CERT_SHA256" | tr -d ':' | tr 'A-F' 'a-f')"
+              ACTUAL_LOWER="$(echo "$ACTUAL_CERT" | tr -d ':' | tr 'A-F' 'a-f')"
+              if [[ "$ACTUAL_LOWER" != "$EXPECTED_LOWER" ]]; then
+                echo "::error::Signing certificate mismatch for $APK"
+                exit 1
+              fi
+            fi
+          done
+
+          ARM64_ABIS="$("$AAPT" dump badging "$RUNNER_TEMP/Yomite-$VERSION-arm64-v8a.apk" | sed -n 's/^native-code: //p')"
+          echo "$ARM64_ABIS" | grep -q "arm64-v8a"
+          if echo "$ARM64_ABIS" | grep -q "armeabi-v7a"; then
+            echo "::error::arm64 APK unexpectedly contains armeabi-v7a"
+            exit 1
+          fi
+
+          UNIVERSAL_ABIS="$("$AAPT" dump badging "$RUNNER_TEMP/Yomite-$VERSION-universal.apk" | sed -n 's/^native-code: //p')"
+          echo "$UNIVERSAL_ABIS" | grep -q "arm64-v8a"
+          echo "$UNIVERSAL_ABIS" | grep -q "armeabi-v7a"
+
+          cd "$RUNNER_TEMP"
+          sha256sum Yomite-*.apk > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: yomite-apk-${{ needs.meta.outputs.version }}
+          path: |
+            ${{ runner.temp }}/Yomite-*.apk
+            ${{ runner.temp }}/SHA256SUMS
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Remove keystore
+        if: always()
+        shell: bash
+        run: rm -f "${RUNNER_TEMP}/release.keystore"
+
+  release:
+    name: Publish release
+    needs:
+      - meta
+      - build
+    if: needs.meta.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download APKs
+        uses: actions/download-artifact@v4
+        with:
+          name: yomite-apk-${{ needs.meta.outputs.version }}
+          path: dist
+
+      - name: Create or resume draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.meta.outputs.version }}
+          TAG: ${{ needs.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            IS_DRAFT="$(gh release view "$TAG" --json isDraft -q '.isDraft')"
+            if [[ "$IS_DRAFT" != "true" ]]; then
+              echo "::error::Release $TAG is already published"
+              exit 1
+            fi
+            echo "Resuming draft release $TAG"
+          else
+            gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
+              --title "Yomite v$VERSION" \
+              --generate-notes \
+              --draft
+          fi
+
+          gh release upload "$TAG" dist/Yomite-*.apk dist/SHA256SUMS --clobber
+          (cd dist && sha256sum -c SHA256SUMS)
+          gh release edit "$TAG" --draft=false
+          gh release view "$TAG" --json url -q '.url'

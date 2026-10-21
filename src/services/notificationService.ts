@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Asset } from 'expo-asset';
 
@@ -24,6 +25,7 @@ const isExpoGoClient = (): boolean => {
 export const isExpoGo = isExpoGoClient;
 
 export const NOTIFICATION_CHANNEL_ID = 'yomite_chapter_updates';
+const LAST_APP_UPDATE_NOTIFICATION_KEY = '@yomite_last_app_update_notification';
 
 let cachedIconUri: string | null = null;
 let cachedNotificationsModule: any = undefined;
@@ -214,6 +216,52 @@ export async function checkNotificationPermissions(): Promise<boolean> {
     const { status } = await Notifications.getPermissionsAsync();
     return status === 'granted';
   } catch {
+    return false;
+  }
+}
+
+/**
+ * Announces a newly detected app release to users who opted into notifications.
+ * The same release is only announced once on a device.
+ */
+export async function sendAppUpdateNotification(params: {
+  version: string;
+  releaseTitle?: string;
+  releaseNotes?: string;
+}): Promise<boolean> {
+  if (Platform.OS === 'web' || !(await checkNotificationPermissions())) return false;
+
+  try {
+    const lastNotifiedVersion = await AsyncStorage.getItem(LAST_APP_UPDATE_NOTIFICATION_KEY);
+    if (lastNotifiedVersion === params.version) return false;
+
+    const Notifications = getNotificationsModule();
+    if (!Notifications?.scheduleNotificationAsync) return false;
+
+    await setupNotificationChannel();
+    const appIconUri = await getAppIconLocalUri();
+    const summary = params.releaseTitle || `Yomite v${params.version} is now available.`;
+
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: `Yomite v${params.version} is available`,
+        body: summary,
+        data: { type: 'app-update', version: params.version, url: '/(tabs)/more' },
+        color: '#E11D48',
+        sound: 'default',
+        channelId: NOTIFICATION_CHANNEL_ID,
+        badge: 1,
+        attachments: appIconUri
+          ? [{ identifier: 'yomite-app-icon', url: appIconUri, typeHint: 'public.png' }]
+          : undefined,
+      },
+      trigger: null,
+    });
+
+    await AsyncStorage.setItem(LAST_APP_UPDATE_NOTIFICATION_KEY, params.version);
+    return true;
+  } catch (err) {
+    console.warn('Failed to dispatch app update notification:', err);
     return false;
   }
 }

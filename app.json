@@ -2,7 +2,7 @@
   "expo": {
     "name": "Yomite",
     "slug": "yomite",
-    "version": "1.2.8",
+    "version": "1.2.9",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "yomite",
@@ -20,6 +20,7 @@
     },
     "android": {
       "package": "com.yomite.mangaapp",
+      "versionCode": 10209,
       "backgroundColor": "#09090B",
       "usesCleartextTraffic": true,
       "adaptiveIcon": {
@@ -39,7 +40,8 @@
         "android.permission.WAKE_LOCK",
         "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
         "android.permission.READ_MEDIA_VIDEO",
-        "android.permission.READ_MEDIA_AUDIO"
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.REQUEST_INSTALL_PACKAGES"
       ]
     },
     "web": {
@@ -89,7 +91,8 @@
         }
       ],
       "@react-native-google-signin/google-signin",
-      "expo-web-browser"
+      "expo-web-browser",
+      "./plugins/withReleaseSigning"
     ],
     "experiments": {
       "typedRoutes": true

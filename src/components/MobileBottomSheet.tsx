@@ -9,6 +9,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
+import { useThemeColors } from '../hooks/useThemeColor';
 
 interface MobileBottomSheetProps {
   visible: boolean;
@@ -35,6 +36,19 @@ const DISMISS_VELOCITY = 900;
 function runCloseCallback(onClose: () => void) {
   'worklet';
   scheduleOnRN(onClose);
+}
+
+function SheetHandleMark() {
+  const colors = useThemeColors();
+  return <View style={[styles.handle, { backgroundColor: colors.text, opacity: 0.3 }]} />;
+}
+
+function SheetHandle() {
+  return (
+    <View style={styles.handleHitArea}>
+      <SheetHandleMark />
+    </View>
+  );
 }
 
 /**
@@ -115,9 +129,7 @@ export function MobileBottomSheet({
         <Pressable style={StyleSheet.absoluteFill} onPress={closeWithAnimation} />
         <GestureDetector gesture={panGesture}>
           <Animated.View style={[styles.sheet, contentStyle, animatedStyle]}>
-            <View style={styles.handleHitArea}>
-              <View style={styles.handle} />
-            </View>
+            <SheetHandle />
             {children}
           </Animated.View>
         </GestureDetector>
@@ -203,7 +215,7 @@ export const MobileSheetPanel = forwardRef<MobileSheetPanelRef, MobileSheetPanel
         {showHandle && (
           <GestureDetector gesture={panGesture}>
             <View style={styles.handleHitArea}>
-              <View style={styles.handle} />
+              <SheetHandleMark />
             </View>
           </GestureDetector>
         )}
@@ -215,11 +227,7 @@ export const MobileSheetPanel = forwardRef<MobileSheetPanelRef, MobileSheetPanel
   return (
     <GestureDetector gesture={panGesture}>
       <Animated.View style={[style, animatedStyle]}>
-        {showHandle && (
-          <View style={styles.handleHitArea}>
-            <View style={styles.handle} />
-          </View>
-        )}
+        {showHandle && <SheetHandle />}
         {children}
       </Animated.View>
     </GestureDetector>
@@ -354,7 +362,7 @@ export const MobileCurtainPanel = forwardRef<MobileSheetPanelRef, MobileSheetPan
         {showHandle && (
           <GestureDetector gesture={panGesture}>
             <View style={styles.handleHitArea}>
-              <View style={styles.handle} />
+              <SheetHandleMark />
             </View>
           </GestureDetector>
         )}
@@ -366,11 +374,7 @@ export const MobileCurtainPanel = forwardRef<MobileSheetPanelRef, MobileSheetPan
     <GestureDetector gesture={panGesture}>
       <Animated.View style={[style, animatedStyle]}>
         {children}
-        {showHandle && (
-          <View style={styles.handleHitArea}>
-            <View style={styles.handle} />
-          </View>
-        )}
+        {showHandle && <SheetHandle />}
       </Animated.View>
     </GestureDetector>
   );
@@ -398,6 +402,5 @@ const styles = StyleSheet.create({
     width: 40,
     height: 4,
     borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.28)',
   },
 });

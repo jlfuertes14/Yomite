@@ -56,6 +56,7 @@ export interface UserProfileData {
   username?: string;
   display_name?: string;
   avatar_url?: string;
+  banner_url?: string;
 }
 
 interface UserState {
@@ -105,6 +106,17 @@ export function getUserAvatarUrl(user: User | null | undefined): string | null {
   if (!user) return null;
   const meta = user.user_metadata || {};
   const url = meta.avatar_url || meta.picture || meta.avatar || (user as any).avatar_url || null;
+  if (!url || typeof url !== 'string' || url.trim().length === 0) return null;
+  return url.trim();
+}
+
+/**
+ * Clean helper function to get user profile banner URL or null
+ */
+export function getUserBannerUrl(user: User | null | undefined): string | null {
+  if (!user) return null;
+  const meta = user.user_metadata || {};
+  const url = meta.banner_url || (user as any).banner_url || null;
   if (!url || typeof url !== 'string' || url.trim().length === 0) return null;
   return url.trim();
 }

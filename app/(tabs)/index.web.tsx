@@ -49,7 +49,11 @@ import { Skeleton } from '../../src/components/Skeleton';
 import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { SourceManager } from '../../src/sources/SourceManager';
-import { dedupeMangaList, sourceMangaToAppManga } from '../../src/sources/adapter';
+import {
+  dedupeMangaList,
+  getUniversalDiscoverData,
+  sourceMangaToAppManga,
+} from '../../src/sources/adapter';
 import type { MangaSourceMetadata } from '../../src/sources/types';
 import { useUserStore, getUserDisplayName, getUserHandle, getUserAvatarUrl } from '../../src/store/userStore';
 import { syncUserDataWithCloud } from '../../src/services/cloudSync';
@@ -945,6 +949,23 @@ export default function DiscoverScreen() {
 
   // Hero carousel active index
   const [heroIndex, setHeroIndex] = useState(0);
+  const [discoverSourceId, setDiscoverSourceId] = useState('mangadex');
+
+  const applyDiscoverFallback = async (
+    section: 'latest' | 'recently_added',
+    isRefresh: boolean = false
+  ) => {
+    const data = await getUniversalDiscoverData('asurascans', isRefresh);
+    setDiscoverSourceId(data.primarySourceId);
+    setPopular(data.popular);
+    const useLatest = section === 'latest' || data.recentlyAdded.length === 0;
+    const feed = useLatest ? data.latestUpdates : data.recentlyAdded;
+    setFeedManga(feed);
+    setTotalMangaCount(feed.length);
+    setActiveFeedTitle(useLatest ? 'Latest Updates' : 'Recently Added');
+    setActiveNavId(useLatest ? 'latest' : 'recently_added');
+    fetchStatsForList([...data.popular, ...feed]);
+  };
 
   const fetchData = useCallback(async () => {
     try {
@@ -960,9 +981,15 @@ export default function DiscoverScreen() {
       setTotalMangaCount(feedResult.total);
       setActiveFeedTitle('Recently Added');
       setActiveNavId('recently_added');
+      setDiscoverSourceId('mangadex');
       fetchStatsForList([...pop, ...feedResult.data]);
     } catch (err) {
-      console.error('Failed to fetch discover data:', err);
+      console.warn('MangaDex discover failed; trying fallback source.', err);
+      try {
+        await applyDiscoverFallback('recently_added', false);
+      } catch (fallbackError) {
+        console.error('Failed to fetch discover fallback data:', fallbackError);
+      }
     } finally {
       setIsLoadingPopular(false);
       setIsLoadingFeed(false);
@@ -993,25 +1020,40 @@ export default function DiscoverScreen() {
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     setCurrentPage(1);
-    const feedRequest =
-      activeNavId === 'latest'
-        ? getLatestUpdates(PAGE_SIZE, 0, true)
-        : getRecentlyAdded(PAGE_SIZE, 0, true);
-    const [pop, feedResult] = await Promise.all([
-      getPopularManga(POPULAR_TOP_LIMIT, true),
-      feedRequest,
-    ]);
-    setPopular(pop);
-    if (!isShowingSearch && activeNavId === 'popular') {
-      setTotalMangaCount(pop.length);
-      fetchStatsForList(pop);
-    } else {
-      setFeedManga(feedResult.data);
-      setTotalMangaCount(feedResult.total);
-      fetchStatsForList([...pop, ...feedResult.data]);
+    try {
+      if (discoverSourceId !== 'mangadex') {
+        await applyDiscoverFallback(activeNavId === 'latest' ? 'latest' : 'recently_added', true);
+        return;
+      }
+      const feedRequest =
+        activeNavId === 'latest'
+          ? getLatestUpdates(PAGE_SIZE, 0, true)
+          : getRecentlyAdded(PAGE_SIZE, 0, true);
+      const [pop, feedResult] = await Promise.all([
+        getPopularManga(POPULAR_TOP_LIMIT, true),
+        feedRequest,
+      ]);
+      setPopular(pop);
+      setDiscoverSourceId('mangadex');
+      if (!isShowingSearch && activeNavId === 'popular') {
+        setTotalMangaCount(pop.length);
+        fetchStatsForList(pop);
+      } else {
+        setFeedManga(feedResult.data);
+        setTotalMangaCount(feedResult.total);
+        fetchStatsForList([...pop, ...feedResult.data]);
+      }
+    } catch (err) {
+      console.warn('MangaDex refresh failed; trying fallback source.', err);
+      try {
+        await applyDiscoverFallback(activeNavId === 'latest' ? 'latest' : 'recently_added', true);
+      } catch (fallbackError) {
+        console.error('Failed to refresh discover fallback data:', fallbackError);
+      }
+    } finally {
+      setRefreshing(false);
     }
-    setRefreshing(false);
-  }, [activeNavId, isShowingSearch]);
+  }, [activeNavId, discoverSourceId, isShowingSearch]);
 
   const handleSearch = useCallback(async () => {
     const query = searchQuery.trim();
@@ -1081,10 +1123,20 @@ export default function DiscoverScreen() {
       setActiveNavId('latest');
       setSidebarVisible(false);
       setMobileDrawerVisible(false);
-      const result = await getLatestUpdates(PAGE_SIZE, 0);
-      setFeedManga(result.data);
-      setTotalMangaCount(result.total);
-      fetchStatsForList(result.data);
+      if (discoverSourceId !== 'mangadex') {
+        await applyDiscoverFallback('latest', false);
+        return;
+      }
+      try {
+        const result = await getLatestUpdates(PAGE_SIZE, 0);
+        setFeedManga(result.data);
+        setTotalMangaCount(result.total);
+        setDiscoverSourceId('mangadex');
+        fetchStatsForList(result.data);
+      } catch (err) {
+        console.warn('MangaDex latest updates failed; trying fallback source.', err);
+        await applyDiscoverFallback('latest', false);
+      }
     } catch (err) {
       console.error('Failed to load latest updates:', err);
     } finally {
@@ -1093,6 +1145,10 @@ export default function DiscoverScreen() {
   };
 
   const handleSelectRecentlyAdded = async () => {
+    if (discoverSourceId !== 'mangadex') {
+      await handleSelectLatest();
+      return;
+    }
     try {
       setIsLoadingFeed(true);
       setCurrentPage(1);
@@ -1101,10 +1157,16 @@ export default function DiscoverScreen() {
       setActiveNavId('recently_added');
       setSidebarVisible(false);
       setMobileDrawerVisible(false);
-      const result = await getRecentlyAdded(PAGE_SIZE, 0);
-      setFeedManga(result.data);
-      setTotalMangaCount(result.total);
-      fetchStatsForList(result.data);
+      try {
+        const result = await getRecentlyAdded(PAGE_SIZE, 0);
+        setFeedManga(result.data);
+        setTotalMangaCount(result.total);
+        setDiscoverSourceId('mangadex');
+        fetchStatsForList(result.data);
+      } catch (err) {
+        console.warn('MangaDex recently added failed; trying fallback source.', err);
+        await applyDiscoverFallback('recently_added', false);
+      }
     } catch (err) {
       console.error('Failed to load recently added:', err);
     } finally {
@@ -1114,6 +1176,7 @@ export default function DiscoverScreen() {
 
   // Page Change Handlers
   const handlePageChange = async (newPage: number) => {
+    if (discoverSourceId !== 'mangadex') return;
     try {
       const offset = (newPage - 1) * PAGE_SIZE;
       setCurrentPage(newPage);
@@ -1258,12 +1321,14 @@ export default function DiscoverScreen() {
       icon: 'time-outline',
       action: handleSelectLatest,
     },
-    {
-      id: 'recently_added',
-      label: 'Recently Added',
-      icon: 'add-circle-outline',
-      action: handleSelectRecentlyAdded,
-    },
+    ...(discoverSourceId === 'asurascans'
+      ? []
+      : [{
+          id: 'recently_added',
+          label: 'Recently Added',
+          icon: 'add-circle-outline' as const,
+          action: handleSelectRecentlyAdded,
+        }]),
     {
       id: 'random',
       label: 'Random Manga',
@@ -1688,12 +1753,12 @@ export default function DiscoverScreen() {
                         <View style={Platform.OS === 'web' ? styles.webCenteredContent : undefined}>
                           {Platform.OS !== 'web' && (
                             <Text style={[styles.heroSectionTitle, { color: colors.text }]}>
-                              Popular New Titles
+                              {discoverSourceId === 'asurascans' ? 'Trending This Week' : 'Popular New Titles'}
                             </Text>
                           )}
                           {Platform.OS === 'web' && (
                             <Text style={[styles.heroSectionTitle, styles.webHeroTitleHeader, { color: '#FAFAFA' }]}>
-                              Popular New Titles
+                              {discoverSourceId === 'asurascans' ? 'Trending This Week' : 'Popular New Titles'}
                             </Text>
                           )}
 
@@ -1895,6 +1960,7 @@ export default function DiscoverScreen() {
         onSelectRecentlyAdded={handleSelectRecentlyAdded}
         onSelectRandom={handleSelectRandom}
         onSelectPopular={handleSelectPopular}
+        showRecentlyAdded={discoverSourceId !== 'asurascans'}
       />
 
       {/* Auth Modal for Unauthenticated Users */}

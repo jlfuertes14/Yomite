@@ -14,7 +14,8 @@ import {
 
 export const BACKGROUND_SCAN_TASK = 'YOMITE_LIBRARY_CHECK';
 const KNOWN_CHAPTERS_STORAGE_KEY = '@yomite_known_latest_chapters_v1';
-const SCAN_CONFIG_STORAGE_KEY = '@yomite_bg_scan_config_v1';
+// v2 starts notifications disabled by default so enabling them is always an explicit opt-in.
+const SCAN_CONFIG_STORAGE_KEY = '@yomite_bg_scan_config_v2';
 
 export interface BackgroundScanConfig {
   enabled: boolean;
@@ -23,7 +24,7 @@ export interface BackgroundScanConfig {
 }
 
 const DEFAULT_CONFIG: BackgroundScanConfig = {
-  enabled: true,
+  enabled: false,
   intervalMinutes: 360, // 6 hours
   lastScanTimestamp: 0,
 };

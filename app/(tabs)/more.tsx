@@ -4,9 +4,10 @@
  * Dedicated full-screen hub for secondary navigation (Downloads, Community, Settings) and Quick Tools.
  */
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -24,10 +25,18 @@ import { useColorScheme } from '../../src/hooks/useColorScheme';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
 import { checkLibraryForUpdates } from '../../src/services/backgroundScanner';
 import { useDownloadStore } from '../../src/store/downloadStore';
+import { useUserStore, getUserDisplayName, getUserHandle, getUserAvatarUrl } from '../../src/store/userStore';
 import { BannerCacheManager } from '../../src/utils/bannerCache';
 import { CacheManager } from '../../src/utils/cacheManager';
 import { triggerHaptic } from '../../src/utils/haptics';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
+import { AppUpdateModal } from '../../src/components/AppUpdateModal';
+import {
+  checkForAppUpdates,
+  getCurrentAppVersion,
+  getLatestGitHubReleaseVersion,
+  AppReleaseInfo,
+} from '../../src/services/appUpdateService';
 
 type VectorIcon = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -112,6 +121,11 @@ export default function MoreScreen() {
   const { width } = useWindowDimensions();
   const isDesktop = Platform.OS === 'web' && width >= 768;
 
+  const user = useUserStore((s) => s.user);
+  const displayName = getUserDisplayName(user);
+  const handle = getUserHandle(user);
+  const avatarUrl = getUserAvatarUrl(user);
+
   const chapters = useDownloadStore((s) => s.chapters);
   const downloadedCount = Object.keys(chapters).length;
 
@@ -179,22 +193,66 @@ export default function MoreScreen() {
     }
   }, [isScanningUpdates]);
 
+  const currentAppVersion = getCurrentAppVersion();
+  const [latestAppVersion, setLatestAppVersion] = useState<string | null>(null);
+  const [isCheckingAppUpdate, setIsCheckingAppUpdate] = useState(false);
+  const [appUpdateRelease, setAppUpdateRelease] = useState<AppReleaseInfo | null>(null);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    getLatestGitHubReleaseVersion().then((version) => {
+      if (version) setLatestAppVersion(version);
+    });
+  }, []);
+
+  const handleCheckAppUpdate = useCallback(async () => {
+    if (isCheckingAppUpdate) return;
+    triggerHaptic();
+    setIsCheckingAppUpdate(true);
+    try {
+      const release = await checkForAppUpdates(true);
+      if (release) {
+        setLatestAppVersion(release.version);
+        setAppUpdateRelease(release);
+      } else {
+        const latestVersion = await getLatestGitHubReleaseVersion();
+        if (latestVersion) setLatestAppVersion(latestVersion);
+        triggerHaptic();
+        Alert.alert(
+          'Up to Date',
+          `You are on the latest version of Yomite (v${latestVersion || currentAppVersion}).`
+        );
+      }
+    } catch {
+      Alert.alert('Notice', 'Unable to check for updates. Please try again later.');
+    } finally {
+      setIsCheckingAppUpdate(false);
+    }
+  }, [isCheckingAppUpdate, currentAppVersion]);
+
+  const handleTestAppUpdateModal = useCallback(() => {
+    triggerHaptic();
+    setAppUpdateRelease({
+      version: '9.9.9',
+      tagName: 'v9.9.9-test',
+      releaseTitle: 'Yomite Test Release',
+      releaseNotes: '## Test update\n\n- Verify the modal layout\n- Check the release notes rendering\n- Confirm the dismiss button works',
+      // Deliberately non-downloadable: this action is for rendering the modal only.
+      downloadUrl: 'https://example.com/yomite-test.apk',
+      fileName: 'Yomite-test.apk',
+      apkSize: 0,
+      publishedAt: new Date().toISOString(),
+      htmlUrl: 'https://github.com/jlfuertes14/Yomite/releases',
+    });
+  }, []);
+
   return (
     <SafeAreaView
       style={[styles.container, { backgroundColor: colors.background }]}
       edges={['top', 'left', 'right']}
     >
       <View style={styles.contentWrapper}>
-        {/* Header — Centered Yomite Transparent Logo */}
-        <View style={styles.headerCentered}>
-          <Image
-            source={require('../../assets/images/yomiite_transparent.png')}
-            style={styles.yomiteLogo}
-            contentFit="contain"
-            accessibilityLabel="Yomite Logo"
-          />
-        </View>
-
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[
@@ -202,6 +260,97 @@ export default function MoreScreen() {
             isDesktop && styles.scrollContentDesktop,
           ]}
         >
+          {/* Header — Centered Yomite Transparent Logo */}
+          <View style={styles.headerCentered}>
+            <Image
+              source={require('../../assets/images/yomiite_transparent.png')}
+              style={styles.yomiteLogo}
+              contentFit="contain"
+              accessibilityLabel="Yomite Logo"
+            />
+          </View>
+
+          {/* SECTION: ACCOUNT (PROFILE / SIGN IN) */}
+          <View style={styles.section}>
+            <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>
+              Account
+            </Text>
+            <View style={styles.flatDividedList}>
+              {user ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Signed in as ${displayName}. View profile`}
+                  onPress={() => {
+                    triggerHaptic();
+                    router.push('/profile' as any);
+                  }}
+                  style={({ pressed, hovered }: any) => [
+                    styles.flatRow,
+                    (pressed || hovered) && {
+                      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.035)',
+                    },
+                    Platform.OS === 'web' && { cursor: 'pointer' as any },
+                  ]}
+                >
+                  <View style={styles.optionLeft}>
+                    <View style={[styles.avatarBox, { backgroundColor: colors.surfaceElevated }]}>
+                      {avatarUrl ? (
+                        <Image
+                          source={{ uri: avatarUrl }}
+                          style={styles.avatarImg}
+                          contentFit="cover"
+                          cachePolicy="memory-disk"
+                        />
+                      ) : (
+                        <Ionicons name="person" size={22} color={accentColor} />
+                      )}
+                    </View>
+                    <View style={styles.optionTextCol}>
+                      <Text style={[styles.optionTitle, { color: colors.text }]} numberOfLines={1}>
+                        {displayName}
+                      </Text>
+                      <Text style={[styles.optionSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
+                        @{handle} • View profile & sync
+                      </Text>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                </Pressable>
+              ) : (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Sign in to Yomite"
+                  onPress={() => {
+                    triggerHaptic();
+                    router.push('/auth/login' as any);
+                  }}
+                  style={({ pressed, hovered }: any) => [
+                    styles.flatRow,
+                    (pressed || hovered) && {
+                      backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.035)',
+                    },
+                    Platform.OS === 'web' && { cursor: 'pointer' as any },
+                  ]}
+                >
+                  <View style={styles.optionLeft}>
+                    <View style={[styles.iconSquare, { backgroundColor: colors.surfaceElevated }]}>
+                      <Ionicons name="person-outline" size={22} color={colors.text} />
+                    </View>
+                    <View style={styles.optionTextCol}>
+                      <Text style={[styles.optionTitle, { color: colors.text }]} numberOfLines={1}>
+                        Sign In to Yomite
+                      </Text>
+                      <Text style={[styles.optionSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
+                        Sync your library, reading progress & cloud bookmarks
+                      </Text>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                </Pressable>
+              )}
+            </View>
+          </View>
+
           {/* SECTION: NAVIGATION (FLAT DIVIDED LIST) */}
           <View style={styles.section}>
             <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>
@@ -262,6 +411,35 @@ export default function MoreScreen() {
                   ) : undefined
                 }
               />
+              <FlatRowItem
+                icon="cloud-download-outline"
+                title="Check for App Updates"
+                subtitle={
+                  isCheckingAppUpdate
+                    ? 'Checking GitHub releases…'
+                    : latestAppVersion
+                      ? `Latest version: v${latestAppVersion}`
+                      : 'Latest version unavailable'
+                }
+                onPress={handleCheckAppUpdate}
+                showChevron={!isCheckingAppUpdate}
+                rightElement={
+                  isCheckingAppUpdate ? (
+                    <ActivityIndicator size="small" color={accentColor} />
+                  ) : undefined
+                }
+              />
+              {__DEV__ && Constants.executionEnvironment === 'storeClient' && (
+                <>
+                  <View style={[styles.hairlineDivider, { backgroundColor: dividerColor }]} />
+                  <FlatRowItem
+                    icon="bug-outline"
+                    title="Test Update Modal"
+                    subtitle="Preview the GitHub release update dialog"
+                    onPress={handleTestAppUpdateModal}
+                  />
+                </>
+              )}
               <View style={[styles.hairlineDivider, { backgroundColor: dividerColor }]} />
               <FlatRowItem
                 icon="trash-outline"
@@ -275,7 +453,7 @@ export default function MoreScreen() {
           {/* Clean App Info Footer */}
           <View style={styles.footer}>
             <Text style={[styles.footerTitle, { color: colors.textMuted }]}>
-              Yomite Manga Reader v1.2.8
+              Yomite Manga Reader v{currentAppVersion}
             </Text>
             <Text style={[styles.footerSubtitle, { color: colors.textMuted }]}>
               Powered by MangaDex API, Kotatsu
@@ -293,6 +471,13 @@ export default function MoreScreen() {
           confirmText={confirmModalConfig.confirmText || 'Confirm'}
           onConfirm={confirmModalConfig.onConfirm}
           onCancel={() => setConfirmModalConfig((prev) => ({ ...prev, visible: false }))}
+        />
+
+        {/* Tachiyomi/Mihon In-App Update Modal */}
+        <AppUpdateModal
+          visible={Boolean(appUpdateRelease)}
+          release={appUpdateRelease}
+          onDismiss={() => setAppUpdateRelease(null)}
         />
       </View>
     </SafeAreaView>
@@ -397,6 +582,21 @@ const styles = StyleSheet.create({
   badgePillText: {
     fontSize: 12,
     fontWeight: '600',
+  },
+
+  /* Account Section Styles */
+  avatarBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarImg: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
   },
 
   /* Footer */

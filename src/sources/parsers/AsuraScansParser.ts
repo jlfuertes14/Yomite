@@ -31,10 +31,10 @@ export class AsuraScansParser extends BaseParser {
       baseUrl: 'https://asurascans.com',
       locale: 'en',
       isNsfw: false,
-      version: '1.2.0',
+      version: '1.3.0',
       icon: 'https://www.google.com/s2/favicons?domain=asuracomic.net&sz=64',
       description: 'English manga, manhwa, and manhua from AsuraScans.',
-      availableSortOrders: ['popular', 'latest', 'newest', 'alphabetical'],
+      availableSortOrders: ['popular', 'rating', 'latest', 'newest', 'alphabetical'],
       enabled: true,
       ...metadata,
     };
@@ -52,10 +52,86 @@ export class AsuraScansParser extends BaseParser {
   public override getAvailableSorts(): SourceSortOption[] {
     return [
       { id: 'popular', label: 'Most Popular' },
+      { id: 'rating', label: 'Top Rated' },
       { id: 'latest', label: 'Latest Update' },
       { id: 'newest', label: 'Newest Series' },
       { id: 'alphabetical', label: 'A-Z' },
     ];
+  }
+
+  private getApiBase(): string {
+    return 'https://api.asurascans.com/api';
+  }
+
+  private apiSortForOrder(order?: string): string | null {
+    switch (order) {
+      case 'rating':
+        return 'rating';
+      case 'popular':
+      case 'most-popular':
+      case 'trending-weekly':
+        return 'popular';
+      case 'latest':
+      case 'update':
+        return 'latest';
+      case 'newest':
+        return 'newest';
+      case 'alphabetical':
+        return 'title';
+      default:
+        return null;
+    }
+  }
+
+  private mapApiManga(item: LooseRecord): SourceManga {
+    const rawSlug =
+      (item.public_url ? item.public_url.replace(/^\/(?:comics|series)\//, '') : '') ||
+      item.slug ||
+      '';
+    const slug = rawSlug.replace(/^\/+/, '');
+    const publicUrl = item.public_url
+      ? `${this.metadata.baseUrl}${item.public_url}`
+      : `${this.metadata.baseUrl}/comics/${slug}`;
+    const status = typeof item.status === 'string' ? item.status.toLowerCase() : '';
+    const state =
+      status === 'ongoing' || status === 'completed' || status === 'hiatus' || status === 'cancelled'
+        ? status
+        : undefined;
+
+    return {
+      id: `${this.metadata.id}:${slug}`,
+      sourceId: this.metadata.id,
+      url: item.public_url || `/comics/${slug}`,
+      publicUrl,
+      title: item.title || this.titleFromSlug(slug),
+      coverUrl: item.cover || item.cover_url || null,
+      description: item.description ? this.stripHtml(item.description) : undefined,
+      rating: typeof item.rating === 'number' ? Number(item.rating.toFixed(1)) : undefined,
+      authors: item.author ? [item.author] : undefined,
+      artists: item.artist ? [item.artist] : undefined,
+      tags: Array.isArray(item.genres)
+        ? item.genres.map((g: any) => g.name || g.slug).filter(Boolean)
+        : undefined,
+      state,
+      chaptersCount: item.chapter_count || undefined,
+      lastUpdated: item.last_chapter_at ? Date.parse(item.last_chapter_at) || undefined : undefined,
+    };
+  }
+
+  private async fetchTrending(period: 'week' | 'all', limit: number): Promise<SourceManga[]> {
+    const json = await sourceHttpClient.fetchJson<any>(
+      `${this.getApiBase()}/trending/${period}?limit=${limit}`,
+      {
+        sourceId: this.metadata.name,
+        referer: 'https://asurascans.com/',
+        headers: {
+          Accept: 'application/json, text/plain, */*',
+          'User-Agent': DEFAULT_USER_AGENT,
+        },
+      }
+    );
+    const items = Array.isArray(json?.data) ? json.data : [];
+    return items.map((item: LooseRecord) => this.mapApiManga(item));
   }
 
   private cachedTags: SourceTag[] | null = null;
@@ -64,7 +140,7 @@ export class AsuraScansParser extends BaseParser {
     if (this.cachedTags && this.cachedTags.length > 0) return this.cachedTags;
 
     try {
-      const json = await sourceHttpClient.fetchJson<any>('https://api.asurascans.com/api/genres', {
+      const json = await sourceHttpClient.fetchJson<any>(`${this.getApiBase()}/genres`, {
         sourceId: this.metadata.name,
         referer: 'https://asurascans.com/',
       });
@@ -135,7 +211,7 @@ export class AsuraScansParser extends BaseParser {
     if (filter.query?.trim()) {
       const q = filter.query.trim();
       try {
-        const url = `https://api.asurascans.com/api/search?q=${encodeURIComponent(q)}${genreParam}&offset=${offset}&limit=${pageSize}`;
+        const url = `${this.getApiBase()}/search?q=${encodeURIComponent(q)}${genreParam}&offset=${offset}&limit=${pageSize}`;
         const json = await sourceHttpClient.fetchJson<any>(url, {
           sourceId: this.metadata.name,
           referer: 'https://asurascans.com/',
@@ -147,35 +223,7 @@ export class AsuraScansParser extends BaseParser {
 
         const items = Array.isArray(json?.data) ? json.data : [];
         if (items.length > 0) {
-          return items.map((item: any) => {
-            const rawSlug =
-              (item.public_url ? item.public_url.replace(/^\/(?:comics|series)\//, '') : '') ||
-              item.slug ||
-              '';
-            const slug = rawSlug.replace(/^\/+/, '');
-            const publicUrl = item.public_url
-              ? `https://asurascans.com${item.public_url}`
-              : `https://asurascans.com/comics/${slug}`;
-            const url = item.public_url || `/comics/${slug}`;
-
-            return {
-              id: `${this.metadata.id}:${slug}`,
-              sourceId: this.metadata.id,
-              url,
-              publicUrl,
-              title: item.title || this.titleFromSlug(slug),
-              coverUrl: item.cover || null,
-              description: item.description ? item.description.replace(/<[^>]*>/g, '').trim() : undefined,
-              rating: item.rating ? Number(item.rating.toFixed(1)) : undefined,
-              authors: item.author ? [item.author] : undefined,
-              artists: item.artist ? [item.artist] : undefined,
-              tags: Array.isArray(item.genres)
-                ? item.genres.map((g: any) => g.name || g.slug).filter(Boolean)
-                : undefined,
-              state: item.status === 'ongoing' ? 'ongoing' : item.status === 'completed' ? 'completed' : undefined,
-              chaptersCount: item.chapter_count || undefined,
-            };
-          });
+          return items.map((item: LooseRecord) => this.mapApiManga(item));
         }
         return [];
       } catch (err) {
@@ -183,9 +231,27 @@ export class AsuraScansParser extends BaseParser {
       }
     }
 
+    if (filter.order === 'trending-weekly') {
+      try {
+        return await this.fetchTrending('week', pageSize);
+      } catch (err) {
+        console.warn('Asura weekly trending API error, falling back to catalog:', err);
+      }
+    }
+
+    if (filter.order === 'most-popular') {
+      try {
+        return await this.fetchTrending('all', pageSize);
+      } catch (err) {
+        console.warn('Asura all-time popular API error, falling back to catalog:', err);
+      }
+    }
+
     // 2. Paginated catalog using official API
     try {
-      const seriesUrl = `https://api.asurascans.com/api/series?offset=${offset}&limit=${pageSize}${genreParam}`;
+      const sort = this.apiSortForOrder(filter.order);
+      const sortParam = sort ? `&sort=${sort}` : '';
+      const seriesUrl = `${this.getApiBase()}/series?offset=${offset}&limit=${pageSize}${genreParam}${sortParam}`;
       const json = await sourceHttpClient.fetchJson<any>(seriesUrl, {
         sourceId: this.metadata.name,
         referer: 'https://asurascans.com/',
@@ -197,35 +263,7 @@ export class AsuraScansParser extends BaseParser {
 
       const items = Array.isArray(json?.data) ? json.data : [];
       if (items.length > 0) {
-        return items.map((item: any) => {
-          const rawSlug =
-            (item.public_url ? item.public_url.replace(/^\/(?:comics|series)\//, '') : '') ||
-            item.slug ||
-            '';
-          const slug = rawSlug.replace(/^\/+/, '');
-          const publicUrl = item.public_url
-            ? `https://asurascans.com${item.public_url}`
-            : `https://asurascans.com/comics/${slug}`;
-          const url = item.public_url || `/comics/${slug}`;
-
-          return {
-            id: `${this.metadata.id}:${slug}`,
-            sourceId: this.metadata.id,
-            url,
-            publicUrl,
-            title: item.title || this.titleFromSlug(slug),
-            coverUrl: item.cover || null,
-            description: item.description ? item.description.replace(/<[^>]*>/g, '').trim() : undefined,
-            rating: item.rating ? Number(item.rating.toFixed(1)) : undefined,
-            authors: item.author ? [item.author] : undefined,
-            artists: item.artist ? [item.artist] : undefined,
-            tags: Array.isArray(item.genres)
-              ? item.genres.map((g: any) => g.name || g.slug).filter(Boolean)
-              : undefined,
-            state: item.status === 'ongoing' ? 'ongoing' : item.status === 'completed' ? 'completed' : undefined,
-            chaptersCount: item.chapter_count || undefined,
-          };
-        });
+        return items.map((item: LooseRecord) => this.mapApiManga(item));
       }
     } catch {
       // Fallback to HTML scraping

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, Platform, StyleSheet, Animated, Easing } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -16,9 +16,11 @@ import { CacheManager } from '../src/utils/cacheManager';
 import { useDocumentTitle } from '../src/utils/useDocumentTitle';
 import { webViewBridge } from '../src/sources/network/webViewBridge';
 import { DEFAULT_USER_AGENT } from '../src/sources/network/httpClient';
-import '../src/services/backgroundScanner';
-import { getNotificationsModule } from '../src/services/notificationService';
+import { getBackgroundScanConfig } from '../src/services/backgroundScanner';
+import { getNotificationsModule, sendAppUpdateNotification } from '../src/services/notificationService';
 import { IntroWelcomeModal } from '../src/components/IntroWelcomeModal';
+import { AppUpdateModal } from '../src/components/AppUpdateModal';
+import { checkForAppUpdates, AppReleaseInfo } from '../src/services/appUpdateService';
 
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -138,6 +140,33 @@ export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
   });
+
+  const [updateRelease, setUpdateRelease] = useState<AppReleaseInfo | null>(null);
+
+  // Tachiyomi/Mihon style in-app update check on startup (non-blocking 12h cadence)
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      const timer = setTimeout(() => {
+        checkForAppUpdates(false)
+          .then((release) => {
+            if (release) {
+              setUpdateRelease(release);
+              getBackgroundScanConfig().then((config) => {
+                if (config.enabled) {
+                  sendAppUpdateNotification({
+                    version: release.version,
+                    releaseTitle: release.releaseTitle,
+                    releaseNotes: release.releaseNotes,
+                  });
+                }
+              });
+            }
+          })
+          .catch(() => {});
+      }, 3500);
+      return () => clearTimeout(timer);
+    }
+  }, []);
 
   // Handle local notification tap response & deep-linking directly into chapter/manga
   useEffect(() => {
@@ -270,6 +299,14 @@ export default function RootLayout() {
               }}
             />
             <Stack.Screen
+              name="auth/login"
+              options={{
+                headerShown: false,
+                animation: 'slide_from_right',
+                contentStyle: { backgroundColor: '#09090B' },
+              }}
+            />
+            <Stack.Screen
               name="auth/callback"
               options={{
                 headerShown: false,
@@ -285,6 +322,15 @@ export default function RootLayout() {
 
           {/* First-Install Introductory Welcome Screen (1-Tap) */}
           {Platform.OS !== 'web' && <IntroWelcomeModal />}
+
+          {/* GitHub Release App Update Modal (Mihon / Tachiyomi In-App Install) */}
+          {Platform.OS !== 'web' && (
+            <AppUpdateModal
+              visible={Boolean(updateRelease)}
+              release={updateRelease}
+              onDismiss={() => setUpdateRelease(null)}
+            />
+          )}
 
           {/* Persistent Global Background WebView for Cloudflare & MangaDot Authenticated Requests */}
           {Platform.OS !== 'web' && (

@@ -4,7 +4,7 @@
  */
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -46,13 +46,10 @@ import {
   THEME_SCHEME_PRESETS,
   useThemeStore,
 } from '../../src/store/themeStore';
-import { getUserAvatarUrl, getUserDisplayName, useUserStore } from '../../src/store/userStore';
 import type { ReaderTheme, ReadingMode } from '../../src/types';
 import { triggerHaptic } from '../../src/utils/haptics';
 
-import { AuthModal } from '../../src/components/AuthModal';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
-import { syncUserDataWithCloud } from '../../src/services/cloudSync';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 
 type VectorIcon = React.ComponentProps<typeof Ionicons>['name'];
@@ -110,6 +107,8 @@ function CustomSwitch({
 export default function SettingsScreen() {
   useDocumentTitle('Settings');
   const router = useRouter();
+  const { from } = useLocalSearchParams<{ from?: string }>();
+  const [returnToProfile, setReturnToProfile] = useState(from === 'profile');
   const colors = useThemeColors();
   const systemColorScheme = useColorScheme();
   const isDark = systemColorScheme === 'dark';
@@ -138,29 +137,11 @@ export default function SettingsScreen() {
   const setHapticsEnabled = useReaderStore((s) => s.setHapticsEnabled);
   const clearHistory = useHistoryStore((s) => s.clearHistory);
 
-  // Supabase User store
-  const user = useUserStore((s) => s.user);
-  const signOut = useUserStore((s) => s.signOut);
-  const refreshUser = useUserStore((s) => s.refreshUser);
-
-  // Sync fresh user details from Supabase on mount and whenever Settings tab gains focus
-  useEffect(() => {
-    refreshUser();
-  }, [refreshUser]);
-
-  useFocusEffect(
-    useCallback(() => {
-      refreshUser();
-    }, [refreshUser])
-  );
-
   // Modal & Notification State
-  const [authModalVisible, setAuthModalVisible] = useState(false);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [scanIntervalMinutes, setScanIntervalMinutes] = useState(360);
   const [lastScanTimestamp, setLastScanTimestamp] = useState<number>(0);
   const [isScanning, setIsScanning] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
 
   useEffect(() => {
     getBackgroundScanConfig()
@@ -189,7 +170,23 @@ export default function SettingsScreen() {
     onConfirm: () => { },
   });
 
-  // Seamless Android Back Navigation: return to More hub instead of Discover
+  useEffect(() => {
+    setReturnToProfile(from === 'profile');
+  }, [from]);
+
+  const handleSettingsBack = useCallback(() => {
+    if (returnToProfile) {
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace('/profile' as any);
+      }
+      return;
+    }
+    router.replace('/(tabs)/more');
+  }, [returnToProfile, router]);
+
+  // Seamless Android Back Navigation: return to the previous screen instead of Discover
   useFocusEffect(
     useCallback(() => {
       const onBackPress = () => {
@@ -197,41 +194,18 @@ export default function SettingsScreen() {
           setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
           return true;
         }
-        if (authModalVisible) {
-          setAuthModalVisible(false);
-          return true;
-        }
         if (drawerVisible) {
           setDrawerVisible(false);
           return true;
         }
-        router.replace('/(tabs)/more');
+        handleSettingsBack();
         return true;
       };
 
       const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
       return () => subscription.remove();
-    }, [confirmModalConfig.visible, authModalVisible, drawerVisible, router])
+    }, [confirmModalConfig.visible, drawerVisible, handleSettingsBack])
   );
-
-  const handleManualSync = async () => {
-    if (!user?.id) return;
-    setIsSyncing(true);
-    const res = await syncUserDataWithCloud(user.id);
-    setIsSyncing(false);
-    setConfirmModalConfig({
-      visible: true,
-      title: res.success ? 'Cloud Sync Complete' : 'Sync Failed',
-      message: res.success
-        ? 'Your reading history and library bookmarks have been synchronized with Supabase.'
-        : res.message,
-      iconName: res.success ? 'checkmark-done-circle-outline' : 'alert-circle-outline',
-      confirmText: 'OK',
-      cancelText: '',
-      confirmVariant: 'primary',
-      onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
-    });
-  };
 
   const handleToggleNotifications = async (value: boolean) => {
     if (value) {
@@ -385,19 +359,6 @@ export default function SettingsScreen() {
     }
   };
 
-  const handleLogout = async () => {
-    await signOut();
-    setConfirmModalConfig({
-      visible: true,
-      title: 'Signed Out',
-      message: 'You have been signed out from Yomite Cloud Sync.',
-      iconName: 'log-out-outline',
-      confirmText: 'OK',
-      cancelText: '',
-      confirmVariant: 'primary',
-      onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
-    });
-  };
 
   const handleClearHistoryPrompt = () => {
     setConfirmModalConfig({
@@ -423,144 +384,6 @@ export default function SettingsScreen() {
     });
   };
 
-  /* ── SECTION 1: ACCOUNT & PROFILE (FLAT) ── */
-  const renderAccountSection = () => (
-    <View style={styles.section}>
-      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>
-        Yomite Account & Profile Settings
-      </Text>
-
-      {user ? (
-        <View style={styles.flatSectionBody}>
-          <Pressable
-            onPress={() => router.push('/profile' as any)}
-            accessibilityRole="button"
-            accessibilityLabel="View profile settings"
-            style={({ pressed, hovered }: any) => [
-              styles.profileCardRow,
-              (pressed || hovered) && { opacity: 0.8 },
-              Platform.OS === 'web' && { cursor: 'pointer' as any },
-            ]}
-          >
-            <View style={styles.profileInfoLeft}>
-              <View
-                style={[
-                  styles.avatarBox,
-                  {
-                    backgroundColor: colors.surfaceElevated,
-                  },
-                ]}
-              >
-                {getUserAvatarUrl(user) ? (
-                  <Image
-                    source={{ uri: getUserAvatarUrl(user)! }}
-                    style={styles.avatarImg}
-                    contentFit="cover"
-                    transition={200}
-                    cachePolicy="memory-disk"
-                  />
-                ) : (
-                  <Ionicons name="person" size={22} color={colors.text} />
-                )}
-              </View>
-              <View style={styles.profileTextCol}>
-                <Text style={[styles.profileName, { color: colors.text }]} numberOfLines={1}>
-                  {getUserDisplayName(user)}
-                </Text>
-              </View>
-            </View>
-
-            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-          </Pressable>
-
-          <View style={styles.profileActionRow}>
-            <AnimatedPressable
-              onPress={() => router.push('/profile' as any)}
-              accessibilityRole="button"
-              accessibilityLabel="Open profile settings"
-              style={[
-                styles.profileActionBtn,
-                { backgroundColor: 'transparent' },
-                Platform.OS === 'web' && { cursor: 'pointer' as any },
-              ]}
-            >
-              <Ionicons name="person-outline" size={15} color={accentColor} />
-              <Text style={[styles.profileActionBtnText, { color: accentColor }]}>
-                Profile
-              </Text>
-            </AnimatedPressable>
-
-            <AnimatedPressable
-              onPress={handleManualSync}
-              disabled={isSyncing}
-              accessibilityRole="button"
-              accessibilityLabel="Synchronize library with cloud"
-              style={[
-                styles.profileActionBtn,
-                { backgroundColor: 'transparent' },
-                Platform.OS === 'web' && { cursor: 'pointer' as any },
-              ]}
-            >
-              {isSyncing ? (
-                <ActivityIndicator size="small" color="#10B981" />
-              ) : (
-                <Ionicons name="sync-outline" size={15} color="#10B981" />
-              )}
-              <Text style={[styles.profileActionBtnText, { color: '#10B981' }]}>
-                {isSyncing ? 'Syncing…' : 'Sync Now'}
-              </Text>
-            </AnimatedPressable>
-
-            <AnimatedPressable
-              onPress={handleLogout}
-              accessibilityRole="button"
-              accessibilityLabel="Sign out of Yomite"
-              style={[
-                styles.profileActionBtn,
-                { backgroundColor: 'transparent' },
-                Platform.OS === 'web' && { cursor: 'pointer' as any },
-              ]}
-            >
-              <Ionicons name="log-out-outline" size={15} color={colors.textSecondary} />
-              <Text style={[styles.profileActionBtnText, { color: colors.textSecondary }]}>
-                Sign out
-              </Text>
-            </AnimatedPressable>
-          </View>
-        </View>
-      ) : (
-        <View style={styles.flatSectionBody}>
-          <View style={styles.signedOutHeader}>
-            <View style={[styles.avatarBox, { backgroundColor: colors.surfaceElevated }]}>
-              <Ionicons name="cloud-upload-outline" size={22} color={colors.textSecondary} />
-            </View>
-            <View style={styles.profileTextCol}>
-              <Text style={[styles.signedOutTitle, { color: colors.text }]}>Cloud Backup & Sync</Text>
-              <Text style={[styles.signedOutSubtitle, { color: colors.textSecondary }]}>
-                Sign in to sync library & bookmarks across devices
-              </Text>
-            </View>
-          </View>
-
-          <AnimatedPressable
-            onPress={() => setAuthModalVisible(true)}
-            accessibilityRole="button"
-            accessibilityLabel="Sign in or create account"
-            style={[
-              styles.openAuthBtn,
-              { backgroundColor: accentColor },
-              Platform.OS === 'web' && { cursor: 'pointer' as any },
-            ]}
-          >
-            <Ionicons name="log-in-outline" size={18} color={getContrastTextColor(accentColor)} />
-            <Text style={[styles.openAuthBtnText, { color: getContrastTextColor(accentColor) }]}>
-              Sign In / Create Account
-            </Text>
-          </AnimatedPressable>
-        </View>
-      )}
-    </View>
-  );
 
   /* ── SECTION 2: APP THEME & MODE (FLAT DIVIDED LIST) ── */
   const renderThemeModeSection = () => (
@@ -1064,7 +887,7 @@ export default function SettingsScreen() {
         {/* Top Header Section */}
         <View style={[styles.header, isDesktop && styles.headerDesktop]}>
           <View style={styles.headerRow}>
-            {Platform.OS === 'web' ? (
+            {Platform.OS === 'web' && !returnToProfile ? (
               <Pressable
                 onPress={() => setDrawerVisible(true)}
                 style={({ pressed, hovered }: any) => [
@@ -1080,10 +903,10 @@ export default function SettingsScreen() {
               </Pressable>
             ) : (
               <Pressable
-                onPress={() => router.replace('/(tabs)/more')}
+                onPress={handleSettingsBack}
                 style={({ pressed }) => [styles.backButton, { opacity: pressed ? 0.6 : 1 }]}
                 accessibilityRole="button"
-                accessibilityLabel="Back to More"
+                accessibilityLabel={returnToProfile ? 'Back to profile' : 'Back to More'}
                 hitSlop={8}
               >
                 <Ionicons name="arrow-back" size={24} color={colors.text} />
@@ -1093,7 +916,7 @@ export default function SettingsScreen() {
               <Text style={[styles.title, isDesktop && styles.titleDesktop, { color: colors.text }]}>Settings</Text>
               {isDesktop && (
                 <Text style={[styles.desktopSubtitle, { color: colors.textMuted }]}>
-                  Manage your account, reader preferences, themes, and storage.
+                  Manage your reader preferences, themes, appearance, and storage.
                 </Text>
               )}
             </View>
@@ -1108,22 +931,20 @@ export default function SettingsScreen() {
             /* ── DESKTOP 2-COLUMN BALANCED FLAT GRID ── */
             <View style={styles.desktopGrid}>
               <View style={styles.desktopCol}>
-                {renderAccountSection()}
                 {renderThemeModeSection()}
                 {renderColorSchemeSection()}
+                {renderDataSection()}
               </View>
               <View style={styles.desktopCol}>
                 {renderReadingModeSection()}
                 {renderReaderThemeSection()}
                 {renderNotificationsSection()}
-                {renderDataSection()}
                 {renderMobilePromoSection()}
               </View>
             </View>
           ) : (
             /* ── MOBILE SINGLE-COLUMN FLAT STACK ── */
             <View style={styles.mobileStack}>
-              {renderAccountSection()}
               {renderThemeModeSection()}
               {renderColorSchemeSection()}
               {renderReadingModeSection()}
@@ -1142,9 +963,6 @@ export default function SettingsScreen() {
             </Text>
           </View>
         </ScrollView>
-
-        {/* Supabase Auth Modal */}
-        <AuthModal visible={authModalVisible} onClose={() => setAuthModalVisible(false)} />
 
         {/* Custom Confirmation Modal */}
         <ConfirmationModal

@@ -44,6 +44,7 @@ interface SidebarDrawerProps {
   onSelectRecentlyAdded?: () => void;
   onSelectRandom?: () => void;
   onSelectPopular?: () => void;
+  showRecentlyAdded?: boolean;
 }
 
 export function SidebarDrawer({
@@ -53,6 +54,7 @@ export function SidebarDrawer({
   onSelectRecentlyAdded,
   onSelectRandom,
   onSelectPopular,
+  showRecentlyAdded = true,
 }: SidebarDrawerProps) {
   const colors = useThemeColors();
   const router = useRouter();
@@ -103,19 +105,21 @@ export function SidebarDrawer({
         }
       },
     },
-    {
-      id: 'recently_added',
-      label: 'Recently Added',
-      icon: 'add-circle-outline',
-      action: () => {
-        onClose();
-        if (onSelectRecentlyAdded) {
-          onSelectRecentlyAdded();
-        } else {
-          router.push('/(tabs)' as any);
-        }
-      },
-    },
+    ...(showRecentlyAdded
+      ? [{
+          id: 'recently_added',
+          label: 'Recently Added',
+          icon: 'add-circle-outline' as const,
+          action: () => {
+            onClose();
+            if (onSelectRecentlyAdded) {
+              onSelectRecentlyAdded();
+            } else {
+              router.push('/(tabs)' as any);
+            }
+          },
+        }]
+      : []),
     {
       id: 'random',
       label: 'Random Manga',

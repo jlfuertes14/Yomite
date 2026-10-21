@@ -10,40 +10,48 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
-  TextInput,
-  ActivityIndicator,
   Platform,
-  Alert,
+  useWindowDimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import * as ImagePicker from 'expo-image-picker';
-import { Colors, Spacing, Radius, Typography } from '../constants/Colors';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Spacing, Radius, Typography } from '../constants/Colors';
 import { useThemeColors } from '../src/hooks/useThemeColor';
-import { useUserStore, getUserDisplayName, getUserHandle, getUserAvatarUrl } from '../src/store/userStore';
+import { useUserStore, getUserDisplayName, getUserHandle, getUserAvatarUrl, getUserBannerUrl } from '../src/store/userStore';
 import { useLibraryStore } from '../src/store/libraryStore';
 import { useHistoryStore } from '../src/store/historyStore';
 import { useDownloadStore } from '../src/store/downloadStore';
 import { useCommunityStore } from '../src/store/communityStore';
-import { syncUserDataWithCloud } from '../src/services/cloudSync';
-import { processAndUploadAvatar } from '../src/services/avatarService';
-import { formatChapterDate } from '../src/utils/date';
 import { triggerHaptic } from '../src/utils/haptics';
 
-import { AuthModal } from '../src/components/AuthModal';
 import { ConfirmationModal } from '../src/components/ConfirmationModal';
+import { ProfileEditSheet } from '../src/components/ProfileEditSheet';
 import { useDocumentTitle } from '../src/utils/useDocumentTitle';
+
+const STREAK_DAY_ART = {
+  Mon: require('../assets/images/streaks/monday.png'),
+  Tue: require('../assets/images/streaks/tuesday.png'),
+  Wed: require('../assets/images/streaks/wednesday.png'),
+  Thu: require('../assets/images/streaks/thursday.png'),
+  Fri: require('../assets/images/streaks/friday.png'),
+  Sat: require('../assets/images/streaks/saturday.png'),
+  Sun: require('../assets/images/streaks/sunday.png'),
+} as const;
+
+const STREAK_FLAME_ART = require('../assets/images/streaks/flame.png');
 
 export default function ProfileScreen() {
   useDocumentTitle('User Profile');
   const colors = useThemeColors();
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const router = useRouter();
 
   const user = useUserStore((s) => s.user);
   const signOut = useUserStore((s) => s.signOut);
-  const updateProfile = useUserStore((s) => s.updateProfile);
   const refreshUser = useUserStore((s) => s.refreshUser);
 
   const libraryEntries = useLibraryStore((s) => s.entries);
@@ -51,12 +59,7 @@ export default function ProfileScreen() {
   const downloadEntries = useDownloadStore((s) => s.chapters);
   const userThreads = useCommunityStore((s) => s.userThreads);
 
-  const [authModalVisible, setAuthModalVisible] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
-  const [editUsername, setEditUsername] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   // Sync user state on mount & focus
   useEffect(() => {
@@ -89,10 +92,15 @@ export default function ProfileScreen() {
   const displayName = getUserDisplayName(user);
   const handle = getUserHandle(user);
   const avatarUrl = getUserAvatarUrl(user);
-  const email = user?.email || 'No email attached';
-  const memberSince = user?.created_at
-    ? formatChapterDate(user.created_at)
-    : 'Recently';
+  const bannerUrl = getUserBannerUrl(user);
+  const streakFill = [`${colors.accent}66`, `${colors.accent}1F`] as const;
+  const contentWidth = Math.min(width, 720) - Spacing.lg * 2;
+  const streakCircleSize = Math.min(
+    48,
+    Math.max(36, Math.floor(contentWidth / 7) - 2)
+  );
+  const streakImageSize = streakCircleSize - 4;
+  const statNumberSize = width >= 768 ? 38 : width < 360 ? 28 : 32;
 
   // Calculate dynamic reading streak in days from history timestamps
   const userStreak = useMemo(() => {
@@ -191,140 +199,9 @@ export default function ProfileScreen() {
     };
   }, [historyEntries]);
 
-  const handlePickAvatar = async () => {
-    if (!user) {
-      setAuthModalVisible(true);
-      return;
-    }
-
-    try {
-      triggerHaptic();
-      if (Platform.OS !== 'web') {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-          Alert.alert(
-            'Permission Required',
-            'Please grant photo library access to change your profile picture.'
-          );
-          return;
-        }
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.7,
-      });
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const asset = result.assets[0];
-        setIsUploadingImage(true);
-
-        const res = await processAndUploadAvatar(user.id, asset);
-        setIsUploadingImage(false);
-
-        if (!res.success) {
-          Alert.alert('Upload Failed', res.error || 'Could not update profile photo.');
-        } else {
-          triggerHaptic();
-          setConfirmModalConfig({
-            visible: true,
-            title: 'Profile Photo Updated',
-            message: 'Your profile avatar has been saved and synchronized across all your devices!',
-            iconName: 'checkmark-circle-outline',
-            confirmText: 'Great',
-            cancelText: '',
-            confirmVariant: 'success',
-            onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
-          });
-        }
-      }
-    } catch (err: any) {
-      setIsUploadingImage(false);
-      console.error('Error picking avatar image:', err);
-      Alert.alert('Error', 'An error occurred while selecting your profile photo.');
-    }
-  };
-
-  const handleRemoveAvatarPrompt = () => {
-    triggerHaptic();
-    setConfirmModalConfig({
-      visible: true,
-      title: 'Remove Profile Photo',
-      message: 'Are you sure you want to remove your profile picture? It will reset to your initial letter.',
-      iconName: 'trash-outline',
-      confirmText: 'Remove',
-      cancelText: 'Cancel',
-      confirmVariant: 'destructive',
-      onConfirm: async () => {
-        setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
-        setIsUploadingImage(true);
-        await updateProfile({ avatar_url: '' });
-        setIsUploadingImage(false);
-      },
-    });
-  };
-
   const handleStartEdit = () => {
-    setEditUsername(displayName);
+    triggerHaptic();
     setIsEditing(true);
-  };
-
-  const handleSaveProfile = async () => {
-    if (!editUsername.trim()) {
-      Alert.alert('Invalid Name', 'Display name cannot be empty.');
-      return;
-    }
-    if (editUsername.trim().length < 3) {
-      Alert.alert('Invalid Name', 'Display name must be at least 3 characters.');
-      return;
-    }
-
-    triggerHaptic();
-    setIsSaving(true);
-    const { error } = await updateProfile({
-      username: editUsername.trim(),
-      display_name: editUsername.trim(),
-    });
-    setIsSaving(false);
-
-    if (error) {
-      Alert.alert('Update Failed', error.message || 'Could not update profile.');
-    } else {
-      setIsEditing(false);
-      setConfirmModalConfig({
-        visible: true,
-        title: 'Profile Updated',
-        message: `Your public display name has been updated to "${editUsername.trim()}".`,
-        iconName: 'checkmark-circle-outline',
-        confirmText: 'Great',
-        cancelText: '',
-        confirmVariant: 'success',
-        onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
-      });
-    }
-  };
-
-  const handleManualSync = async () => {
-    if (!user?.id) return;
-    triggerHaptic();
-    setIsSyncing(true);
-    const res = await syncUserDataWithCloud(user.id);
-    setIsSyncing(false);
-
-    setConfirmModalConfig({
-      visible: true,
-      title: res.success ? 'Cloud Sync Complete' : 'Sync Failed',
-      message: res.success
-        ? 'Your reading history and library bookmarks have been synchronized with Supabase.'
-        : res.message,
-      iconName: res.success ? 'checkmark-done-circle-outline' : 'alert-circle-outline',
-      confirmText: 'OK',
-      cancelText: '',
-      confirmVariant: 'primary',
-      onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
-    });
   };
 
   const handleLogoutPrompt = () => {
@@ -354,186 +231,138 @@ export default function ProfileScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[{ flex: 1, width: '100%' }, isWeb && styles.webCenteredContent]}>
-        {/* Top Header */}
-        <View style={styles.header}>
-          <Pressable
-            onPress={handleBack}
-            style={styles.headerIconBtn}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Ionicons name="arrow-back" size={22} color={colors.text} />
-          </Pressable>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>Profile</Text>
-          <Pressable
-            onPress={() => router.push('/(tabs)/settings' as any)}
-            style={styles.headerIconBtn}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Settings"
-          >
-            <Ionicons name="settings-outline" size={21} color={colors.textSecondary} />
-          </Pressable>
-        </View>
-
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {user ? (
-            <>
-              {/* ── 1. FLAT USER HERO ── */}
-              <View style={styles.userHeroSection}>
-                <View style={styles.avatarWrapper}>
-                  <Pressable
-                    onPress={handlePickAvatar}
-                    disabled={isUploadingImage}
-                    accessibilityRole="button"
-                    accessibilityLabel="Change profile picture"
-                    style={({ pressed, hovered }: any) => [
-                      styles.avatarCircle,
-                      {
-                        backgroundColor: avatarUrl ? 'transparent' : colors.accent,
-                        opacity: pressed ? 0.85 : hovered ? 0.95 : 1,
-                      },
-                      Platform.OS === 'web' && { cursor: 'pointer' as any },
-                    ]}
-                  >
-                    {avatarUrl ? (
-                      <Image
-                        source={{ uri: avatarUrl }}
-                        style={styles.avatarImg}
-                        contentFit="cover"
-                        transition={200}
-                        cachePolicy="memory-disk"
-                      />
-                    ) : (
-                      <Text style={[styles.avatarInitials, { color: colors.accentForeground }]}>
-                        {displayName.charAt(0).toUpperCase()}
-                      </Text>
-                    )}
+          {/* ── BANNER ── */}
+          <View style={styles.banner}>
+            <Image
+              source={bannerUrl ? { uri: bannerUrl } : require('../assets/images/login_backdrop_collage.jpg')}
+              style={StyleSheet.absoluteFill}
+              contentFit="cover"
+              transition={250}
+              cachePolicy="memory-disk"
+              accessibilityLabel="Profile banner"
+            />
+            <LinearGradient
+              colors={['rgba(0, 0, 0, 0.72)', 'rgba(0, 0, 0, 0.42)', 'rgba(0, 0, 0, 0.52)']}
+              locations={[0, 0.55, 1]}
+              style={StyleSheet.absoluteFill}
+            />
+            <LinearGradient
+              colors={['transparent', colors.background]}
+              locations={[0.5, 1]}
+              style={styles.bannerFade}
+              pointerEvents="none"
+            />
 
-                    {isUploadingImage && (
-                      <View style={styles.avatarLoadingOverlay}>
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                      </View>
-                    )}
-                  </Pressable>
+            <View style={[styles.bannerNav, { paddingTop: insets.top + 10 }]}>
+              <Pressable
+                onPress={handleBack}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
+                style={({ pressed, hovered }: any) => [
+                  styles.bannerIconBtn,
+                  (pressed || hovered) && { opacity: 0.7 },
+                  Platform.OS === 'web' && { cursor: 'pointer' as any },
+                ]}
+              >
+                <Ionicons name="chevron-back" size={26} color="#FFFFFF" />
+              </Pressable>
+              <Text style={styles.bannerTitle}>Profile</Text>
+              <Pressable
+                onPress={() =>
+                  router.push({
+                    pathname: '/(tabs)/settings',
+                    params: { from: 'profile' },
+                  } as any)
+                }
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Settings"
+                style={({ pressed, hovered }: any) => [
+                  styles.bannerIconBtn,
+                  (pressed || hovered) && { opacity: 0.7 },
+                  Platform.OS === 'web' && { cursor: 'pointer' as any },
+                ]}
+              >
+                <Ionicons name="settings-outline" size={22} color="#FFFFFF" />
+              </Pressable>
+            </View>
+          </View>
 
-                  {/* Minimal Camera Badge */}
+          <View
+            style={[
+              styles.body,
+              { paddingBottom: 32 + insets.bottom },
+            ]}
+          >
+            <View style={styles.identityRow}>
+              <View
+                style={[
+                  styles.avatarCircle,
+                  {
+                    backgroundColor: avatarUrl ? 'transparent' : colors.accent,
+                    borderColor: colors.background,
+                  },
+                ]}
+              >
+                {avatarUrl ? (
+                  <Image
+                    source={{ uri: avatarUrl }}
+                    style={styles.avatarImg}
+                    contentFit="cover"
+                    transition={200}
+                    cachePolicy="memory-disk"
+                  />
+                ) : user ? (
+                  <Text style={[styles.avatarInitials, { color: colors.accentForeground }]}>
+                    {displayName.charAt(0).toUpperCase()}
+                  </Text>
+                ) : (
+                  <Ionicons name="person" size={38} color={colors.accentForeground} />
+                )}
+              </View>
+            </View>
+
+            {/* Name & Handle */}
+            <View style={styles.nameBlock}>
+              <View style={styles.userNameRow}>
+                <Text style={[styles.userNameText, { color: colors.text }]} numberOfLines={1}>
+                  {user ? displayName : 'Guest Reader'}
+                </Text>
+                {user && (
                   <Pressable
-                    onPress={handlePickAvatar}
-                    disabled={isUploadingImage}
-                    style={[
-                      styles.cameraBadge,
-                      {
-                        backgroundColor: colors.accent,
-                        borderColor: colors.background,
-                        borderWidth: 1.5,
-                      },
-                    ]}
+                    onPress={handleStartEdit}
+                    style={styles.editBtn}
                     hitSlop={8}
                     accessibilityRole="button"
-                    accessibilityLabel="Upload photo"
+                    accessibilityLabel="Edit profile"
                   >
-                    <Ionicons name="camera" size={12} color={colors.accentForeground} />
+                    <Ionicons name="pencil" size={16} color={colors.accent} />
                   </Pressable>
-                </View>
-
-                {/* User Info & Edit */}
-                <View style={styles.userInfoCol}>
-                  <View style={styles.userNameRow}>
-                    <Text style={[styles.userNameText, { color: colors.text }]} numberOfLines={1}>
-                      {displayName}
-                    </Text>
-                    <Pressable
-                      onPress={handleStartEdit}
-                      style={styles.editBtn}
-                      hitSlop={8}
-                      accessibilityRole="button"
-                      accessibilityLabel="Edit display name"
-                    >
-                      <Ionicons name="pencil" size={13} color={colors.accent} />
-                    </Pressable>
-                  </View>
-
-                  <Text style={[styles.userHandleText, { color: colors.textMuted }]}>
-                    @{handle}
-                  </Text>
-
-                  {/* Flat Action Buttons Row */}
-                  <View style={styles.profileActionRow}>
-                    <Pressable
-                      onPress={handlePickAvatar}
-                      disabled={isUploadingImage}
-                      style={({ pressed, hovered }: any) => [
-                        styles.flatActionPill,
-                        (pressed || hovered) && { opacity: 0.7 },
-                        Platform.OS === 'web' && { cursor: 'pointer' as any },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="Change profile picture"
-                    >
-                      <Ionicons name="image-outline" size={13} color={colors.accent} />
-                      <Text style={[styles.flatActionPillText, { color: colors.accent }]}>
-                        {avatarUrl ? 'Change Photo' : 'Upload Photo'}
-                      </Text>
-                    </Pressable>
-
-                    {avatarUrl ? (
-                      <Pressable
-                        onPress={handleRemoveAvatarPrompt}
-                        disabled={isUploadingImage}
-                        style={({ pressed, hovered }: any) => [
-                          styles.flatActionPill,
-                          (pressed || hovered) && { opacity: 0.7 },
-                          Platform.OS === 'web' && { cursor: 'pointer' as any },
-                        ]}
-                        accessibilityRole="button"
-                        accessibilityLabel="Remove photo"
-                      >
-                        <Ionicons name="trash-outline" size={13} color={colors.textMuted} />
-                        <Text style={[styles.flatActionPillText, { color: colors.textMuted }]}>
-                          Remove
-                        </Text>
-                      </Pressable>
-                    ) : null}
-
-                    <Pressable
-                      onPress={handleManualSync}
-                      disabled={isSyncing}
-                      style={({ pressed, hovered }: any) => [
-                        styles.flatActionPill,
-                        (pressed || hovered) && { opacity: 0.7 },
-                        Platform.OS === 'web' && { cursor: 'pointer' as any },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="Sync library data"
-                    >
-                      {isSyncing ? (
-                        <ActivityIndicator size="small" color={colors.emerald || '#10B981'} />
-                      ) : (
-                        <Ionicons name="sync-outline" size={13} color={colors.emerald || '#10B981'} />
-                      )}
-                      <Text style={[styles.flatActionPillText, { color: colors.emerald || '#10B981' }]}>
-                        {isSyncing ? 'Syncing…' : 'Sync Now'}
-                      </Text>
-                    </Pressable>
-                  </View>
-                </View>
+                )}
               </View>
 
-              {/* ── 2. FLAT COLLECTION & READING STATS ── */}
+              <Text style={[styles.userHandleText, { color: colors.textSecondary }]} numberOfLines={1}>
+                {user ? `@${handle}` : 'Sign in to sync your reading'}
+              </Text>
+            </View>
+
+            {user ? (
+              <>
+              {/* ── 2. READING OVERVIEW ── */}
               <View style={styles.sectionWrapper}>
-                <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+                <Text style={[styles.heroSectionTitle, { color: colors.text }]}>
                   Reading Overview
                 </Text>
                 <View style={styles.statsRow}>
                   <View style={styles.statTile}>
-                    <Text style={[styles.statNumber, { color: colors.text }]}>
+                    <Text style={[styles.statNumber, { color: colors.accent, fontSize: statNumberSize }]} numberOfLines={1}>
                       {Object.keys(libraryEntries).length}
                     </Text>
                     <Text style={[styles.statLabel, { color: colors.textMuted }]}>
@@ -541,10 +370,10 @@ export default function ProfileScreen() {
                     </Text>
                   </View>
 
-                  <View style={styles.statDivider} />
+                  <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
 
                   <View style={styles.statTile}>
-                    <Text style={[styles.statNumber, { color: colors.text }]}>
+                    <Text style={[styles.statNumber, { color: colors.accent, fontSize: statNumberSize }]} numberOfLines={1}>
                       {historyEntries.length}
                     </Text>
                     <Text style={[styles.statLabel, { color: colors.textMuted }]}>
@@ -552,10 +381,10 @@ export default function ProfileScreen() {
                     </Text>
                   </View>
 
-                  <View style={styles.statDivider} />
+                  <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
 
                   <View style={styles.statTile}>
-                    <Text style={[styles.statNumber, { color: colors.text }]}>
+                    <Text style={[styles.statNumber, { color: colors.accent, fontSize: statNumberSize }]} numberOfLines={1}>
                       {Object.keys(downloadEntries).length}
                     </Text>
                     <Text style={[styles.statLabel, { color: colors.textMuted }]}>
@@ -563,10 +392,10 @@ export default function ProfileScreen() {
                     </Text>
                   </View>
 
-                  <View style={styles.statDivider} />
+                  <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
 
                   <View style={styles.statTile}>
-                    <Text style={[styles.statNumber, { color: colors.text }]}>
+                    <Text style={[styles.statNumber, { color: colors.accent, fontSize: statNumberSize }]} numberOfLines={1}>
                       {userThreads.length}
                     </Text>
                     <Text style={[styles.statLabel, { color: colors.textMuted }]}>
@@ -576,11 +405,11 @@ export default function ProfileScreen() {
                 </View>
               </View>
 
-              {/* ── 3. FLAT WEEKLY DAY STREAK ── */}
+              {/* ── 3. DAILY READING STREAK ── */}
               <View style={styles.sectionWrapper}>
                 <View style={styles.streakHeaderRow}>
                   <View style={styles.streakTitleCol}>
-                    <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+                    <Text style={[styles.heroSectionTitle, { color: colors.text }]}>
                       Daily Reading Streak
                     </Text>
                     <Text style={[styles.streakSubtitleText, { color: colors.textMuted }]}>
@@ -588,172 +417,117 @@ export default function ProfileScreen() {
                     </Text>
                   </View>
 
-                  <View style={[styles.userStreakBadge, { backgroundColor: `${colors.accent}18` }]}>
-                    <Ionicons name="flame" size={15} color={colors.accent} />
+                  <View style={styles.userStreakBadge}>
+                    <Image
+                      source={STREAK_FLAME_ART}
+                      style={styles.userStreakFlame}
+                      contentFit="contain"
+                      transition={150}
+                      cachePolicy="memory-disk"
+                      accessibilityLabel="Reading streak"
+                    />
                     <Text style={[styles.userStreakBadgeText, { color: colors.accent }]}>
-                      {userStreak} Day Streak
+                      {userStreak} {userStreak === 1 ? 'Day' : 'Days'}
                     </Text>
                   </View>
                 </View>
 
-                {/* 7-Day Flat Tracker Row */}
                 <View style={styles.weekDaysRow}>
-                  {weekStreakData.days.map((item) => {
-                    return (
-                      <View key={item.dateStr} style={styles.dayCol}>
-                        <Text
-                          style={[
-                            styles.dayLabelText,
-                            { color: item.isToday ? colors.text : colors.textMuted },
-                            item.isToday && { fontWeight: '700' },
-                          ]}
-                        >
-                          {item.dayName}
-                        </Text>
+                    {weekStreakData.days.map((item) => {
+                      return (
+                        <View key={item.dateStr} style={styles.dayCol}>
+                          <Text
+                            style={[
+                              styles.dayLabelText,
+                              { color: item.isToday ? colors.text : colors.textMuted },
+                              item.isToday && { fontWeight: '700' },
+                            ]}
+                          >
+                            {item.dayName}
+                          </Text>
 
-                        {/* Day Status Circle */}
-                        <View
-                          style={[
-                            styles.dayStatusCircle,
-                            {
-                              backgroundColor: item.hasRead
-                                ? colors.accent
-                                : item.isToday
-                                ? `${colors.accent}20`
-                                : colors.surfaceElevated,
-                            },
-                            item.isToday && !item.hasRead && {
-                              borderWidth: 1.5,
-                              borderColor: colors.accent,
-                            },
-                          ]}
-                        >
-                          {item.hasRead ? (
-                            <Ionicons name="flame" size={16} color={colors.accentForeground} />
-                          ) : item.isToday ? (
-                            <View style={[styles.todayCenterDot, { backgroundColor: colors.accent }]} />
-                          ) : item.isPast ? (
-                            <View style={[styles.missedDot, { backgroundColor: colors.textMuted }]} />
-                          ) : (
-                            <Text style={[styles.futureDateNum, { color: colors.textMuted }]}>
-                              {item.dateNum}
-                            </Text>
-                          )}
+                          {/* Day Status Circle */}
+                          <View
+                            style={[
+                              styles.dayStatusCircle,
+                              {
+                                width: streakCircleSize,
+                                height: streakCircleSize,
+                                borderRadius: streakCircleSize / 2,
+                              },
+                              {
+                                backgroundColor: item.hasRead
+                                  ? 'transparent'
+                                  : item.isToday
+                                  ? `${colors.accent}20`
+                                  : colors.background,
+                              },
+                              item.isToday && !item.hasRead && {
+                                borderWidth: 1.5,
+                                borderColor: colors.accent,
+                              },
+                            ]}
+                          >
+                            {item.hasRead && (
+                              <LinearGradient
+                                colors={streakFill}
+                                start={{ x: 0.15, y: 0 }}
+                                end={{ x: 0.85, y: 1 }}
+                                style={[
+                                  StyleSheet.absoluteFill,
+                                  styles.streakDayBackdrop,
+                                  { borderRadius: streakCircleSize / 2 },
+                                ]}
+                                pointerEvents="none"
+                              />
+                            )}
+                            {item.hasRead ? (
+                              <Image
+                                source={STREAK_DAY_ART[item.dayName as keyof typeof STREAK_DAY_ART]}
+                                style={{
+                                  width: streakImageSize,
+                                  height: streakImageSize,
+                                }}
+                                contentFit="contain"
+                                transition={150}
+                                cachePolicy="memory-disk"
+                                accessibilityLabel={`${item.dayName} reading streak completed`}
+                              />
+                            ) : item.isToday ? (
+                              <View style={[styles.todayCenterDot, { backgroundColor: colors.accent }]} />
+                            ) : item.isPast ? (
+                              <View style={[styles.missedDot, { backgroundColor: colors.textMuted }]} />
+                            ) : (
+                              <Text style={[styles.futureDateNum, { color: colors.textMuted }]}>
+                                {item.dateNum}
+                              </Text>
+                            )}
+                          </View>
+
+                          <Text
+                            style={[
+                              styles.dayDateNumText,
+                              { color: item.isToday ? colors.accent : colors.textMuted },
+                              item.isToday && { fontWeight: '700' },
+                            ]}
+                          >
+                            {item.dateNum}
+                          </Text>
                         </View>
+                      );
+                    })}
+                  </View>
 
-                        <Text
-                          style={[
-                            styles.dayDateNumText,
-                            { color: item.isToday ? colors.accent : colors.textMuted },
-                            item.isToday && { fontWeight: '700' },
-                          ]}
-                        >
-                          {item.dateNum}
-                        </Text>
-                      </View>
-                    );
-                  })}
-                </View>
-
-                {/* Motivational Status Micro-Text */}
-                <Text style={[styles.streakMotivationText, { color: colors.textMuted }]}>
-                  {userStreak > 0
-                    ? `🔥 ${userStreak}-day reading streak! Read daily to keep your momentum going.`
-                    : 'Read a chapter today to start your weekly reading streak!'}
-                </Text>
+                  {/* Motivational Status Micro-Text */}
+                  <View style={[styles.streakMotivationDivider, { backgroundColor: colors.border }]} />
+                  <Text style={[styles.streakMotivationText, { color: colors.textMuted }]}>
+                    {userStreak > 0
+                      ? `${userStreak}-day reading streak! Read daily to keep your momentum going.`
+                      : 'Read a chapter today to start your weekly reading streak!'}
+                  </Text>
               </View>
 
-              {/* ── 4. FLAT QUICK ACCESS LIST ── */}
-              <View style={styles.sectionWrapper}>
-                <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
-                  Quick Access
-                </Text>
-                <View style={styles.flatDividedList}>
-                  <Pressable
-                    onPress={() => router.push('/(tabs)/library' as any)}
-                    accessibilityRole="button"
-                    accessibilityLabel="Go to library"
-                    style={({ pressed, hovered }: any) => [
-                      styles.flatListItem,
-                      (pressed || hovered) && { opacity: 0.7 },
-                      Platform.OS === 'web' && { cursor: 'pointer' as any },
-                    ]}
-                  >
-                    <View style={styles.flatListItemLeft}>
-                      <Ionicons name="library-outline" size={18} color={colors.accent} />
-                      <Text style={[styles.flatListItemText, { color: colors.text }]}>
-                        My Manga Library
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-                  </Pressable>
-
-                  <View style={[styles.flatSeparator, { backgroundColor: colors.border }]} />
-
-                  <Pressable
-                    onPress={() => router.push('/(tabs)/history' as any)}
-                    accessibilityRole="button"
-                    accessibilityLabel="Go to reading history"
-                    style={({ pressed, hovered }: any) => [
-                      styles.flatListItem,
-                      (pressed || hovered) && { opacity: 0.7 },
-                      Platform.OS === 'web' && { cursor: 'pointer' as any },
-                    ]}
-                  >
-                    <View style={styles.flatListItemLeft}>
-                      <Ionicons name="time-outline" size={18} color={colors.accent} />
-                      <Text style={[styles.flatListItemText, { color: colors.text }]}>
-                        Reading History
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-                  </Pressable>
-
-                  <View style={[styles.flatSeparator, { backgroundColor: colors.border }]} />
-
-                  <Pressable
-                    onPress={() => router.push('/(tabs)/community' as any)}
-                    accessibilityRole="button"
-                    accessibilityLabel="Go to community discussions"
-                    style={({ pressed, hovered }: any) => [
-                      styles.flatListItem,
-                      (pressed || hovered) && { opacity: 0.7 },
-                      Platform.OS === 'web' && { cursor: 'pointer' as any },
-                    ]}
-                  >
-                    <View style={styles.flatListItemLeft}>
-                      <Ionicons name="chatbubbles-outline" size={18} color={colors.accent} />
-                      <Text style={[styles.flatListItemText, { color: colors.text }]}>
-                        Community Discussions
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-                  </Pressable>
-
-                  <View style={[styles.flatSeparator, { backgroundColor: colors.border }]} />
-
-                  <Pressable
-                    onPress={() => router.push('/(tabs)/settings' as any)}
-                    accessibilityRole="button"
-                    accessibilityLabel="Go to settings"
-                    style={({ pressed, hovered }: any) => [
-                      styles.flatListItem,
-                      (pressed || hovered) && { opacity: 0.7 },
-                      Platform.OS === 'web' && { cursor: 'pointer' as any },
-                    ]}
-                  >
-                    <View style={styles.flatListItemLeft}>
-                      <Ionicons name="settings-outline" size={18} color={colors.accent} />
-                      <Text style={[styles.flatListItemText, { color: colors.text }]}>
-                        App & Reader Preferences
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-                  </Pressable>
-                </View>
-              </View>
-
-              {/* ── 5. FLAT SIGN OUT ── */}
+              {/* ── 4. SIGN OUT ── */}
               <View style={styles.signOutSection}>
                 <Pressable
                   onPress={handleLogoutPrompt}
@@ -765,24 +539,27 @@ export default function ProfileScreen() {
                     Platform.OS === 'web' && { cursor: 'pointer' as any },
                   ]}
                 >
-                  <Ionicons name="log-out-outline" size={16} color="#EF4444" />
+                  <Ionicons name="log-out-outline" size={20} color="#EF4444" />
                   <Text style={styles.flatSignOutText}>Sign out</Text>
                 </Pressable>
               </View>
             </>
           ) : (
-            /* ── LOGGED OUT GUEST VIEW (FLAT) ── */
+            /* ── LOGGED OUT GUEST VIEW ── */
             <View style={styles.guestSection}>
-              <View style={[styles.guestIconCircle, { backgroundColor: colors.surfaceElevated }]}>
-                <Ionicons name="person-outline" size={36} color={colors.accent} />
+              <View style={[styles.guestIconCircle, { backgroundColor: `${colors.accent}14` }]}>
+                <Ionicons name="cloud-upload-outline" size={28} color={colors.accent} />
               </View>
-              <Text style={[styles.guestTitle, { color: colors.text }]}>Account & Cloud Sync</Text>
+              <Text style={[styles.guestTitle, { color: colors.text }]}>Sync your library</Text>
               <Text style={[styles.guestSubtitle, { color: colors.textMuted }]}>
-                Sign in to sync your bookmarks, record reading progress across devices, and participate in discussions.
+                Sign in to save bookmarks, sync reading progress across devices, and join community discussions.
               </Text>
 
               <Pressable
-                onPress={() => setAuthModalVisible(true)}
+                onPress={() => {
+                  triggerHaptic();
+                  router.push({ pathname: '/auth/login', params: { redirect: '/profile' } } as any);
+                }}
                 accessibilityRole="button"
                 accessibilityLabel="Sign in or create account"
                 style={({ pressed, hovered }: any) => [
@@ -801,45 +578,30 @@ export default function ProfileScreen() {
               </Pressable>
             </View>
           )}
-
-          <View style={{ height: 40 }} />
+          </View>
         </ScrollView>
 
-        {/* Edit Profile Modal Dialog */}
-        <ConfirmationModal
+        {/* Edit Profile Sheet */}
+        <ProfileEditSheet
           visible={isEditing}
-          title="Edit Display Name"
-          message="Enter your preferred username / display name for Yomite."
-          iconName="person-circle-outline"
-          confirmText={isSaving ? 'Saving...' : 'Save Changes'}
-          cancelText="Cancel"
-          confirmVariant="primary"
-          onConfirm={handleSaveProfile}
-          onCancel={() => setIsEditing(false)}
-        >
-          <View style={styles.editInputWrapper}>
-            <TextInput
-              style={[
-                styles.editTextInput,
-                {
-                  backgroundColor: colors.surfaceElevated,
-                  borderColor: colors.border,
-                  color: colors.text,
-                },
-              ]}
-              placeholder="e.g. OtakuLegend"
-              placeholderTextColor={colors.textMuted}
-              value={editUsername}
-              onChangeText={setEditUsername}
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoFocus
-            />
-          </View>
-        </ConfirmationModal>
+          onClose={() => setIsEditing(false)}
+          onSaved={(name) => {
+            setIsEditing(false);
+            setTimeout(() => {
+              setConfirmModalConfig({
+                visible: true,
+                title: 'Profile Updated',
+                message: `Your username has been updated to "${name}".`,
+                iconName: 'checkmark-circle-outline',
+                confirmText: 'Great',
+                cancelText: '',
+                confirmVariant: 'success',
+                onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
+              });
+            }, 260);
+          }}
+        />
 
-        {/* Auth Modal for Guests */}
-        <AuthModal visible={authModalVisible} onClose={() => setAuthModalVisible(false)} />
 
         {/* General Confirmation Modal */}
         <ConfirmationModal
@@ -854,7 +616,7 @@ export default function ProfileScreen() {
           onCancel={() => setConfirmModalConfig((prev) => ({ ...prev, visible: false }))}
         />
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -867,42 +629,60 @@ const styles = StyleSheet.create({
     width: '100%',
     alignSelf: 'center',
   },
-  header: {
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 20,
+  },
+  banner: {
+    height: 230,
+    width: '100%',
+    overflow: 'hidden',
+    justifyContent: 'flex-start',
+  },
+  bannerFade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 130,
+  },
+  bannerNav: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingBottom: Spacing.sm,
   },
-  headerIconBtn: {
-    padding: 6,
+  bannerIconBtn: {
+    width: 40,
+    height: 40,
     borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  headerTitle: {
+  bannerTitle: {
+    color: '#FFFFFF',
     fontSize: Typography.sizes.title2,
     fontWeight: Typography.weights.bold,
     letterSpacing: -0.3,
+    textShadowColor: 'rgba(0, 0, 0, 0.35)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
-  scrollContent: {
+  body: {
+    flexGrow: 1,
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.sm,
-    gap: 28,
+    gap: 36,
   },
-
-  /* 1. Flat User Hero Section */
-  userHeroSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-    paddingVertical: 8,
-  },
-  avatarWrapper: {
-    position: 'relative',
+  identityRow: {
+    marginTop: -46,
+    zIndex: 2,
   },
   avatarCircle: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    borderWidth: 3,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -910,161 +690,133 @@ const styles = StyleSheet.create({
   avatarImg: {
     width: '100%',
     height: '100%',
-    borderRadius: 34,
+    borderRadius: 44,
   },
   avatarInitials: {
     color: '#FFFFFF',
-    fontSize: 26,
+    fontSize: 32,
     fontWeight: Typography.weights.bold,
   },
-  avatarLoadingOverlay: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cameraBadge: {
-    position: 'absolute',
-    bottom: -2,
-    right: -2,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  userInfoCol: {
-    flex: 1,
-    gap: 2,
+  nameBlock: {
+    gap: 6,
+    marginTop: 4,
   },
   userNameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
   },
   userNameText: {
-    fontSize: 18,
-    fontWeight: Typography.weights.bold,
-    letterSpacing: -0.3,
+    fontSize: 24,
+    fontWeight: '800',
+    letterSpacing: -0.6,
+    flexShrink: 1,
   },
   editBtn: {
     padding: 4,
   },
   userHandleText: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: Typography.weights.medium,
-    marginBottom: 4,
-  },
-  profileActionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 14,
-    marginTop: 2,
-  },
-  flatActionPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingVertical: 4,
-    paddingHorizontal: 0,
-    minHeight: 28,
-  },
-  flatActionPillText: {
-    fontSize: 12,
-    fontWeight: Typography.weights.semibold,
   },
 
-  /* 2. Flat Stats Overview */
+  /* 2. Reading Overview */
   sectionWrapper: {
-    gap: 10,
+    gap: 16,
   },
-  sectionTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.3,
+  heroSectionTitle: {
+    fontSize: 19,
+    fontWeight: '800',
+    letterSpacing: -0.4,
     paddingHorizontal: 2,
   },
   statsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 12,
-    paddingHorizontal: 4,
+    paddingVertical: 28,
+    paddingHorizontal: 2,
   },
   statTile: {
     flex: 1,
     alignItems: 'center',
-    gap: 2,
+    gap: 6,
   },
   statDivider: {
-    width: 1,
-    height: 24,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    width: StyleSheet.hairlineWidth,
+    height: 44,
   },
   statNumber: {
-    fontSize: 20,
-    fontWeight: Typography.weights.bold,
-    letterSpacing: -0.5,
+    fontWeight: '800',
+    letterSpacing: -1,
+    fontVariant: ['tabular-nums'],
   },
   statLabel: {
-    fontSize: 11,
-    fontWeight: Typography.weights.medium,
+    fontSize: 12.5,
+    lineHeight: 16,
+    minHeight: 32,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 
-  /* 3. Flat Weekly Day Streak */
+  /* 3. Daily Reading Streak */
   streakHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 2,
+    gap: 12,
   },
   streakTitleCol: {
-    gap: 2,
+    gap: 3,
+    flexShrink: 1,
   },
   streakSubtitleText: {
-    fontSize: 12,
+    fontSize: 13,
+    lineHeight: 18,
     fontWeight: '500',
   },
   userStreakBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: Radius.full,
+  },
+  userStreakFlame: {
+    width: 26,
+    height: 26,
   },
   userStreakBadgeText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
   },
   weekDaysRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 12,
-    paddingHorizontal: 2,
+    paddingTop: 26,
+    paddingBottom: 10,
+    paddingHorizontal: 0,
   },
   dayCol: {
     alignItems: 'center',
-    gap: 6,
+    gap: 10,
     flex: 1,
   },
   dayLabelText: {
-    fontSize: 11.5,
+    fontSize: 12.5,
     fontWeight: '600',
   },
   dayStatusCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  streakDayBackdrop: {
+    overflow: 'hidden',
+  },
   todayCenterDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
   },
   missedDot: {
     width: 5,
@@ -1073,49 +825,31 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
   futureDateNum: {
-    fontSize: 11,
+    fontSize: 12.5,
     fontWeight: '500',
     opacity: 0.6,
   },
   dayDateNumText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '500',
   },
+  streakMotivationDivider: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 2,
+    opacity: 0.7,
+  },
   streakMotivationText: {
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 13,
+    lineHeight: 19,
     paddingHorizontal: 2,
-  },
-
-  /* 4. Flat Divided List for Quick Access */
-  flatDividedList: {
-    paddingVertical: 2,
-  },
-  flatListItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 14,
-    paddingHorizontal: 4,
-  },
-  flatListItemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-  },
-  flatListItemText: {
-    fontSize: 14,
-    fontWeight: Typography.weights.medium,
-  },
-  flatSeparator: {
-    height: 1,
-    opacity: 0.4,
-    marginLeft: 32,
-  },
-
-  /* 5. Flat Sign Out */
-  signOutSection: {
     paddingTop: 8,
+    paddingBottom: 12,
+  },
+
+  /* 4. Flat Sign Out */
+  signOutSection: {
+    marginTop: 'auto',
+    paddingTop: 12,
   },
   flatSignOutBtn: {
     flexDirection: 'row',
@@ -1127,28 +861,29 @@ const styles = StyleSheet.create({
   },
   flatSignOutText: {
     color: '#EF4444',
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: Typography.weights.semibold,
   },
 
-  /* 6. Flat Guest State */
+  /* 6. Guest State */
   guestSection: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 48,
-    paddingHorizontal: 16,
+    marginTop: 8,
+    paddingVertical: 40,
+    paddingHorizontal: 8,
     gap: 12,
   },
   guestIconCircle: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   guestTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: Typography.weights.bold,
     textAlign: 'center',
     letterSpacing: -0.3,
@@ -1163,28 +898,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 42,
+    alignSelf: 'stretch',
+    height: 44,
     paddingHorizontal: 24,
-    borderRadius: Radius.md,
+    borderRadius: 12,
     gap: 8,
-    marginTop: 8,
+    marginTop: 10,
   },
   guestSignInBtnText: {
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: Typography.weights.bold,
-  },
-
-  /* Edit Name Modal Input */
-  editInputWrapper: {
-    marginVertical: Spacing.sm,
-    width: '100%',
-  },
-  editTextInput: {
-    height: 44,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    paddingHorizontal: Spacing.md,
-    fontSize: Typography.sizes.body,
   },
 });

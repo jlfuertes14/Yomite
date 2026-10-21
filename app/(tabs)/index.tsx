@@ -40,9 +40,8 @@ import {
   getRandomManga,
   getRecentlyAdded,
   getTopRatedManga,
-  MangaStatistics
+  MangaStatistics,
 } from '../../src/api/mangadex';
-import { AuthModal } from '../../src/components/AuthModal';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
 import { CARD_GAP, MangaCard } from '../../src/components/MangaCard';
 import { OfflineState } from '../../src/components/OfflineState';
@@ -76,6 +75,9 @@ interface SidebarNavItem {
 
 const PAGE_SIZE = 27;
 const POPULAR_TOP_LIMIT = 10;
+
+const getDefaultFeedList = (data: { recentlyAdded: Manga[]; latestUpdates: Manga[] }) =>
+  data.recentlyAdded.length > 0 ? data.recentlyAdded : data.latestUpdates;
 
 const getMangaStatusColor = (status?: string) => {
   switch (status?.toLowerCase()) {
@@ -840,7 +842,8 @@ export default function DiscoverScreen() {
   // Retractable Sidebar states
   const [sidebarVisible, setSidebarVisible] = useState(false); // Inline desktop sidebar
   const [mobileDrawerVisible, setMobileDrawerVisible] = useState(false); // Mobile slide modal drawer
-  const [authModalVisible, setAuthModalVisible] = useState(false);
+  const user = useUserStore((s) => s.user);
+  const avatarUrl = getUserAvatarUrl(user);
   const [searchModalVisible, setSearchModalVisible] = useState(false);
   const [searchInitialQuery, setSearchInitialQuery] = useState('');
   // Restores from the source catalog appear instantly instead of sliding up
@@ -1137,6 +1140,9 @@ export default function DiscoverScreen() {
   }, [contractSearchBar]);
 
   const handleOpenSeeAll = useCallback(async (section: 'top_rated' | 'most_popular' | 'recently_added' | 'latest') => {
+    if (section === 'recently_added' && primarySourceId === 'asurascans') {
+      section = 'latest';
+    }
     setActiveSeeAllSection(section);
     setCurrentPage(1);
     showSeeAllChrome();
@@ -1147,10 +1153,27 @@ export default function DiscoverScreen() {
     mainScrollViewRef.current?.scrollTo({ y: 0, animated: false });
 
     let title = 'Top Rated Manga';
-    if (section === 'most_popular') title = 'Most Popular';
-    else if (section === 'recently_added') title = 'Recently Added';
+    if (section === 'most_popular') {
+      title = primarySourceId === 'asurascans' ? 'Most Popular All Time' : 'Most Popular';
+    } else if (section === 'recently_added') title = 'Recently Added';
     else if (section === 'latest') title = 'Latest Updates';
     setActiveFeedTitle(title);
+
+    if (primarySourceId !== 'mangadex') {
+      const sectionManga =
+        section === 'top_rated'
+          ? topRatedManga
+          : section === 'most_popular'
+            ? mostPopularManga
+            : section === 'latest'
+              ? latestUpdatesManga
+              : recentlyAddedManga;
+      setFeedManga(sectionManga);
+      setTotalMangaCount(sectionManga.length);
+      fetchStatsForList(sectionManga);
+      setIsLoadingFeed(false);
+      return;
+    }
 
     try {
       setIsLoadingFeed(true);
@@ -1172,7 +1195,14 @@ export default function DiscoverScreen() {
     } finally {
       setIsLoadingFeed(false);
     }
-  }, [showSeeAllChrome]);
+  }, [
+    showSeeAllChrome,
+    primarySourceId,
+    topRatedManga,
+    mostPopularManga,
+    latestUpdatesManga,
+    recentlyAddedManga,
+  ]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -1228,10 +1258,11 @@ export default function DiscoverScreen() {
       setMostPopularManga(data.mostPopular || []);
       setRecentlyAddedManga(data.recentlyAdded || []);
       setLatestUpdatesManga(data.latestUpdates || []);
-      setFeedManga(data.recentlyAdded || []);
-      setTotalMangaCount(data.recentlyAdded?.length || 0);
-      setActiveFeedTitle('Recently Added');
-      setActiveNavId('recently_added');
+      const defaultFeed = getDefaultFeedList(data);
+      setFeedManga(defaultFeed);
+      setTotalMangaCount(defaultFeed.length);
+      setActiveFeedTitle(data.recentlyAdded.length > 0 ? 'Recently Added' : 'Latest Updates');
+      setActiveNavId(data.recentlyAdded.length > 0 ? 'recently_added' : 'latest');
 
       if (data.popular && data.popular.length > 0) {
         const heroItems = data.popular.slice(0, POPULAR_TOP_LIMIT).map((m) => ({
@@ -1359,7 +1390,10 @@ export default function DiscoverScreen() {
     } catch {}
 
     try {
-      const data = await getUniversalDiscoverData(undefined, true);
+      const data = await getUniversalDiscoverData(
+        primarySourceId === 'mangadex' ? undefined : primarySourceId,
+        true
+      );
       setPrimarySourceName(data.primarySourceName);
       setPrimarySourceId(data.primarySourceId);
 
@@ -1369,13 +1403,18 @@ export default function DiscoverScreen() {
       setRecentlyAddedManga(data.recentlyAdded || []);
       setLatestUpdatesManga(data.latestUpdates || []);
 
-      let feedList = data.recentlyAdded || [];
+      let feedList = getDefaultFeedList(data);
       if (activeSeeAllSection === 'top_rated') feedList = data.topRated || [];
       else if (activeSeeAllSection === 'most_popular') feedList = data.mostPopular || [];
       else if (activeSeeAllSection === 'latest') feedList = data.latestUpdates || [];
+      else if (activeNavId === 'latest') feedList = data.latestUpdates || [];
 
       setFeedManga(feedList);
       setTotalMangaCount(feedList.length);
+      if (data.recentlyAdded.length === 0 && activeSeeAllSection === null) {
+        setActiveFeedTitle('Latest Updates');
+        setActiveNavId('latest');
+      }
 
       fetchStatsForList([
         ...(data.popular || []),
@@ -1389,7 +1428,7 @@ export default function DiscoverScreen() {
     } finally {
       setRefreshing(false);
     }
-  }, [activeSeeAllSection]);
+  }, [activeNavId, activeSeeAllSection, primarySourceId]);
 
   const handleSearch = useCallback(async (overrideQuery?: string) => {
     const query = (overrideQuery ?? searchQuery).trim();
@@ -1449,7 +1488,7 @@ export default function DiscoverScreen() {
   const handleSelectPopular = () => {
     clearSearchState();
     setCurrentPage(1);
-    setActiveFeedTitle('Popular New Titles');
+    setActiveFeedTitle(primarySourceId === 'asurascans' ? 'Trending This Week' : 'Popular New Titles');
     setActiveNavId('popular');
     setSidebarVisible(false);
     setMobileDrawerVisible(false);
@@ -1466,18 +1505,31 @@ export default function DiscoverScreen() {
       setActiveNavId('latest');
       setSidebarVisible(false);
       setMobileDrawerVisible(false);
+      if (primarySourceId !== 'mangadex') {
+        setFeedManga(latestUpdatesManga);
+        setTotalMangaCount(latestUpdatesManga.length);
+        fetchStatsForList(latestUpdatesManga);
+        return;
+      }
       const result = await getLatestUpdates(PAGE_SIZE, 0);
       setFeedManga(result.data);
       setTotalMangaCount(result.total);
       fetchStatsForList(result.data);
     } catch (err) {
-      console.error('Failed to load latest updates:', err);
+      console.warn('MangaDex latest updates failed; using cached discover data.', err);
+      setFeedManga(latestUpdatesManga);
+      setTotalMangaCount(latestUpdatesManga.length);
+      fetchStatsForList(latestUpdatesManga);
     } finally {
       setIsLoadingFeed(false);
     }
   };
 
   const handleSelectRecentlyAdded = async () => {
+    if (primarySourceId !== 'mangadex' && recentlyAddedManga.length === 0) {
+      await handleSelectLatest();
+      return;
+    }
     try {
       setIsLoadingFeed(true);
       setCurrentPage(1);
@@ -1486,12 +1538,21 @@ export default function DiscoverScreen() {
       setActiveNavId('recently_added');
       setSidebarVisible(false);
       setMobileDrawerVisible(false);
+      if (primarySourceId !== 'mangadex') {
+        setFeedManga(recentlyAddedManga);
+        setTotalMangaCount(recentlyAddedManga.length);
+        fetchStatsForList(recentlyAddedManga);
+        return;
+      }
       const result = await getRecentlyAdded(PAGE_SIZE, 0);
       setFeedManga(result.data);
       setTotalMangaCount(result.total);
       fetchStatsForList(result.data);
     } catch (err) {
-      console.error('Failed to load recently added:', err);
+      console.warn('MangaDex recently added failed; using cached discover data.', err);
+      setFeedManga(recentlyAddedManga);
+      setTotalMangaCount(recentlyAddedManga.length);
+      fetchStatsForList(recentlyAddedManga);
     } finally {
       setIsLoadingFeed(false);
     }
@@ -1499,6 +1560,7 @@ export default function DiscoverScreen() {
 
   // Page Change Handlers
   const handlePageChange = async (newPage: number) => {
+    if (primarySourceId !== 'mangadex') return;
     try {
       const offset = (newPage - 1) * PAGE_SIZE;
       setCurrentPage(newPage);
@@ -1754,12 +1816,14 @@ export default function DiscoverScreen() {
       icon: 'time-outline',
       action: handleSelectLatest,
     },
-    {
-      id: 'recently_added',
-      label: 'Recently Added',
-      icon: 'add-circle-outline',
-      action: handleSelectRecentlyAdded,
-    },
+    ...(primarySourceId === 'asurascans'
+      ? []
+      : [{
+          id: 'recently_added',
+          label: 'Recently Added',
+          icon: 'add-circle-outline' as const,
+          action: handleSelectRecentlyAdded,
+        }]),
     {
       id: 'random',
       label: 'Random Manga',
@@ -1806,7 +1870,7 @@ export default function DiscoverScreen() {
               activeNavId={activeNavId}
               isScrolled={isScrolled}
               onResetToDiscover={handleResetToDiscover}
-              onOpenAuth={() => setAuthModalVisible(true)}
+              onOpenAuth={() => router.push('/auth/login' as any)}
             />
           )}
 
@@ -1868,6 +1932,40 @@ export default function DiscoverScreen() {
                     accessibilityLabel="Search titles"
                   >
                     <Ionicons name="search-outline" size={24} color={colors.text} />
+                  </Pressable>
+
+                  <Pressable
+                    onPress={() => {
+                      triggerHaptic();
+                      if (user) {
+                        router.push('/profile' as any);
+                      } else {
+                        router.push('/auth/login' as any);
+                      }
+                    }}
+                    style={({ pressed }) => [
+                      styles.plainIconButton,
+                      styles.headerProfileBtn,
+                      { opacity: pressed ? 0.6 : 1 },
+                    ]}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={user ? 'Open profile' : 'Sign in to Yomite'}
+                  >
+                    {user ? (
+                      avatarUrl ? (
+                        <Image
+                          source={{ uri: avatarUrl }}
+                          style={styles.headerAvatarImg}
+                          contentFit="cover"
+                          cachePolicy="memory-disk"
+                        />
+                      ) : (
+                        <Ionicons name="person-circle" size={26} color={colors.accent} />
+                      )
+                    ) : (
+                      <Ionicons name="person-circle-outline" size={26} color={colors.text} />
+                    )}
                   </Pressable>
                 </View>
               </View>
@@ -2217,36 +2315,38 @@ export default function DiscoverScreen() {
                         </Text>
                       </Pressable>
 
-                      <Pressable
-                        onPress={handleSelectRecentlyAdded}
-                        style={[
-                          styles.feedSegmentPill,
-                          String(activeNavId) === 'recently_added' && styles.feedSegmentPillActive,
-                          {
-                            backgroundColor: String(activeNavId) === 'recently_added' ? colors.accent : colors.surfaceElevated,
-                            borderWidth: 0,
-                          },
-                        ]}
-                        accessibilityRole="tab"
-                        accessibilityState={{ selected: String(activeNavId) === 'recently_added' }}
-                      >
-                        <Ionicons
-                          name="add-circle-outline"
-                          size={14}
-                          color={String(activeNavId) === 'recently_added' ? colors.accentForeground : colors.textSecondary}
-                        />
-                        <Text
+                      {primarySourceId !== 'asurascans' && (
+                        <Pressable
+                          onPress={handleSelectRecentlyAdded}
                           style={[
-                            styles.feedSegmentText,
-                            String(activeNavId) === 'recently_added'
-                              ? [styles.feedSegmentTextActive, { color: colors.accentForeground }]
-                              : styles.feedSegmentTextInactive,
-                            String(activeNavId) !== 'recently_added' && { color: colors.textSecondary },
+                            styles.feedSegmentPill,
+                            String(activeNavId) === 'recently_added' && styles.feedSegmentPillActive,
+                            {
+                              backgroundColor: String(activeNavId) === 'recently_added' ? colors.accent : colors.surfaceElevated,
+                              borderWidth: 0,
+                            },
                           ]}
+                          accessibilityRole="tab"
+                          accessibilityState={{ selected: String(activeNavId) === 'recently_added' }}
                         >
-                          Recently Added
-                        </Text>
-                      </Pressable>
+                          <Ionicons
+                            name="add-circle-outline"
+                            size={14}
+                            color={String(activeNavId) === 'recently_added' ? colors.accentForeground : colors.textSecondary}
+                          />
+                          <Text
+                            style={[
+                              styles.feedSegmentText,
+                              String(activeNavId) === 'recently_added'
+                                ? [styles.feedSegmentTextActive, { color: colors.accentForeground }]
+                                : styles.feedSegmentTextInactive,
+                              String(activeNavId) !== 'recently_added' && { color: colors.textSecondary },
+                            ]}
+                          >
+                            Recently Added
+                          </Text>
+                        </Pressable>
+                      )}
 
                     </View>
                   </View>
@@ -2570,7 +2670,7 @@ export default function DiscoverScreen() {
                             {/* Carousel header */}
                             <View style={styles.trendingEyebrowRow}>
                               <Text style={[styles.trendingEyebrowText, { color: isLightTheme ? colors.text : '#E4E4E7' }]}>
-                                Popular New Titles
+                                {primarySourceId === 'asurascans' ? 'Trending This Week' : 'Popular New Titles'}
                               </Text>
 
                               <View style={styles.heroHeaderControls}>
@@ -2786,7 +2886,9 @@ export default function DiscoverScreen() {
                         <View style={styles.carouselSection}>
                           <View style={styles.carouselHeaderRow}>
                             <View style={styles.carouselTitleLeft}>
-                              <Text style={[styles.carouselTitle, { color: colors.text }]}>Most Popular</Text>
+                              <Text style={[styles.carouselTitle, { color: colors.text }]}>
+                                {primarySourceId === 'asurascans' ? 'Most Popular All Time' : 'Most Popular'}
+                              </Text>
                             </View>
                             <Pressable
                               onPress={() => handleOpenSeeAll('most_popular')}
@@ -2835,7 +2937,7 @@ export default function DiscoverScreen() {
                         </View>
                       )}
                       {/* 3. Recently Added Carousel */}
-                      {(isLoadingCarousels || recentlyAddedManga.length > 0) && (
+                      {primarySourceId !== 'asurascans' && (isLoadingCarousels || recentlyAddedManga.length > 0) && (
                         <View style={styles.carouselSection}>
                           <View style={styles.carouselHeaderRow}>
                             <View style={styles.carouselTitleLeft}>
@@ -2979,36 +3081,38 @@ export default function DiscoverScreen() {
                               </Text>
                             </Pressable>
 
-                            <Pressable
-                              onPress={handleSelectRecentlyAdded}
-                              style={[
-                                styles.feedSegmentPill,
-                                activeNavId === 'recently_added' && styles.feedSegmentPillActive,
-                                {
-                                  backgroundColor: activeNavId === 'recently_added' ? colors.accent : colors.surfaceElevated,
-                                  borderWidth: 0,
-                                },
-                              ]}
-                              accessibilityRole="tab"
-                              accessibilityState={{ selected: activeNavId === 'recently_added' }}
-                            >
-                              <Ionicons
-                                name="add-circle-outline"
-                                size={14}
-                                color={activeNavId === 'recently_added' ? colors.accentForeground : colors.textSecondary}
-                              />
-                              <Text
+                            {primarySourceId !== 'asurascans' && (
+                              <Pressable
+                                onPress={handleSelectRecentlyAdded}
                                 style={[
-                                  styles.feedSegmentText,
-                                  activeNavId === 'recently_added'
-                                    ? [styles.feedSegmentTextActive, { color: colors.accentForeground }]
-                                    : styles.feedSegmentTextInactive,
-                                  activeNavId !== 'recently_added' && { color: colors.textSecondary },
+                                  styles.feedSegmentPill,
+                                  activeNavId === 'recently_added' && styles.feedSegmentPillActive,
+                                  {
+                                    backgroundColor: activeNavId === 'recently_added' ? colors.accent : colors.surfaceElevated,
+                                    borderWidth: 0,
+                                  },
                                 ]}
+                                accessibilityRole="tab"
+                                accessibilityState={{ selected: activeNavId === 'recently_added' }}
                               >
-                                Recently Added
-                              </Text>
-                            </Pressable>
+                                <Ionicons
+                                  name="add-circle-outline"
+                                  size={14}
+                                  color={activeNavId === 'recently_added' ? colors.accentForeground : colors.textSecondary}
+                                />
+                                <Text
+                                  style={[
+                                    styles.feedSegmentText,
+                                    activeNavId === 'recently_added'
+                                      ? [styles.feedSegmentTextActive, { color: colors.accentForeground }]
+                                      : styles.feedSegmentTextInactive,
+                                    activeNavId !== 'recently_added' && { color: colors.textSecondary },
+                                  ]}
+                                >
+                                  Recently Added
+                                </Text>
+                              </Pressable>
+                            )}
                           </View>
                         </View>
                       ) : null}
@@ -3137,14 +3241,10 @@ export default function DiscoverScreen() {
           onSelectRecentlyAdded={handleSelectRecentlyAdded}
           onSelectRandom={handleSelectRandom}
           onSelectPopular={handleSelectPopular}
+          showRecentlyAdded={primarySourceId !== 'asurascans'}
         />
       )}
 
-      {/* Auth Modal for Unauthenticated Users */}
-      <AuthModal
-        visible={authModalVisible}
-        onClose={() => setAuthModalVisible(false)}
-      />
 
       {/* Sleek Custom Confirmation Dialog */}
       <ConfirmationModal
@@ -3393,6 +3493,18 @@ const styles = StyleSheet.create({
     padding: 4,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  headerProfileBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerAvatarImg: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
   },
   appTitle: {
     fontSize: Typography.sizes.title1,

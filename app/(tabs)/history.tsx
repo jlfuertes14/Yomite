@@ -79,6 +79,7 @@ function HistoryRowItem({
   onDeleteSingle: (entry: HistoryEntry) => void;
 }) {
   const colors = useThemeColors();
+  const progressTrackColor = colors.border;
   const [coverUrl, setCoverUrl] = useState<string | null>(item.coverUrl);
 
   const dlItem = useDownloadStore((s) => s.chapters[item.chapterId]);
@@ -234,7 +235,7 @@ function HistoryRowItem({
 
           {/* Reading Progress Bar & Timestamp */}
           <View style={styles.progressRow}>
-            <View style={styles.progressBarTrack}>
+            <View style={[styles.progressBarTrack, { backgroundColor: progressTrackColor }]}>
               <View
                 style={[
                   styles.progressBarFill,
@@ -486,7 +487,7 @@ export default function HistoryScreen() {
                     accessibilityRole="button"
                     accessibilityLabel="Toggle select all items"
                   >
-                    <Text style={styles.headerBtnTextMuted}>
+                    <Text style={[styles.headerBtnTextMuted, { color: colors.text }]}>
                       {selectedIds.size === filteredEntries.length ? 'Deselect All' : 'Select All'}
                     </Text>
                   </Pressable>
@@ -512,7 +513,7 @@ export default function HistoryScreen() {
                     accessibilityRole="button"
                     accessibilityLabel="Enter selection mode"
                   >
-                    <Text style={styles.headerBtnTextMuted}>Select</Text>
+                    <Text style={[styles.headerBtnTextMuted, { color: colors.text }]}>Select</Text>
                   </Pressable>
                   <Pressable
                     onPress={handleClearAll}
@@ -766,7 +767,6 @@ const styles = StyleSheet.create({
   headerBtnTextMuted: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#D4D4D8',
   },
   headerBtnTextAccent: {
     fontSize: 14,
@@ -886,7 +886,6 @@ const styles = StyleSheet.create({
     width: 64,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#27272A',
     overflow: 'hidden',
   },
   progressBarFill: {

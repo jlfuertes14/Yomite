@@ -319,12 +319,12 @@ export function extractCoverFileName(manga: Manga): string | null {
 
 export function extractAuthorName(manga: Manga): string {
   const author = manga.relationships.find((r) => r.type === 'author');
-  return author?.attributes?.name ?? 'Unknown';
+  return author?.attributes?.name ?? '';
 }
 
 export function extractArtistName(manga: Manga): string {
   const artist = manga.relationships.find((r) => r.type === 'artist');
-  return artist?.attributes?.name ?? 'Unknown';
+  return artist?.attributes?.name ?? '';
 }
 
 export function extractScanlationGroupName(chapter: Chapter): string {
