@@ -21,6 +21,8 @@ import { getNotificationsModule, sendAppUpdateNotification } from '../src/servic
 import { IntroWelcomeModal } from '../src/components/IntroWelcomeModal';
 import { AppUpdateModal } from '../src/components/AppUpdateModal';
 import { checkForAppUpdates, AppReleaseInfo } from '../src/services/appUpdateService';
+import { useColorScheme } from '../src/hooks/useColorScheme';
+import { useThemeColors } from '../src/hooks/useThemeColor';
 
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -132,6 +134,9 @@ function AuthSuccessToast({
 export default function RootLayout() {
   useDocumentTitle();
   const router = useRouter();
+  const colorScheme = useColorScheme();
+  const themeColors = useThemeColors();
+  const isDark = colorScheme === 'dark';
   const authSuccessMessage = useUserStore((s) => s.authSuccessMessage);
   const clearAuthSuccessMessage = useUserStore((s) => s.clearAuthSuccessMessage);
   const globalBridgeRef = useRef<any>(null);
@@ -233,8 +238,11 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
-    // Set native Android window background to dark, request storage permissions & initialize auth sync on launch
-    SystemUI.setBackgroundColorAsync('#09090B').catch(() => {});
+    // Keep the Android system/status-bar area aligned with the active app theme.
+    SystemUI.setBackgroundColorAsync(themeColors.background).catch(() => {});
+  }, [themeColors.background]);
+
+  useEffect(() => {
     CacheManager.cleanLegacyStorageCache();
     requestStoragePermissionOnLaunch();
     useUserStore.getState().initializeAuth();
@@ -251,7 +259,9 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider value={YomiteDarkTheme}>
-        <StatusBar style="light" />
+        <StatusBar
+          style={isDark ? 'light' : 'dark'}
+        />
         <View
           style={
             Platform.OS === 'web'

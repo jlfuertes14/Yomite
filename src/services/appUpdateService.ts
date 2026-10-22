@@ -189,6 +189,19 @@ export async function downloadAndInstallUpdate(
     updatesDir.create();
   }
 
+  // Keep only the APK currently being prepared. Older release APKs are no
+  // longer useful after the installer has been launched and can otherwise
+  // accumulate in the app cache across releases.
+  for (const entry of updatesDir.list()) {
+    if (entry instanceof File && entry.name.endsWith('.apk') && entry.name !== release.fileName) {
+      try {
+        entry.delete();
+      } catch {
+        // Cache cleanup is best-effort and must not block an update.
+      }
+    }
+  }
+
   const destFile = new File(updatesDir, release.fileName);
 
   // Remove stale/partial download for this filename

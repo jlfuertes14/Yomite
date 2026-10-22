@@ -140,6 +140,7 @@ export function MobileBottomSheet({
 
 export interface MobileSheetPanelRef {
   close: () => void;
+  open?: () => void;
 }
 
 interface MobileSheetPanelProps {
@@ -171,7 +172,13 @@ export const MobileSheetPanel = forwardRef<MobileSheetPanelRef, MobileSheetPanel
     });
   };
 
-  useImperativeHandle(ref, () => ({ close: closeWithAnimation }), [height]);
+  const openWithAnimation = () => {
+    isClosing.value = false;
+    cancelAnimation(translateY);
+    translateY.value = withSpring(0, SHEET_SPRING);
+  };
+
+  useImperativeHandle(ref, () => ({ close: closeWithAnimation, open: openWithAnimation }), [height]);
 
   useEffect(() => {
     if (!visible) return;

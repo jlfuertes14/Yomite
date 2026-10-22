@@ -6,6 +6,8 @@ import { Platform } from 'react-native';
 const BANNER_CACHE_SUBDIR = 'hero_banners_v512/';
 const LEGACY_BANNER_CACHE_SUBDIR = 'hero_banners/';
 const PURGE_FLAG_KEY = '@yomite_banner_cache_purged_v512_clean';
+const MAX_MEMORY_BANNERS = 12;
+const PREFETCH_CONCURRENCY = 3;
 
 const MANGA_REQUEST_HEADERS = {
   'User-Agent': 'Yomite/1.2.6',
@@ -75,6 +77,17 @@ async function ensureDirExists(): Promise<string> {
 // In-memory lookup map of mangaId -> local file:// URI
 const memoryBannerMap = new Map<string, string>();
 
+function rememberBanner(mangaId: string, uri: string): void {
+  memoryBannerMap.delete(mangaId);
+  memoryBannerMap.set(mangaId, uri);
+
+  while (memoryBannerMap.size > MAX_MEMORY_BANNERS) {
+    const oldestId = memoryBannerMap.keys().next().value as string | undefined;
+    if (!oldestId) break;
+    memoryBannerMap.delete(oldestId);
+  }
+}
+
 export const BannerCacheManager = {
   /**
    * Synchronously returns the locally cached file URI if known in memory
@@ -106,7 +119,7 @@ export const BannerCacheManager = {
 
       // Verify file exists and has healthy size (> 10KB for 512 image; 400 error was 45 bytes)
       if (fileInfo.exists && (fileInfo as any).size > 10000) {
-        memoryBannerMap.set(mangaId, localFilePath);
+        rememberBanner(mangaId, localFilePath);
         return localFilePath;
       }
 
@@ -123,7 +136,7 @@ export const BannerCacheManager = {
       if (downloadRes.status === 200) {
         const dlInfo = await FileSystem.getInfoAsync(downloadRes.uri);
         if (dlInfo.exists && (dlInfo as any).size > 10000) {
-          memoryBannerMap.set(mangaId, downloadRes.uri);
+          rememberBanner(mangaId, downloadRes.uri);
           return downloadRes.uri;
         }
       }
@@ -141,19 +154,22 @@ export const BannerCacheManager = {
     if (Platform.OS === 'web') return {};
 
     const resolved: Record<string, string> = {};
-    const promises = items.map(async (item) => {
-      if (!item.url) return;
-      try {
-        const localUri = await BannerCacheManager.getOrCacheBanner(item.id, item.url);
-        if (localUri && localUri.startsWith('file://')) {
-          resolved[item.id] = localUri;
-        }
-      } catch {
-        // Fail silently per item
-      }
-    });
-
-    await Promise.allSettled(promises);
+    for (let index = 0; index < items.length; index += PREFETCH_CONCURRENCY) {
+      const batch = items.slice(index, index + PREFETCH_CONCURRENCY);
+      await Promise.allSettled(
+        batch.map(async (item) => {
+          if (!item.url) return;
+          try {
+            const localUri = await BannerCacheManager.getOrCacheBanner(item.id, item.url);
+            if (localUri && localUri.startsWith('file://')) {
+              resolved[item.id] = localUri;
+            }
+          } catch {
+            // Fail silently per item
+          }
+        })
+      );
+    }
     return resolved;
   },
 

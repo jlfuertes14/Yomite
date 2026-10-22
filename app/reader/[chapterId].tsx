@@ -17,8 +17,12 @@ import {
   Platform,
   Modal,
   AppState,
+  Image as NativeImage,
+  Animated,
+  PanResponder,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -80,6 +84,66 @@ function getChapterNumberFromId(id: string): number | null {
   if (!match) return null;
   const value = Number(match[1]);
   return Number.isFinite(value) ? value : null;
+}
+
+type ImageDimensions = { width: number; height: number };
+
+async function getPageDimensions(
+  url: string,
+  headers?: Record<string, string>,
+): Promise<ImageDimensions | null> {
+  if (!url) return null;
+
+  try {
+    if (headers && Object.keys(headers).length > 0) {
+      return await NativeImage.getSizeWithHeaders(url, headers);
+    }
+    return await NativeImage.getSize(url);
+  } catch {
+    return null;
+  }
+}
+
+async function classifyDefaultReadingMode({
+  pages,
+  headers,
+  originalLanguage,
+  sourceHint,
+}: {
+  pages: string[];
+  headers?: Record<string, string>;
+  originalLanguage?: string;
+  sourceHint: string;
+}): Promise<ReadingMode> {
+  const sample = pages.filter(Boolean).slice(0, 8);
+  const dimensions = (await Promise.all(sample.map((url) => getPageDimensions(url, headers))))
+    .filter((size): size is ImageDimensions => Boolean(size && size.width > 0 && size.height > 0));
+
+  const ratios = dimensions.map((size) => size.height / size.width).sort((a, b) => a - b);
+  const medianRatio = ratios.length > 0 ? ratios[Math.floor(ratios.length / 2)] : 0;
+  const veryTallPageRatio = ratios.length > 0
+    ? ratios.filter((ratio) => ratio >= 2.2).length / ratios.length
+    : 0;
+  const tallPageRatio = ratios.length > 0
+    ? ratios.filter((ratio) => ratio >= 1.9).length / ratios.length
+    : 0;
+
+  const language = (originalLanguage || '').toLowerCase();
+  const source = sourceHint.toLowerCase();
+  const koreanSignal = /^(ko|kr)([-_]|$)/.test(language);
+  const webtoonSourceSignal = /webtoon|manhwa|asura|reaper|flame|void|toonkotsu|webtoonxyz/.test(source);
+
+  // Dimensions are deliberately evaluated across several pages. One unusually
+  // tall manga page is not enough to classify the whole title as a webtoon.
+  let webtoonScore = 0;
+  if (koreanSignal) webtoonScore += 3;
+  if (webtoonSourceSignal) webtoonScore += 3;
+  if (medianRatio >= 2.2) webtoonScore += 3;
+  else if (medianRatio >= 1.9) webtoonScore += 1;
+  if (veryTallPageRatio >= 0.5) webtoonScore += 2;
+  else if (tallPageRatio >= 0.6) webtoonScore += 1;
+
+  return webtoonScore >= 3 ? 'webtoon' : 'single';
 }
 
 const MODE_LABELS: Record<ReadingMode, string> = {
@@ -415,8 +479,8 @@ interface WebtoonPageItemProps {
   webtoonWidth: number;
   windowHeight: number;
   imageFit: 'fit_both' | 'fit_width' | 'fit_height';
-  onTap: (x: number) => void;
-  onLayout?: (event: LayoutChangeEvent) => void;
+ onTap: (x: number) => void;
+  onLayout?: (index: number, event: LayoutChangeEvent) => void;
   headers?: Record<string, string>;
   reloadTrigger?: number;
   onImageError?: (index: number, url: string) => void;
@@ -445,7 +509,7 @@ const WebtoonPageItem = React.memo(function WebtoonPageItem({
   const displayFit = imageFit === 'fit_height' ? 'contain' : 'fill';
 
   return (
-    <View onLayout={onLayout}>
+    <View onLayout={onLayout ? (event) => onLayout(index, event) : undefined}>
       <ReaderImagePage
         url={url}
         index={index}
@@ -470,6 +534,7 @@ const WebtoonPageItem = React.memo(function WebtoonPageItem({
 export default function ReaderScreen() {
   const router = useRouter();
   const colors = useThemeColors();
+  const insets = useSafeAreaInsets();
   const { checkNetwork } = useNetworkStatus();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const {
@@ -527,18 +592,22 @@ export default function ReaderScreen() {
   const TAP_LEFT = windowWidth * 0.3;
   const TAP_RIGHT = windowWidth * 0.7;
 
-  const mode = useReaderStore((s) => s.mode);
+  const storedMode = useReaderStore((s) => s.mode);
+  const modeOverrides = useReaderStore((s) => s.modeOverrides);
   const theme = useReaderStore((s) => s.theme);
   const dataSaver = useReaderStore((s) => s.dataSaver);
   const showPageNumber = useReaderStore((s) => s.showPageNumber);
   const hapticsEnabled = useReaderStore((s) => s.hapticsEnabled);
-  const setHapticsEnabled = useReaderStore((s) => s.setHapticsEnabled);
   const setMode = useReaderStore((s) => s.setMode);
+  const setModeOverride = useReaderStore((s) => s.setModeOverride);
   const controlsVisible = useReaderStore((s) => s.controlsVisible);
   const toggleControls = useReaderStore((s) => s.toggleControls);
   const setControlsVisible = useReaderStore((s) => s.setControlsVisible);
 
   const addHistoryEntry = useHistoryStore((s) => s.addEntry);
+  const readerLibraryEntry = useLibraryStore((s) => (mangaId ? s.entries[mangaId] : undefined));
+  const addToLibrary = useLibraryStore((s) => s.addToLibrary);
+  const removeFromLibrary = useLibraryStore((s) => s.removeFromLibrary);
 
   // Local state
   const [pages, setPages] = useState<string[]>([]);
@@ -551,9 +620,16 @@ export default function ReaderScreen() {
   const [offlineUnavailable, setOfflineUnavailable] = useState(false);
   const [showModeSelector, setShowModeSelector] = useState(false);
   const [sideMenuVisible, setSideMenuVisible] = useState(false);
+  const [mobileMenuSection, setMobileMenuSection] = useState<'chapters' | 'settings'>('settings');
+  const [mobileChapterViewMode, setMobileChapterViewMode] = useState<'list' | 'grid'>('list');
   const [imageFit, setImageFit] = useState<'fit_both' | 'fit_width' | 'fit_height'>('fit_both');
   const [headerHidden, setHeaderHidden] = useState(false);
-  const [pageTimelineWidth, setPageTimelineWidth] = useState(0);
+ const [pageTimelineWidth, setPageTimelineWidth] = useState(0);
+  const controlsProgress = useRef(new Animated.Value(controlsVisible ? 1 : 0)).current;
+  const sliderProgress = useRef(new Animated.Value(0)).current;
+  const timelinePreviewPageRef = useRef<number | null>(null);
+  const timelineDraggingRef = useRef(false);
+  const [timelinePreviewPage, setTimelinePreviewPage] = useState<number | null>(null);
 
   const [mangaTitle, setMangaTitle] = useState('Manga');
   const [chapterTitle, setChapterTitle] = useState(`Chapter`);
@@ -564,12 +640,25 @@ export default function ReaderScreen() {
   const [currentChapterPublishAt, setCurrentChapterPublishAt] = useState<string | undefined>();
   const [uploaderName, setUploaderName] = useState<string>('Uploader');
   const [resolvedMangaId, setResolvedMangaId] = useState<string | undefined>(mangaId);
+  const [mangaOriginalLanguage, setMangaOriginalLanguage] = useState<string | undefined>();
+  const [detectedDefaultMode, setDetectedDefaultMode] = useState<ReadingMode | null>(null);
+  const [isDetectingDefaultMode, setIsDetectingDefaultMode] = useState(false);
   const [pageHeaders, setPageHeaders] = useState<Record<string, string> | undefined>(undefined);
   const [isCloudflare, setIsCloudflare] = useState(false);
   const [isCfInAppModalOpen, setIsCfInAppModalOpen] = useState(false);
   const [cfInAppUrl, setCfInAppUrl] = useState('https://mangadot.net/');
   const [reloadTrigger, setReloadTrigger] = useState(0);
   const [failedPages, setFailedPages] = useState<Set<number>>(new Set());
+
+  const readerContentKey = mangaId || resolvedMangaId || chapterId || '';
+  const mode = modeOverrides[readerContentKey] || detectedDefaultMode || storedMode;
+  const handleSetReaderMode = useCallback((nextMode: ReadingMode) => {
+    setMode(nextMode);
+    if (readerContentKey) {
+      setModeOverride(readerContentKey, nextMode);
+    }
+    setDetectedDefaultMode(nextMode);
+  }, [readerContentKey, setMode, setModeOverride]);
 
   const persistentBridgeRef = useRef<any>(null);
   const cfWebViewRef = useRef<any>(null);
@@ -666,30 +755,95 @@ export default function ReaderScreen() {
   const webtoonLayoutsRef = useRef(new Map<number, { y: number; height: number }>());
   const pendingWebtoonOffsetRef = useRef(0);
   const currentWebtoonIndexRef = useRef(0);
+  const webtoonContentOffsetRef = useRef(0);
   const webtoonScrollOffsetRef = useRef(0);
 
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 30,
+    itemVisiblePercentThreshold: 1,
+    minimumViewTime: 0,
   }).current;
   const readerTheme = ReaderThemes[theme];
+  const webtoonWidth = Math.min(windowWidth, 800);
+  const webtoonDefaultPageHeight = webtoonWidth * 1.5;
+  const estimateWebtoonOffset = useCallback(
+    (index: number) => {
+      let offset = 0;
+      for (let itemIndex = 0; itemIndex < index; itemIndex += 1) {
+        offset += webtoonLayoutsRef.current.get(itemIndex)?.height || webtoonDefaultPageHeight;
+      }
+      return offset;
+    },
+    [webtoonDefaultPageHeight]
+  );
+
+  const settleWebtoonJump = useCallback((contentOffset: number) => {
+    const targetIndex = pendingWebtoonJumpRef.current;
+    if (targetIndex === null) return;
+
+    const layout = webtoonLayoutsRef.current.get(targetIndex);
+    if (!layout) return;
+
+    const targetOffset = Math.max(0, layout.y + pendingWebtoonOffsetRef.current);
+    // A small tolerance accounts for Android's fractional scroll offsets while
+    // still preventing viewability from accepting a nearby page as the target.
+    if (Math.abs(contentOffset - targetOffset) > 18) return;
+
+    pendingWebtoonJumpRef.current = null;
+    isProgrammaticScrollRef.current = false;
+    webtoonJumpAttemptsRef.current = 0;
+    if (webtoonJumpTimerRef.current) {
+      clearTimeout(webtoonJumpTimerRef.current);
+      webtoonJumpTimerRef.current = null;
+    }
+  }, []);
 
   const moveWebtoonTo = useCallback((index: number, scrollOffset = 0, animated = false) => {
-    isProgrammaticScrollRef.current = true;
-    pendingWebtoonJumpRef.current = index;
-    pendingWebtoonOffsetRef.current = Math.max(0, scrollOffset);
+    const targetIndex = Math.max(0, index);
+    const targetOffset = Math.max(0, scrollOffset);
 
-    const layout = webtoonLayoutsRef.current.get(index);
-    if (layout) {
-      webtoonListRef.current?.scrollToOffset({
-        offset: Math.max(0, layout.y + pendingWebtoonOffsetRef.current),
-        animated,
-      });
-      pendingWebtoonJumpRef.current = null;
-      return;
+    isProgrammaticScrollRef.current = true;
+    pendingWebtoonJumpRef.current = targetIndex;
+    pendingWebtoonOffsetRef.current = targetOffset;
+    webtoonJumpAttemptsRef.current = 0;
+
+    if (webtoonJumpTimerRef.current) {
+      clearTimeout(webtoonJumpTimerRef.current);
+      webtoonJumpTimerRef.current = null;
     }
 
-    webtoonListRef.current?.scrollToIndex({ index, animated, viewPosition: 0 });
-  }, []);
+    const attemptScroll = () => {
+      if (pendingWebtoonJumpRef.current !== targetIndex) return;
+
+      const layout = webtoonLayoutsRef.current.get(targetIndex);
+      const offset = Math.max(
+        0,
+        (layout?.y ?? estimateWebtoonOffset(targetIndex)) + targetOffset,
+      );
+
+      webtoonListRef.current?.scrollToOffset({
+        offset,
+        // Exact measured jumps may animate. Estimated jumps must be immediate;
+        // animating an estimate makes the list visibly snap when measurements arrive.
+        animated: Boolean(layout && animated),
+      });
+
+      if (layout) return;
+
+      webtoonJumpAttemptsRef.current += 1;
+      if (webtoonJumpAttemptsRef.current >= 40) {
+        // The estimated offset is still useful as a safe fallback, but do not
+        // leave the reader permanently locked if a page fails to measure.
+        pendingWebtoonJumpRef.current = null;
+        isProgrammaticScrollRef.current = false;
+        webtoonJumpTimerRef.current = null;
+        return;
+      }
+
+      webtoonJumpTimerRef.current = setTimeout(attemptScroll, 80);
+    };
+
+    attemptScroll();
+  }, [estimateWebtoonOffset]);
 
   const handleWebtoonPageLayout = useCallback((index: number, event: LayoutChangeEvent) => {
     const { y, height } = event.nativeEvent.layout;
@@ -700,8 +854,10 @@ export default function ReaderScreen() {
       offset: Math.max(0, y + pendingWebtoonOffsetRef.current),
       animated: false,
     });
-    pendingWebtoonJumpRef.current = null;
-  }, []);
+    requestAnimationFrame(() => {
+      settleWebtoonJump(webtoonContentOffsetRef.current);
+    });
+  }, [settleWebtoonJump]);
 
   // Load chapter pages & metadata
   useEffect(() => {
@@ -742,6 +898,9 @@ export default function ReaderScreen() {
       restoredChapterIdRef.current = null;
       resumeTargetPageRef.current = 0;
       resumeRestoreAttemptsRef.current = 0;
+      setDetectedDefaultMode(null);
+      setIsDetectingDefaultMode(false);
+      setMangaOriginalLanguage(undefined);
       isProgrammaticScrollRef.current = false;
       webtoonJumpAttemptsRef.current = 0;
       pendingWebtoonJumpRef.current = null;
@@ -754,6 +913,7 @@ export default function ReaderScreen() {
       webtoonLayoutsRef.current.clear();
       pendingWebtoonOffsetRef.current = 0;
       currentWebtoonIndexRef.current = 0;
+      webtoonContentOffsetRef.current = 0;
       webtoonScrollOffsetRef.current = 0;
 
       // Check if downloaded locally
@@ -939,6 +1099,36 @@ export default function ReaderScreen() {
       setIsLoading(false);
     }
   };
+
+  // Choose a per-title default after the chapter pages are available. The
+  // explicit override in readerStore always wins, so automatic detection never
+  // changes a mode the user deliberately selected for this title.
+  useEffect(() => {
+    if (isLoading || pages.length === 0 || !readerContentKey || modeOverrides[readerContentKey]) {
+      setIsDetectingDefaultMode(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsDetectingDefaultMode(true);
+
+    classifyDefaultReadingMode({
+      pages,
+      headers: pageHeaders,
+      originalLanguage: mangaOriginalLanguage,
+      sourceHint: `${chapterId || ''} ${readerContentKey}`,
+    })
+      .then((detectedMode) => {
+        if (!cancelled) setDetectedDefaultMode(detectedMode);
+      })
+      .finally(() => {
+        if (!cancelled) setIsDetectingDefaultMode(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [chapterId, isLoading, mangaOriginalLanguage, modeOverrides, pageHeaders, pages, readerContentKey]);
 
   // Auto-reload chapter pages when returning back to Yomite app from external browser
   useEffect(() => {
@@ -1396,6 +1586,7 @@ export default function ReaderScreen() {
 
         const title = getMangaTitle(manga);
         setMangaTitle(title);
+        setMangaOriginalLanguage(manga?.attributes?.originalLanguage);
 
         let allChapters = chList.data || [];
         if (chapterData && !allChapters.some((c) => c.id === chapterId)) {
@@ -1662,45 +1853,70 @@ export default function ReaderScreen() {
   const activeChapterPublishAt = activeAppendedChapter?.attributes.publishAt || activeAppendedChapter?.attributes.readableAt || currentChapterPublishAt;
   const activeScanlationGroup = activeAppendedChapter ? extractScanlationGroupName(activeAppendedChapter) : scanlationGroup;
   const activeUploaderName = activeAppendedChapter ? extractUploaderUsername(activeAppendedChapter) : uploaderName;
+  const handleToggleReaderBookmark = useCallback(() => {
+    if (!mangaId) return;
+
+    if (readerLibraryEntry) {
+      removeFromLibrary(mangaId);
+    } else {
+      addToLibrary({
+        mangaId,
+        title: mangaTitle,
+        coverUrl: coverUrl || '',
+        category: 'reading',
+        lastReadChapterId: activeWebtoonChapterId || chapterId,
+        lastReadPage: currentPage,
+        totalChapters: chapterList.length,
+        unreadCount: chapterList.length,
+        description: '',
+      });
+    }
+  }, [activeWebtoonChapterId, addToLibrary, chapterId, chapterList.length, coverUrl, currentPage, mangaId, mangaTitle, readerLibraryEntry, removeFromLibrary]);
   const webtoonPages = useMemo(
     () => (nextChapterPages.length > 0 ? [...pages, ...nextChapterPages] : pages),
     [nextChapterPages, pages]
   );
 
   const handleWebtoonViewableItemsChanged = useCallback(({ viewableItems }: any) => {
-    const firstVisible = viewableItems?.[0]?.index;
+    // A page selector/history restore owns the scroll until its measured page
+    // reaches the requested offset. Otherwise a transient viewability event can
+    // immediately replace the selected page with the page that happened to be
+    // visible during the jump.
+    settleWebtoonJump(webtoonContentOffsetRef.current);
+    if (pendingWebtoonJumpRef.current !== null || isProgrammaticScrollRef.current) {
+      return;
+    }
+
+    const visibleIndexes = (viewableItems || [])
+      .map((item: any) => item.index)
+      .filter((index: any): index is number => typeof index === 'number')
+      .sort((a: number, b: number) => a - b);
+    const firstVisible = visibleIndexes[0];
     if (firstVisible === null || firstVisible === undefined) return;
 
     if (firstVisible >= pages.length - 2 && nextChapterPages.length === 0 && nextChapterId) {
       loadNextChapterPages();
     }
 
-    const pendingJump = pendingWebtoonJumpRef.current;
-    if (pendingJump !== null && viewableItems.some((item: any) => item.index === pendingJump)) {
-      const layout = webtoonLayoutsRef.current.get(pendingJump);
-      if (layout) {
-        webtoonListRef.current?.scrollToOffset({
-          offset: Math.max(0, layout.y + pendingWebtoonOffsetRef.current),
-          animated: false,
-        });
-        pendingWebtoonJumpRef.current = null;
-      }
-    } else if (pendingJump !== null) {
-      return;
-    }
+    const viewportCenter = webtoonContentOffsetRef.current + windowHeight * 0.4;
+    const centeredVisible = visibleIndexes.find((index) => {
+      const layout = webtoonLayoutsRef.current.get(index);
+      return layout && viewportCenter >= layout.y && viewportCenter <= layout.y + layout.height;
+    });
+    const activeVisible = centeredVisible ?? firstVisible;
 
-    if (lastWebtoonPositionRef.current === firstVisible) return;
-    lastWebtoonPositionRef.current = firstVisible;
-    currentWebtoonIndexRef.current = firstVisible;
+    if (lastWebtoonPositionRef.current === activeVisible) return;
+    lastWebtoonPositionRef.current = activeVisible;
+    currentWebtoonIndexRef.current = activeVisible;
 
-    if (firstVisible < pages.length) {
+    if (activeVisible < pages.length) {
       setActiveWebtoonChapterId(chapterId);
-      setCurrentPage(firstVisible);
+      setCurrentPage(activeVisible);
     } else if (nextChapterPages.length > 0) {
       setActiveWebtoonChapterId(nextChapterId);
-      setCurrentPage(firstVisible - pages.length);
+      setCurrentPage(activeVisible - pages.length);
     }
-  }, [chapterId, loadNextChapterPages, nextChapterId, nextChapterPages.length, pages.length]);
+  }, [chapterId, loadNextChapterPages, nextChapterId, nextChapterPages.length, pages.length, settleWebtoonJump, windowHeight]);
 
   useEffect(() => {
     if (!activeAppendedChapter || currentPage < 0 || nextChapterPages.length === 0) return;
@@ -1765,7 +1981,10 @@ export default function ReaderScreen() {
 
       if (mode === 'webtoon') {
         const globalIndex = activeAppendedChapter ? pages.length + clamped : clamped;
-        moveWebtoonTo(globalIndex, 0, true);
+        // Webtoon pages have variable measured heights. An instant measured
+        // jump is more reliable than animating an estimate and then correcting
+        // the destination while the list is still laying out images.
+        moveWebtoonTo(globalIndex, 0, false);
       } else if (mode === 'double') {
         const spreadIdx = Math.floor(clamped / 2);
         try {
@@ -1796,6 +2015,66 @@ export default function ReaderScreen() {
     [activeAppendedChapter, mode, moveWebtoonTo, nextChapterPages.length, pages.length, windowWidth]
   );
 
+  useEffect(() => {
+    Animated.spring(controlsProgress, {
+      toValue: controlsVisible ? 1 : 0,
+      useNativeDriver: true,
+      tension: 85,
+      friction: 13,
+    }).start();
+  }, [controlsProgress, controlsVisible]);
+
+  useEffect(() => {
+    if (timelineDraggingRef.current) return;
+    const ratio = activePageCount > 1 ? currentPage / (activePageCount - 1) : 0;
+    sliderProgress.setValue(Math.max(0, Math.min(1, ratio)));
+  }, [activePageCount, currentPage, sliderProgress]);
+
+  const timelineDragStartRatio = useRef(0);
+  const timelinePanResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onStartShouldSetPanResponderCapture: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponderCapture: () => true,
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderGrant: (event) => {
+      const ratio = pageTimelineWidth > 0
+        ? event.nativeEvent.locationX / pageTimelineWidth
+        : 0;
+      const clampedRatio = Math.max(0, Math.min(1, ratio));
+      timelineDragStartRatio.current = clampedRatio;
+      timelineDraggingRef.current = true;
+      const previewPage = Math.round(clampedRatio * Math.max(0, activePageCount - 1));
+      timelinePreviewPageRef.current = previewPage;
+      setTimelinePreviewPage(previewPage);
+      sliderProgress.setValue(clampedRatio);
+    },
+    onPanResponderMove: (_event, gestureState) => {
+      if (pageTimelineWidth <= 0) return;
+      const ratio = Math.max(
+        0,
+        Math.min(1, timelineDragStartRatio.current + gestureState.dx / pageTimelineWidth),
+      );
+      const previewPage = Math.round(ratio * Math.max(0, activePageCount - 1));
+      sliderProgress.setValue(ratio);
+      timelinePreviewPageRef.current = previewPage;
+      setTimelinePreviewPage(previewPage);
+    },
+    onPanResponderRelease: () => {
+      const previewPage = timelinePreviewPageRef.current;
+      timelineDraggingRef.current = false;
+      timelinePreviewPageRef.current = null;
+      setTimelinePreviewPage(null);
+      if (previewPage !== null) goToPage(previewPage);
+    },
+    onPanResponderTerminate: () => {
+      timelineDraggingRef.current = false;
+      timelinePreviewPageRef.current = null;
+      setTimelinePreviewPage(null);
+      sliderProgress.setValue(activePageCount > 1 ? currentPage / (activePageCount - 1) : 0);
+    },
+  }), [activePageCount, goToPage, pageTimelineWidth, sliderProgress]);
+
   const goToNextPageOrChapter = useCallback(() => {
     if (currentPage < activePageCount - 1) {
       goToPage(currentPage + 1);
@@ -1804,19 +2083,14 @@ export default function ReaderScreen() {
     } else if (nextChapterPages.length > 0) {
       setActiveWebtoonChapterId(nextChapterId);
       setCurrentPage(0);
-      isProgrammaticScrollRef.current = true;
-      webtoonListRef.current?.scrollToIndex({
-        index: pages.length,
-        animated: true,
-        viewPosition: 0,
-      });
+      moveWebtoonTo(pages.length, 0, false);
     } else if (hasNextChapter && nextChapterPages.length === 0) {
       if (hapticsEnabled && Platform.OS !== 'web') {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
       handleNextChapter();
     }
-  }, [activeAppendedChapter, activePageCount, currentPage, goToPage, hasNextChapter, handleNextChapter, hapticsEnabled, nextChapterPages.length]);
+  }, [activeAppendedChapter, activePageCount, currentPage, goToPage, hasNextChapter, handleNextChapter, hapticsEnabled, moveWebtoonTo, nextChapterPages.length, pages.length]);
 
   const goToPrevPageOrChapter = useCallback(() => {
     if (currentPage > 0) {
@@ -1824,15 +2098,14 @@ export default function ReaderScreen() {
     } else if (activeAppendedChapter) {
       setActiveWebtoonChapterId(chapterId);
       setCurrentPage(pages.length - 1);
-      isProgrammaticScrollRef.current = true;
-      webtoonListRef.current?.scrollToIndex({ index: pages.length - 1, animated: true, viewPosition: 0 });
+      moveWebtoonTo(pages.length - 1, 0, false);
     } else if (hasPrevChapter) {
       if (hapticsEnabled && Platform.OS !== 'web') {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
       handlePrevChapter();
     }
-  }, [activeAppendedChapter, chapterId, currentPage, goToPage, hasPrevChapter, handlePrevChapter, hapticsEnabled, pages.length]);
+  }, [activeAppendedChapter, chapterId, currentPage, goToPage, hasPrevChapter, handlePrevChapter, hapticsEnabled, moveWebtoonTo, pages.length]);
 
   const handlePageTap = useCallback(
     (x: number) => {
@@ -1872,6 +2145,14 @@ export default function ReaderScreen() {
     },
     [windowWidth, mode, toggleControls, goToNextPageOrChapter, goToPrevPageOrChapter, hapticsEnabled]
   );
+
+  // Keep the page item prop stable. The ref still routes taps to the latest
+  // navigation state without invalidating every mounted page on progress updates.
+  const handlePageTapRef = useRef(handlePageTap);
+  useEffect(() => {
+    handlePageTapRef.current = handlePageTap;
+  }, [handlePageTap]);
+  const stablePageTap = useCallback((x: number) => handlePageTapRef.current(x), []);
 
   // Web Keyboard Navigation
   useEffect(() => {
@@ -1967,7 +2248,7 @@ export default function ReaderScreen() {
         width={windowWidth}
         height={windowHeight}
         contentFit={fitMode}
-        onTap={handlePageTap}
+        onTap={stablePageTap}
         headers={pageHeaders}
         reloadTrigger={reloadTrigger}
         onImageError={handleImageError}
@@ -1992,7 +2273,7 @@ export default function ReaderScreen() {
           width={windowWidth / 2}
           height={windowHeight}
           contentFit="contain"
-          onTap={handlePageTap}
+          onTap={stablePageTap}
           headers={pageHeaders}
           reloadTrigger={reloadTrigger}
           onImageError={handleImageError}
@@ -2006,7 +2287,7 @@ export default function ReaderScreen() {
             width={windowWidth / 2}
             height={windowHeight}
             contentFit="contain"
-            onTap={handlePageTap}
+            onTap={stablePageTap}
             headers={pageHeaders}
             reloadTrigger={reloadTrigger}
             onImageError={handleImageError}
@@ -2020,12 +2301,12 @@ export default function ReaderScreen() {
 
   // ─── Main Render ───────────────────────────────────────────────
 
-  if (isLoading) {
+  if (isLoading || isDetectingDefaultMode) {
     return (
       <View style={[styles.centerContainer, { backgroundColor: readerTheme.background }]}>
         <ActivityIndicator size="large" color={colors.accent} />
         <Text style={[styles.loadingText, { color: readerTheme.text }]}>
-          Loading chapter pages...
+          {isLoading ? 'Loading chapter pages...' : 'Analyzing reading layout...'}
         </Text>
       </View>
     );
@@ -2172,8 +2453,15 @@ export default function ReaderScreen() {
     );
   }
 
-  const webtoonWidth = Math.min(windowWidth, 800);
   const pageTimelineDotCount = Math.min(activePageCount, 18);
+  const topCurtainY = controlsProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-120, 0],
+  });
+  const bottomCurtainY = controlsProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [140, 0],
+  });
 
   return (
     <View style={[styles.readerContainer, { backgroundColor: readerTheme.background }]}>
@@ -2194,13 +2482,13 @@ export default function ReaderScreen() {
               webtoonWidth={webtoonWidth}
               windowHeight={windowHeight}
               imageFit={imageFit}
-              onTap={handlePageTap}
+              onTap={stablePageTap}
               headers={index < pages.length ? pageHeaders : nextChapterPageHeaders}
               reloadTrigger={reloadTrigger}
               onImageError={handleImageError}
               onImageSuccess={handleImageSuccess}
               onCloudflareVerify={handleOpenCloudflareVerification}
-              onLayout={(event) => handleWebtoonPageLayout(index, event)}
+              onLayout={handleWebtoonPageLayout}
             />
           )}
           onViewableItemsChanged={handleWebtoonViewableItemsChanged}
@@ -2212,22 +2500,19 @@ export default function ReaderScreen() {
           updateCellsBatchingPeriod={50}
           initialNumToRender={5}
           windowSize={7}
-          onScrollToIndexFailed={({ index, averageItemLength }) => {
-            // Bring the target into the render window. Its onLayout callback then
-            // restores the exact page-relative offset without repeated snapping.
-            webtoonListRef.current?.scrollToOffset({
-              offset: averageItemLength * index,
-              animated: false,
-            });
-          }}
           onScroll={({ nativeEvent }) => {
+            webtoonContentOffsetRef.current = nativeEvent.contentOffset.y;
+            settleWebtoonJump(nativeEvent.contentOffset.y);
             const layout = webtoonLayoutsRef.current.get(currentWebtoonIndexRef.current);
             if (layout) {
               webtoonScrollOffsetRef.current = Math.max(0, nativeEvent.contentOffset.y - layout.y);
             }
           }}
           onScrollEndDrag={saveWebtoonProgress}
-          onMomentumScrollEnd={saveWebtoonProgress}
+          onMomentumScrollEnd={() => {
+            settleWebtoonJump(webtoonContentOffsetRef.current);
+            saveWebtoonProgress();
+          }}
           scrollEventThrottle={16}
           onScrollBeginDrag={() => {
             // A page-selector/history restore may still be retrying while image
@@ -2333,10 +2618,11 @@ export default function ReaderScreen() {
       )}
 
       {/* Controls Overlay (Mobile Only) */}
-      {Platform.OS !== 'web' && controlsVisible && (
-        <View style={[StyleSheet.absoluteFill, { pointerEvents: 'box-none' }]}>
+      {Platform.OS !== 'web' && (
+        <Animated.View pointerEvents={controlsVisible ? 'box-none' : 'none'} style={StyleSheet.absoluteFill}>
           {/* Top Bar */}
-          <View style={[styles.topBar, { backgroundColor: colors.surfaceElevated }]}>
+
+          <Animated.View style={[styles.topBar, { backgroundColor: colors.surfaceElevated }, { transform: [{ translateY: topCurtainY }] }]}>
             <Pressable
               onPress={() => {
                 setControlsVisible(false);
@@ -2363,21 +2649,27 @@ export default function ReaderScreen() {
             </View>
 
             <Pressable
-              onPress={() => setSideMenuVisible(true)}
+              onPress={handleToggleReaderBookmark}
               style={styles.controlButton}
+              accessibilityRole="button"
+              accessibilityLabel={readerLibraryEntry ? 'Remove bookmark' : 'Bookmark manga'}
             >
-              <Ionicons name="options" size={22} color={colors.text} />
+              <Ionicons
+                name={readerLibraryEntry ? 'bookmark' : 'bookmark-outline'}
+                size={22}
+                color={readerLibraryEntry ? colors.accent : colors.text}
+              />
             </Pressable>
-          </View>
+          </Animated.View>
 
-          {/* Mode Selector Quick Bar */}
+         {/* Mode Selector Quick Bar */}
           {showModeSelector && (
             <View style={[styles.modeSelectorContainer, { backgroundColor: colors.surface }]}>
               {(Object.keys(MODE_LABELS) as ReadingMode[]).map((m) => (
                 <Pressable
                   key={m}
                   onPress={() => {
-                    setMode(m);
+                    handleSetReaderMode(m);
                     setShowModeSelector(false);
                     if (Platform.OS !== 'web') {
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -2405,7 +2697,8 @@ export default function ReaderScreen() {
           )}
 
           {/* Chapter and page timeline navigation */}
-          <View style={[styles.bottomBar, { backgroundColor: colors.surfaceElevated }]}>
+
+          <Animated.View style={[styles.bottomBar, { backgroundColor: colors.surfaceElevated, paddingBottom: insets.bottom + Spacing.sm }, { transform: [{ translateY: bottomCurtainY }] }]}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Previous chapter"
@@ -2426,55 +2719,94 @@ export default function ReaderScreen() {
               style={styles.pageTimeline}
               onLayout={(event) => setPageTimelineWidth(event.nativeEvent.layout.width)}
             >
-              <View style={[styles.timelineRail, { backgroundColor: colors.borderSubtle }]} />
-              <View
+              <View style={[styles.timelineRail, { backgroundColor: colors.accentSubtle }]} />
+              <Animated.View
                 style={[
                   styles.timelineProgress,
                   {
-                    width: `${activePageCount > 1 ? (currentPage / (activePageCount - 1)) * 100 : 0}%`,
+                    width: sliderProgress.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, pageTimelineWidth],
+                    }),
                     backgroundColor: colors.accent,
                   },
                 ]}
               />
-              {Array.from({ length: pageTimelineDotCount }, (_, dotIndex) => {
-                const progress = pageTimelineDotCount > 1
-                  ? dotIndex / (pageTimelineDotCount - 1)
-                  : 0;
-                return (
-                  <View
-                    key={dotIndex}
-                    pointerEvents="none"
-                    style={[
-                      styles.timelineDot,
-                      {
-                        left: `${Math.min(100, progress * 100)}%`,
-                        backgroundColor: colors.border,
-                      },
-                    ]}
-                  />
-                );
-              })}
-              <View
+              <View pointerEvents="none" style={styles.timelineDots}>
+                {Array.from({ length: pageTimelineDotCount }, (_, dotIndex) => {
+                  const progress = pageTimelineDotCount > 1
+                    ? dotIndex / (pageTimelineDotCount - 1)
+                    : 0;
+                  const activeDotLimit = activePageCount > 1
+                    ? (timelinePreviewPage ?? currentPage) / (activePageCount - 1)
+                    : 0;
+                  const isActive = progress <= activeDotLimit;
+                  return (
+                    <View
+                      key={dotIndex}
+                      style={[
+                        styles.timelineDot,
+                        {
+                          left: `${Math.min(100, progress * 100)}%`,
+                          backgroundColor: isActive ? colors.accentForeground : colors.text,
+                        },
+                      ]}
+                    />
+                  );
+                })}
+              </View>
+              <Animated.View
                 pointerEvents="none"
                 style={[
-                  styles.timelineCurrentMarker,
+                  styles.timelineThumbGap,
                   {
-                    left: `${activePageCount > 1 ? (currentPage / (activePageCount - 1)) * 100 : 0}%`,
-                    backgroundColor: colors.accent,
+                    left: sliderProgress.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, pageTimelineWidth],
+                    }),
+                    backgroundColor: colors.surfaceElevated,
                   },
                 ]}
               />
-              <Pressable
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  styles.timelineThumb,
+                  {
+                    left: sliderProgress.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, pageTimelineWidth],
+                    }),
+                    backgroundColor: colors.accent,
+                    shadowColor: colors.background,
+                  },
+                ]}
+              />
+              {timelinePreviewPage !== null && (
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    styles.timelinePreviewBubble,
+                    {
+                      left: sliderProgress.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, pageTimelineWidth],
+                      }),
+                      backgroundColor: colors.surface,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.timelinePreviewText, { color: colors.text }]}>
+                    {timelinePreviewPage + 1}
+                  </Text>
+                </Animated.View>
+              )}
+              <View
+                {...timelinePanResponder.panHandlers}
                 style={StyleSheet.absoluteFill}
+                accessible
                 accessibilityRole="adjustable"
                 accessibilityLabel={`Page ${currentPage + 1} of ${activePageCount}`}
-                onPress={(e) => {
-                  const ratio = pageTimelineWidth > 0
-                    ? e.nativeEvent.locationX / pageTimelineWidth
-                    : 0;
-                  const targetPage = Math.round(ratio * (activePageCount - 1));
-                  goToPage(targetPage);
-                }}
               />
             </View>
 
@@ -2493,14 +2825,51 @@ export default function ReaderScreen() {
             >
               <Ionicons name="play-skip-forward" size={18} color={colors.text} />
             </Pressable>
-          </View>
-        </View>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={mobileChapterViewMode === 'grid' ? 'Open page grid' : 'Open chapter list'}
+              onPress={() => {
+                setMobileMenuSection('chapters');
+                setSideMenuVisible(true);
+              }}
+              style={({ pressed }) => [
+                styles.chapterNavButton,
+                pressed && { backgroundColor: colors.accentSubtle, opacity: 0.82 },
+              ]}
+            >
+              <Ionicons
+                name={mobileChapterViewMode === 'grid' ? 'grid-outline' : 'list-outline'}
+                size={20}
+                color={colors.text}
+              />
+            </Pressable>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Open reader settings"
+              onPress={() => {
+                setMobileMenuSection('settings');
+                setSideMenuVisible(true);
+              }}
+              style={({ pressed }) => [
+                styles.chapterNavButton,
+                pressed && { backgroundColor: colors.accentSubtle, opacity: 0.82 },
+              ]}
+            >
+              <Ionicons name="ellipsis-horizontal" size={21} color={colors.text} />
+            </Pressable>
+          </Animated.View>
+        </Animated.View>
       )}
 
       {/* Official MangaDex Reader Side Control Drawer */}
       <ReaderMenuDrawer
         visible={sideMenuVisible}
         onClose={() => setSideMenuVisible(false)}
+        mobileSection={mobileMenuSection}
+        mobileChapterViewMode={mobileChapterViewMode}
+        onMobileChapterViewModeChange={setMobileChapterViewMode}
         mangaTitle={mangaTitle}
         chapterTitle={activeChapterTitle}
         scanlationGroup={activeScanlationGroup}
@@ -2510,11 +2879,15 @@ export default function ReaderScreen() {
         totalPages={activePageCount}
         onSelectPage={goToPage}
         currentChapterId={activeWebtoonChapterId || chapterId!}
+        pageUrls={activeAppendedChapter ? nextChapterPages : pages}
+        pageHeaders={activeAppendedChapter ? nextChapterPageHeaders : pageHeaders}
         chapters={effectiveChapterList.map((c) => ({
           id: c.id,
           chapterNum: c.attributes.chapter ?? '?',
           title: c.attributes.title ?? '',
           publishAt: c.attributes.publishAt || c.attributes.readableAt,
+          scanlator: extractScanlationGroupName(c),
+          uploader: extractUploaderUsername(c),
         }))}
         selectedScanlator={selectedScanlator}
         availableScanlators={availableScanlators}
@@ -2525,17 +2898,11 @@ export default function ReaderScreen() {
         onPrevChapter={handlePrevChapter}
         onNextChapter={handleNextChapter}
         readingMode={mode}
-        onChangeReadingMode={(m) => setMode(m)}
+        onChangeReadingMode={handleSetReaderMode}
         imageFit={imageFit}
         onChangeImageFit={(fit) => setImageFit(fit)}
         headerHidden={headerHidden}
         onToggleHeaderHidden={() => setHeaderHidden(!headerHidden)}
-        hapticsEnabled={hapticsEnabled}
-        onToggleHaptics={() => setHapticsEnabled(!hapticsEnabled)}
-        onOpenSettings={() => {
-          setSideMenuVisible(false);
-          router.push('/(tabs)/settings' as any);
-        }}
         onGoBackToManga={() => {
           setSideMenuVisible(false);
           if (mangaId) {
@@ -2545,10 +2912,6 @@ export default function ReaderScreen() {
           } else {
             router.replace('/(tabs)' as any);
           }
-        }}
-        onGoToHome={() => {
-          setSideMenuVisible(false);
-          router.replace('/(tabs)' as any);
         }}
       />
 
@@ -2783,7 +3146,8 @@ const styles = StyleSheet.create({
   },
   pageTimeline: {
     flex: 1,
-    height: 40,
+    height: 48,
+    marginHorizontal: 6,
     justifyContent: 'center',
     position: 'relative',
   },
@@ -2791,30 +3155,68 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    height: 2,
+    top: 15,
+    height: 18,
     borderRadius: Radius.full,
   },
   timelineProgress: {
     position: 'absolute',
     left: 0,
-    height: 2,
+    top: 15,
+    height: 18,
     borderRadius: Radius.full,
+    borderTopRightRadius: 6,
+    borderBottomRightRadius: 6,
+  },
+  timelineDots: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    top: 0,
+    bottom: 0,
+    zIndex: 3,
   },
   timelineDot: {
     position: 'absolute',
-    top: 18,
+    top: 22,
     width: 4,
     height: 4,
     marginLeft: -2,
     borderRadius: Radius.full,
   },
-  timelineCurrentMarker: {
+  timelineThumbGap: {
     position: 'absolute',
     top: 6,
+    width: 11,
+    height: 36,
+    marginLeft: -5.5,
+    borderRadius: Radius.full,
+    zIndex: 2,
+  },
+  timelineThumb: {
+    position: 'absolute',
+    top: 1,
     width: 3,
-    height: 28,
+    height: 46,
     marginLeft: -1.5,
     borderRadius: Radius.full,
+    zIndex: 4,
+  },
+  timelinePreviewBubble: {
+    position: 'absolute',
+    bottom: 44,
+    minWidth: 42,
+    height: 30,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.full,
+    transform: [{ translateX: -21 }],
+    elevation: 5,
+  },
+  timelinePreviewText: {
+    fontSize: Typography.sizes.caption,
+    fontWeight: Typography.weights.bold,
   },
 
   webFloatingMenuTrigger: {

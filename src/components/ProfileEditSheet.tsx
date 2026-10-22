@@ -59,6 +59,7 @@ export function ProfileEditSheet({ visible, onClose, onSaved }: ProfileEditSheet
   const [draftName, setDraftName] = useState(displayName);
   const [isSaving, setIsSaving] = useState(false);
   const [uploading, setUploading] = useState<UploadTarget | null>(null);
+  const [isPickingImage, setIsPickingImage] = useState(false);
   const isBusy = isSaving || uploading !== null;
 
   useEffect(() => {
@@ -92,12 +93,23 @@ export function ProfileEditSheet({ visible, onClose, onSaved }: ProfileEditSheet
         }
       }
 
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: Platform.OS !== 'web',
-        aspect: target === 'avatar' ? [1, 1] : [16, 9],
-        quality: 0.85,
-      });
+      // Android can leave a transparent native Modal mounted behind the
+      // picker. Temporarily unmount our sheet so cancelling the picker cannot
+      // leave an orphaned dark backdrop on screen.
+      setIsPickingImage(true);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+      let result: ImagePicker.ImagePickerResult;
+      try {
+        result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          allowsEditing: Platform.OS !== 'web',
+          aspect: target === 'avatar' ? [1, 1] : [16, 9],
+          quality: 0.85,
+        });
+      } finally {
+        setIsPickingImage(false);
+      }
 
       if (result.canceled || !result.assets?.length) return;
 
@@ -170,7 +182,7 @@ export function ProfileEditSheet({ visible, onClose, onSaved }: ProfileEditSheet
 
   return (
     <Modal
-      visible={visible}
+      visible={visible && !isPickingImage}
       transparent
       animationType={isWeb ? 'fade' : 'none'}
       onRequestClose={closeSheet}
@@ -190,7 +202,7 @@ export function ProfileEditSheet({ visible, onClose, onSaved }: ProfileEditSheet
         >
           <MobileSheetPanel
             ref={isWeb ? undefined : sheetRef}
-            visible={visible}
+            visible={visible && !isPickingImage}
             onClose={onClose}
             showHandle={!isWeb}
             gestureHandleOnly

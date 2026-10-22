@@ -1,49 +1,32 @@
-import { Platform, PermissionsAndroid } from 'react-native';
+import { Platform } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
 
-/**
- * Prompt initial device storage permissions on app launch.
- *
- * Uses React Native's built-in PermissionsAndroid API instead of
- * expo-media-library, which requires a custom dev client and crashes
- * inside Expo Go (missing ExpoMediaLibraryNext native module).
- *
- * expo-file-system writes to the app's own documentDirectory by default,
- * which does NOT require external storage permissions. This helper is
- * a forward-looking guard for users who pick a custom SAF storage path.
- */
-export async function requestStoragePermissionOnLaunch(): Promise<boolean> {
-  if (Platform.OS !== 'android') return true;
+export const YOMITE_DOWNLOAD_FOLDER = 'Yomite';
+
+/** Creates Yomite's private download folder during first app startup. */
+export async function ensureYomiteDownloadFolder(): Promise<boolean> {
+  if (Platform.OS === 'web') return true;
 
   try {
-    // Android 13+ (API 33) uses granular media permissions
-    const apiLevel = Platform.Version;
+    const documentDirectory = (FileSystem as any).documentDirectory || '';
+    if (!documentDirectory) return false;
 
-    if (typeof apiLevel === 'number' && apiLevel >= 33) {
-      const result = await PermissionsAndroid.request(
-        'android.permission.READ_MEDIA_IMAGES' as any,
-        {
-          title: 'Storage Permission',
-          message: 'Yomite needs access to save and read downloaded manga chapters.',
-          buttonPositive: 'Allow',
-          buttonNegative: 'Deny',
-        }
-      );
-      return result === PermissionsAndroid.RESULTS.GRANTED;
+    const folderUri = `${documentDirectory}${YOMITE_DOWNLOAD_FOLDER}/`;
+    const info = await FileSystem.getInfoAsync(folderUri);
+    if (!info.exists) {
+      await FileSystem.makeDirectoryAsync(folderUri, { intermediates: true });
     }
-
-    // Android 12 and below
-    const result = await PermissionsAndroid.request(
-      PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
-      {
-        title: 'Storage Permission',
-        message: 'Yomite needs access to save downloaded manga chapters.',
-        buttonPositive: 'Allow',
-        buttonNegative: 'Deny',
-      }
-    );
-    return result === PermissionsAndroid.RESULTS.GRANTED;
-  } catch (_err) {
-    // Gracefully swallow — app document directory works without this
     return true;
+  } catch (error) {
+    console.warn('[storage] Could not create the Yomite download folder:', error);
+    return false;
   }
+}
+
+/**
+ * Initializes Yomite's app-private download folder.
+ * Custom shared folders request access later through Android's SAF picker.
+ */
+export async function requestStoragePermissionOnLaunch(): Promise<boolean> {
+  return ensureYomiteDownloadFolder();
 }

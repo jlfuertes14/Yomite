@@ -923,7 +923,7 @@ export default function DiscoverScreen() {
 
   const isSeeAllChromeHiddenRef = useRef(false);
   const seeAllHeaderTranslateY = useRef(new Animated.Value(0)).current;
-  const seeAllScrollStopTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const seeAllLastScrollYRef = useRef(0);
   const setTabBarVisible = useUIStore((s) => s.setTabBarVisible);
 
   const seeAllHeaderOpacity = seeAllHeaderTranslateY.interpolate({
@@ -959,58 +959,35 @@ export default function DiscoverScreen() {
   }, [setTabBarVisible, seeAllHeaderTranslateY]);
 
   const handleScrollBeginDrag = useCallback(() => {
-    if (activeSeeAllSection !== null) {
-      if (seeAllScrollStopTimerRef.current) {
-        clearTimeout(seeAllScrollStopTimerRef.current);
-        seeAllScrollStopTimerRef.current = null;
-      }
-      hideSeeAllChrome();
-    }
-  }, [activeSeeAllSection, hideSeeAllChrome]);
+    // The header follows the actual scroll direction. Do not hide it merely
+    // because a drag started, since that also happens when pulling upward.
+  }, []);
 
   const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const y = event.nativeEvent.contentOffset.y;
     setIsScrolled(y > 50);
 
     if (activeSeeAllSection !== null) {
+      const previousY = seeAllLastScrollYRef.current;
+      seeAllLastScrollYRef.current = y;
+
       if (y <= 10) {
-        if (seeAllScrollStopTimerRef.current) {
-          clearTimeout(seeAllScrollStopTimerRef.current);
-          seeAllScrollStopTimerRef.current = null;
-        }
         showSeeAllChrome();
         return;
       }
 
-      hideSeeAllChrome();
-
-      if (seeAllScrollStopTimerRef.current) {
-        clearTimeout(seeAllScrollStopTimerRef.current);
-      }
-      seeAllScrollStopTimerRef.current = setTimeout(() => {
-        showSeeAllChrome();
-      }, 350);
+      if (y > previousY + 2) hideSeeAllChrome();
+      else if (y < previousY - 2) showSeeAllChrome();
     }
   }, [activeSeeAllSection, hideSeeAllChrome, showSeeAllChrome]);
 
   const handleScrollEndDrag = useCallback(() => {
-    if (activeSeeAllSection !== null) {
-      if (seeAllScrollStopTimerRef.current) clearTimeout(seeAllScrollStopTimerRef.current);
-      seeAllScrollStopTimerRef.current = setTimeout(() => {
-        showSeeAllChrome();
-      }, 350);
-    }
-  }, [activeSeeAllSection, showSeeAllChrome]);
+    // Keep the current chrome state after the gesture ends.
+  }, []);
 
   const handleMomentumScrollEnd = useCallback(() => {
-    if (activeSeeAllSection !== null) {
-      if (seeAllScrollStopTimerRef.current) {
-        clearTimeout(seeAllScrollStopTimerRef.current);
-        seeAllScrollStopTimerRef.current = null;
-      }
-      showSeeAllChrome();
-    }
-  }, [activeSeeAllSection, showSeeAllChrome]);
+    // Keep the current chrome state after momentum ends.
+  }, []);
 
   useEffect(() => {
     if (activeSeeAllSection === null) {
@@ -1146,10 +1123,7 @@ export default function DiscoverScreen() {
     setActiveSeeAllSection(section);
     setCurrentPage(1);
     showSeeAllChrome();
-    if (seeAllScrollStopTimerRef.current) {
-      clearTimeout(seeAllScrollStopTimerRef.current);
-      seeAllScrollStopTimerRef.current = null;
-    }
+    seeAllLastScrollYRef.current = 0;
     mainScrollViewRef.current?.scrollTo({ y: 0, animated: false });
 
     let title = 'Top Rated Manga';
@@ -1271,7 +1245,7 @@ export default function DiscoverScreen() {
         }));
         const heroCoverUrls = heroItems.map((h) => h.url).filter(Boolean) as string[];
         if (heroCoverUrls.length > 0) {
-          Image.prefetch(heroCoverUrls, 'memory-disk');
+          Image.prefetch(heroCoverUrls, 'disk');
         }
         BannerCacheManager.prefetchHeroBanners(heroItems).then((resolved) => {
           if (Object.keys(resolved).length > 0) {
@@ -1958,7 +1932,7 @@ export default function DiscoverScreen() {
                           source={{ uri: avatarUrl }}
                           style={styles.headerAvatarImg}
                           contentFit="cover"
-                          cachePolicy="memory-disk"
+                          cachePolicy="disk"
                         />
                       ) : (
                         <Ionicons name="person-circle" size={26} color={colors.accent} />
@@ -2558,7 +2532,7 @@ export default function DiscoverScreen() {
                                         contentFit="cover"
                                         contentPosition="top"
                                         priority={idx === 0 || idx === loopHeroCards.length - 1 ? 'high' : 'normal'}
-                                        cachePolicy="memory-disk"
+                                        cachePolicy="disk"
                                         recyclingKey={coverUri || undefined}
                                         transition={150}
                                       />

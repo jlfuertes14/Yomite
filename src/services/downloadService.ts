@@ -12,7 +12,7 @@ export function getBaseDownloadDirectory(): string {
     return customDir.endsWith('/') ? customDir : `${customDir}/`;
   }
   const docDir = (FileSystem as any).documentDirectory || '';
-  return `${docDir}downloads/`;
+  return `${docDir}Yomite/`;
 }
 
 /**
@@ -31,7 +31,7 @@ export function getDisplayDownloadDirectory(): string {
     return 'Browser IndexedDB / Cache (downloads/yomite/)';
   }
   const docDir = (FileSystem as any).documentDirectory || '';
-  return `${docDir}downloads/`;
+  return `${docDir}Yomite/`;
 }
 
 /**
@@ -186,7 +186,7 @@ export async function downloadChapter(params: {
           safErr?.message || safErr
         );
         useDownloadStore.getState().setCustomStorageDirectory(null);
-        baseDir = `${(FileSystem as any).documentDirectory || ''}downloads/`;
+        baseDir = `${(FileSystem as any).documentDirectory || ''}Yomite/`;
       }
     }
 
@@ -472,7 +472,7 @@ export async function removeDownloadedChapter(chapterId: string, mangaId: string
     // 2. Delete standard internal documentDirectory folder (file://)
     const docDir = (FileSystem as any).documentDirectory || '';
     if (docDir) {
-      const internalChapterDir = `${docDir}downloads/${mangaId}/${chapterId}/`;
+      const internalChapterDir = `${docDir}Yomite/${mangaId}/${chapterId}/`;
       try {
         await FileSystem.deleteAsync(internalChapterDir, { idempotent: true });
       } catch (_e) {}

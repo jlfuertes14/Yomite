@@ -51,6 +51,13 @@ import { triggerHaptic } from '../../src/utils/haptics';
 
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
+import {
+  getDisplayDownloadDirectory,
+  pickAndroidStorageDirectory,
+  pickStorageDirectory,
+} from '../../src/services/downloadService';
+import { useDownloadStore } from '../../src/store/downloadStore';
+import { getCurrentAppVersion } from '../../src/services/appUpdateService';
 
 type VectorIcon = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -110,6 +117,7 @@ export default function SettingsScreen() {
   const { from } = useLocalSearchParams<{ from?: string }>();
   const [returnToProfile, setReturnToProfile] = useState(from === 'profile');
   const colors = useThemeColors();
+  const currentAppVersion = getCurrentAppVersion();
   const systemColorScheme = useColorScheme();
   const isDark = systemColorScheme === 'dark';
   const dividerColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.045)';
@@ -128,6 +136,7 @@ export default function SettingsScreen() {
   const mode = useReaderStore((s) => s.mode);
   const readerTheme = useReaderStore((s) => s.theme);
   const dataSaver = useReaderStore((s) => s.dataSaver);
+  const downloadDirectory = useDownloadStore((s) => s.downloadDirectory);
   const setDataSaver = useReaderStore((s) => s.setDataSaver);
   const showPageNumber = useReaderStore((s) => s.showPageNumber);
   const hapticsEnabled = useReaderStore((s) => s.hapticsEnabled);
@@ -136,6 +145,40 @@ export default function SettingsScreen() {
   const setShowPageNumber = useReaderStore((s) => s.setShowPageNumber);
   const setHapticsEnabled = useReaderStore((s) => s.setHapticsEnabled);
   const clearHistory = useHistoryStore((s) => s.clearHistory);
+
+  const handleChangeDownloadFolder = useCallback(async () => {
+    triggerHaptic();
+    try {
+      const selected =
+        Platform.OS === 'android'
+          ? await pickAndroidStorageDirectory()
+          : await pickStorageDirectory();
+
+      if (selected) {
+        setConfirmModalConfig({
+          visible: true,
+          title: 'Download Folder Updated',
+          message: `New downloads will be saved to:\n${getDisplayDownloadDirectory()}`,
+          iconName: 'folder-outline',
+          confirmText: 'Done',
+          cancelText: '',
+          confirmVariant: 'primary',
+          onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
+        });
+      }
+    } catch {
+      setConfirmModalConfig({
+        visible: true,
+        title: 'Folder Not Changed',
+        message: 'The download folder could not be changed. Please try again.',
+        iconName: 'alert-circle-outline',
+        confirmText: 'OK',
+        cancelText: '',
+        confirmVariant: 'primary',
+        onConfirm: () => setConfirmModalConfig((prev) => ({ ...prev, visible: false })),
+      });
+    }
+  }, []);
 
   // Modal & Notification State
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
@@ -754,6 +797,34 @@ export default function SettingsScreen() {
     <View style={styles.section}>
       <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>Data & Performance</Text>
       <View style={styles.flatDividedList}>
+        <Pressable
+          onPress={handleChangeDownloadFolder}
+          accessibilityRole="button"
+          accessibilityLabel="Change download folder"
+          style={({ pressed, hovered }: any) => [
+            styles.flatRow,
+            (pressed || hovered) && {
+              backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.035)',
+            },
+            Platform.OS === 'web' && { cursor: 'pointer' as any },
+          ]}
+        >
+          <View style={styles.optionLeft}>
+            <View style={[styles.iconSquare, { backgroundColor: colors.surfaceElevated }]}>
+              <Ionicons name="folder-outline" size={18} color={colors.text} />
+            </View>
+            <View style={styles.optionTextCol}>
+              <Text style={[styles.optionTitle, { color: colors.text }]}>Download Folder</Text>
+              <Text style={[styles.optionSubtitle, { color: colors.textMuted }]} numberOfLines={1}>
+                {downloadDirectory ? getDisplayDownloadDirectory() : 'Yomite app folder'}
+              </Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+        </Pressable>
+
+        <View style={[styles.hairlineDivider, { backgroundColor: dividerColor }]} />
+
         <View style={styles.flatRow}>
           <View style={styles.optionLeft}>
             <View style={[styles.iconSquare, { backgroundColor: colors.surfaceElevated }]}>
@@ -866,7 +937,7 @@ export default function SettingsScreen() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <Text style={[styles.optionTitle, { color: colors.text }]}>Get Yomite for Mobile</Text>
                   <View style={[styles.promoBadge, { backgroundColor: `${accentColor}26` }]}>
-                    <Text style={[styles.promoBadgeText, { color: accentColor }]}>APK v1.2.2</Text>
+                    <Text style={[styles.promoBadgeText, { color: accentColor }]}>APK v{currentAppVersion}</Text>
                   </View>
                 </View>
                 <Text style={[styles.optionSubtitle, { color: colors.textMuted }]}>
@@ -957,7 +1028,7 @@ export default function SettingsScreen() {
 
           {/* App Info Footer */}
           <View style={styles.footer}>
-            <Text style={[styles.footerTitle, { color: colors.textMuted }]}>Yomite Manga Reader v1.2.8</Text>
+            <Text style={[styles.footerTitle, { color: colors.textMuted }]}>Yomite Manga Reader v{currentAppVersion}</Text>
             <Text style={[styles.footerSubtitle, { color: colors.textMuted }]}>
               Powered by MangaDex API, Kotatsu and Supabase Cloud Sync
             </Text>

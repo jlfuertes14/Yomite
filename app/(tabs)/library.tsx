@@ -456,6 +456,7 @@ function LibraryDetailsCard({
               <Text
                 style={[
                   styles.detailsProgressText,
+                  { color: colors.text },
                   progressPercent === 100 && { color: '#10B981' },
                 ]}
               >
@@ -602,6 +603,7 @@ function LibraryCompactCard({
           <Text
             style={[
               styles.compactPercentText,
+              { color: colors.text },
               progressPercent === 100 && { color: '#10B981' },
             ]}
           >
@@ -1537,7 +1539,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   percentText: {
-    color: '#F3F4F6',
+    color: '#1B1B1F',
     fontSize: 10.5,
     fontWeight: '700',
     letterSpacing: 0.2,
@@ -1636,7 +1638,7 @@ const styles = StyleSheet.create({
   detailsProgressText: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#E2E8F0',
+    color: '#1B1B1F',
   },
   detailsTotalText: {
     fontSize: 11,
@@ -1726,7 +1728,7 @@ const styles = StyleSheet.create({
   compactPercentText: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#94A3B8',
+    color: '#1B1B1F',
   },
   compactUnreadBadge: {
     minWidth: 22,

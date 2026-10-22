@@ -19,6 +19,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeColors } from '../hooks/useThemeColor';
 import { useColorScheme } from '../hooks/useColorScheme';
 import {
@@ -123,6 +124,7 @@ function MarkdownChangelog({ content, textColor, textMutedColor }: { content: st
 export function AppUpdateModal({ visible, release, onDismiss }: AppUpdateModalProps) {
   const colors = useThemeColors();
   const colorScheme = useColorScheme();
+  const insets = useSafeAreaInsets();
   const isDark = colorScheme === 'dark';
   const currentVersion = getCurrentAppVersion();
 
@@ -419,7 +421,16 @@ export function AppUpdateModal({ visible, release, onDismiss }: AppUpdateModalPr
         </Animated.View>
         </ScrollView>
 
-        <View style={styles.fixedActions}>
+        <View
+          style={[
+            styles.fixedActions,
+            {
+              // Keep the floating actions clear of Android's navigation bar,
+              // including devices using gesture navigation.
+              paddingBottom: Math.max(insets.bottom + 20, 28),
+            },
+          ]}
+        >
           {status !== 'downloading' && (
             <Pressable
               onPress={handleIgnore}

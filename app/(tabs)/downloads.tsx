@@ -736,25 +736,6 @@ export default function DownloadsScreen() {
                 <Text style={[styles.headerTitle, { color: colors.text }]}>Downloads</Text>
               </View>
 
-              <View style={styles.headerActions}>
-                {/* Storage Button matching HTML Prototype */}
-                <Pressable
-                  onPress={openFolderModal}
-                  style={({ pressed }) => [
-                    styles.storagePillBtn,
-                    {
-                      backgroundColor: colors.surfaceElevated,
-                      borderColor: colors.border,
-                      opacity: pressed ? 0.75 : 1,
-                    },
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel="Change download location"
-                >
-                  <Ionicons name="folder-outline" size={13} color={colors.accent} />
-                  <Text style={[styles.storagePillText, { color: colors.text }]}>Storage</Text>
-                </Pressable>
-              </View>
             </>
           )}
         </View>

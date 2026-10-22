@@ -10,6 +10,7 @@ import type { ReadingMode, ImageFit, ReaderTheme } from '../types';
 interface ReaderState {
   // Preferences (persisted)
   mode: ReadingMode;
+  modeOverrides: Record<string, ReadingMode>;
   theme: ReaderTheme;
   imageFit: ImageFit;
   dataSaver: boolean;
@@ -28,6 +29,7 @@ interface ReaderState {
 
   // Actions
   setMode: (mode: ReadingMode) => void;
+  setModeOverride: (contentId: string, mode: ReadingMode) => void;
   setTheme: (theme: ReaderTheme) => void;
   setImageFit: (fit: ImageFit) => void;
   setDataSaver: (enabled: boolean) => void;
@@ -48,6 +50,7 @@ export const useReaderStore = create<ReaderState>()(
     (set) => ({
       // Defaults
       mode: 'webtoon',
+      modeOverrides: {},
       theme: 'oled',
       imageFit: 'width',
       dataSaver: false,
@@ -64,6 +67,13 @@ export const useReaderStore = create<ReaderState>()(
       controlsVisible: false,
 
       setMode: (mode) => set({ mode }),
+      setModeOverride: (contentId, mode) =>
+        set((state) => ({
+          modeOverrides: {
+            ...state.modeOverrides,
+            [contentId]: mode,
+          },
+        })),
       setTheme: (theme) => set({ theme }),
       setImageFit: (fit) => set({ imageFit: fit }),
       setDataSaver: (enabled) => set({ dataSaver: enabled }),
@@ -102,6 +112,7 @@ export const useReaderStore = create<ReaderState>()(
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
         mode: state.mode,
+        modeOverrides: state.modeOverrides,
         theme: state.theme,
         imageFit: state.imageFit,
         dataSaver: state.dataSaver,

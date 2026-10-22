@@ -1276,7 +1276,7 @@ export default function ExtensionsScreen() {
   // Source catalog curtain header animation
   const catalogHeaderAnim = useRef(new Animated.Value(0)).current;
   const isCatalogChromeHiddenRef = useRef(false);
-  const catalogScrollStopTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const catalogLastScrollYRef = useRef(0);
   const [catalogHeaderHeight, setCatalogHeaderHeight] = useState(135);
 
   const catalogHeaderOpacity = catalogHeaderAnim.interpolate({
@@ -1310,53 +1310,35 @@ export default function ExtensionsScreen() {
   }, [catalogHeaderAnim]);
 
   const handleCatalogScrollBeginDrag = useCallback(() => {
-    if (catalogScrollStopTimerRef.current) {
-      clearTimeout(catalogScrollStopTimerRef.current);
-      catalogScrollStopTimerRef.current = null;
-    }
-    hideCatalogHeader();
-  }, [hideCatalogHeader]);
+    // Hide/show the header from the actual scroll direction, not drag start.
+  }, []);
 
   const handleCatalogScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const y = event.nativeEvent.contentOffset.y;
+    const previousY = catalogLastScrollYRef.current;
+    catalogLastScrollYRef.current = y;
+
     if (y <= 10) {
-      if (catalogScrollStopTimerRef.current) {
-        clearTimeout(catalogScrollStopTimerRef.current);
-        catalogScrollStopTimerRef.current = null;
-      }
       showCatalogHeader();
       return;
     }
 
-    hideCatalogHeader();
-
-    if (catalogScrollStopTimerRef.current) {
-      clearTimeout(catalogScrollStopTimerRef.current);
-    }
-    catalogScrollStopTimerRef.current = setTimeout(() => {
-      showCatalogHeader();
-    }, 350);
+    if (y > previousY + 2) hideCatalogHeader();
+    else if (y < previousY - 2) showCatalogHeader();
   }, [hideCatalogHeader, showCatalogHeader]);
 
   const handleCatalogScrollEndDrag = useCallback(() => {
-    if (catalogScrollStopTimerRef.current) clearTimeout(catalogScrollStopTimerRef.current);
-    catalogScrollStopTimerRef.current = setTimeout(() => {
-      showCatalogHeader();
-    }, 350);
-  }, [showCatalogHeader]);
+    // Keep the current chrome state after the gesture ends.
+  }, []);
 
   const handleCatalogMomentumScrollEnd = useCallback(() => {
-    if (catalogScrollStopTimerRef.current) {
-      clearTimeout(catalogScrollStopTimerRef.current);
-      catalogScrollStopTimerRef.current = null;
-    }
-    showCatalogHeader();
-  }, [showCatalogHeader]);
+    // Keep the current chrome state after momentum ends.
+  }, []);
 
   useEffect(() => {
     if (!mangaModalVisible) {
-      if (catalogScrollStopTimerRef.current) clearTimeout(catalogScrollStopTimerRef.current);
       isCatalogChromeHiddenRef.current = false;
+      catalogLastScrollYRef.current = 0;
       catalogHeaderAnim.setValue(0);
     }
   }, [mangaModalVisible, catalogHeaderAnim]);

@@ -20,6 +20,8 @@ export const DEFAULT_USER_AGENT =
     ? 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
     : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
+const MAX_HTML_RESPONSE_BYTES = 8 * 1024 * 1024;
+
 export interface RequestOptions extends AxiosRequestConfig {
   referer?: string;
   sourceId?: string;
@@ -130,6 +132,8 @@ export class SourceHttpClient {
       const response: AxiosResponse<string> = await axios.get(url, {
         timeout: 15000,
         ...options,
+        maxContentLength: MAX_HTML_RESPONSE_BYTES,
+        maxBodyLength: MAX_HTML_RESPONSE_BYTES,
         headers,
         responseType: 'text',
       });
