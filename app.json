@@ -20,7 +20,7 @@
     },
     "android": {
       "package": "com.yomite.mangaapp",
-      "versionCode": 10209,
+      "versionCode": 10300,
       "backgroundColor": "#09090B",
       "usesCleartextTraffic": true,
       "adaptiveIcon": {
