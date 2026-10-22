@@ -2,7 +2,7 @@
   "expo": {
     "name": "Yomite",
     "slug": "yomite",
-    "version": "1.3.3",
+    "version": "1.3.4",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "yomite",
@@ -20,7 +20,7 @@
     },
     "android": {
       "package": "com.yomite.mangaapp",
-      "versionCode": 10303,
+      "versionCode": 10304,
       "googleServicesFile": "./google-services.json",
       "backgroundColor": "#09090B",
       "usesCleartextTraffic": true,
@@ -56,7 +56,7 @@
         "expo-notifications",
         {
           "icon": "./assets/images/android-icon-monochrome.png",
-          "color": "#E11D48"
+          "color": "#93C5FD"
         }
       ],
       [
