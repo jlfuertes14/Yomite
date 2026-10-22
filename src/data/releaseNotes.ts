@@ -14,4 +14,14 @@ export const LOCAL_RELEASE_NOTES: Record<string, string> = {
 - Added detailed release notes and universal APK delivery.
 - Improved update modal progress, notification startup permissions, Discover navigation, and reader layout analysis.
 `,
+  '1.3.2': `## Yomite v1.3.2
+
+### What's new
+- Added in-app release notification diagnostics in Settings.
+- Added retry registration for Expo push subscriptions.
+- Added detailed mobile-side diagnostics for permissions, project configuration, token generation, and parser responses.
+- Fixed standalone Android builds being incorrectly treated as Expo Go environments.
+- Fixed the release parser's Supabase subscription response handling.
+- Added Render logs for release subscriptions and Anime News feed requests.
+`,
 };

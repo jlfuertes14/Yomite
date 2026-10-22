@@ -33,11 +33,13 @@ import {
   unregisterLibraryScanTask,
 } from '../../src/services/backgroundScanner';
 import {
+  getReleasePushDiagnostics,
   requestNotificationPermissions,
   registerReleasePushSubscription,
   sendNewChapterNotification,
   unregisterReleasePushSubscription,
 } from '../../src/services/notificationService';
+import type { ReleasePushDiagnostics } from '../../src/services/notificationService';
 import { getUniversalMangaChapters, isExternalSource } from '../../src/sources/adapter';
 import { SourceManager } from '../../src/sources/SourceManager';
 import { useHistoryStore } from '../../src/store/historyStore';
@@ -187,6 +189,11 @@ export default function SettingsScreen() {
   const [scanIntervalMinutes, setScanIntervalMinutes] = useState(360);
   const [lastScanTimestamp, setLastScanTimestamp] = useState<number>(0);
   const [isScanning, setIsScanning] = useState(false);
+  const [releasePushDiagnostics, setReleasePushDiagnostics] = useState<ReleasePushDiagnostics | null>(null);
+
+  const refreshReleasePushDiagnostics = useCallback(async () => {
+    setReleasePushDiagnostics(await getReleasePushDiagnostics());
+  }, []);
 
   useEffect(() => {
     getBackgroundScanConfig()
@@ -200,6 +207,10 @@ export default function SettingsScreen() {
       })
       .catch(() => { });
   }, [currentAppVersion]);
+
+  useEffect(() => {
+    refreshReleasePushDiagnostics().catch(() => {});
+  }, [refreshReleasePushDiagnostics]);
 
   // Custom Confirmation Dialog State
   const [confirmModalConfig, setConfirmModalConfig] = useState<{
@@ -261,6 +272,7 @@ export default function SettingsScreen() {
       if (granted) {
         setNotificationsEnabled(true);
         await registerReleasePushSubscription(currentAppVersion);
+        await refreshReleasePushDiagnostics();
         await registerLibraryScanTask(scanIntervalMinutes);
         setConfirmModalConfig({
           visible: true,
@@ -288,6 +300,7 @@ export default function SettingsScreen() {
     } else {
       setNotificationsEnabled(false);
       await unregisterReleasePushSubscription();
+      await refreshReleasePushDiagnostics();
       await unregisterLibraryScanTask();
     }
   };
@@ -298,6 +311,11 @@ export default function SettingsScreen() {
     if (notificationsEnabled) {
       await registerLibraryScanTask(minutes);
     }
+  };
+
+  const handleRetryReleaseSubscription = async () => {
+    await registerReleasePushSubscription(currentAppVersion);
+    await refreshReleasePushDiagnostics();
   };
 
   const handleCheckUpdatesNow = async () => {
@@ -795,6 +813,70 @@ export default function SettingsScreen() {
             <Ionicons name="chevron-forward" size={16} color="#71717A" />
           )}
         </Pressable>
+
+        <View style={[styles.hairlineDivider, { backgroundColor: dividerColor }]} />
+
+        <View style={{ paddingHorizontal: 16, paddingVertical: 14, backgroundColor: colors.cardBackground }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={[styles.iconSquare, { backgroundColor: colors.surfaceElevated }]}>
+                <Ionicons name="bug-outline" size={18} color={colors.text} />
+              </View>
+              <Text style={[styles.optionTitle, { color: colors.text }]}>Release Notification Diagnostics</Text>
+            </View>
+            <Pressable
+              onPress={refreshReleasePushDiagnostics}
+              accessibilityRole="button"
+              accessibilityLabel="Refresh release notification diagnostics"
+              hitSlop={8}
+            >
+              <Ionicons name="refresh-outline" size={18} color={accentColor} />
+            </Pressable>
+          </View>
+
+          <Text style={[styles.optionSubtitle, { color: colors.textMuted }]}>
+            Permission: {releasePushDiagnostics?.permissionStatus || 'checking...'}
+          </Text>
+          <Text style={[styles.optionSubtitle, { color: colors.textMuted }]}>
+            Environment: {releasePushDiagnostics?.executionEnvironment || 'checking...'}
+          </Text>
+          <Text style={[styles.optionSubtitle, { color: colors.textMuted }]}>
+            EAS project ID: {releasePushDiagnostics ? (releasePushDiagnostics.projectIdConfigured ? 'configured' : 'missing') : 'checking...'}
+          </Text>
+          <Text style={[styles.optionSubtitle, { color: colors.textMuted }]}>
+            Expo notifications: {releasePushDiagnostics ? (releasePushDiagnostics.notificationsModuleAvailable ? 'available' : 'unavailable') : 'checking...'}
+          </Text>
+          <Text style={[styles.optionSubtitle, { color: colors.textMuted }]}>
+            Push token stored: {releasePushDiagnostics ? (releasePushDiagnostics.storedToken ? 'yes' : 'no') : 'checking...'}
+          </Text>
+          {releasePushDiagnostics?.lastResult && (
+            <Text style={[styles.optionSubtitle, { color: colors.textMuted }]}>
+              Last registration: {releasePushDiagnostics.lastResult}
+              {releasePushDiagnostics.lastHttpStatus ? ` (${releasePushDiagnostics.lastHttpStatus})` : ''}
+            </Text>
+          )}
+          {releasePushDiagnostics?.lastError && (
+            <Text style={[styles.optionSubtitle, { color: '#EF4444' }]}>
+              Error: {releasePushDiagnostics.lastError}
+            </Text>
+          )}
+
+          <Pressable
+            onPress={handleRetryReleaseSubscription}
+            accessibilityRole="button"
+            accessibilityLabel="Retry release notification registration"
+            style={({ pressed }) => ({
+              alignSelf: 'flex-start',
+              marginTop: 10,
+              paddingVertical: 7,
+              paddingHorizontal: 10,
+              borderRadius: 8,
+              backgroundColor: pressed ? `${accentColor}35` : `${accentColor}20`,
+            })}
+          >
+            <Text style={{ color: accentColor, fontSize: 12, fontWeight: '600' }}>Retry Registration</Text>
+          </Pressable>
+        </View>
       </View>
     </View>
   );

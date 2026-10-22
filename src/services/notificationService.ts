@@ -6,13 +6,6 @@ import { Asset } from 'expo-asset';
 const isExpoGoClient = (): boolean => {
   if (Platform.OS === 'web') return false;
   try {
-    const { requireNativeModule } = require('expo-modules-core');
-    if (requireNativeModule && requireNativeModule('ExpoGo') != null) {
-      return true;
-    }
-  } catch {}
-
-  try {
     return (
       Constants.executionEnvironment === ExecutionEnvironment.StoreClient ||
       (Constants as any).appOwnership === 'expo'
@@ -28,6 +21,60 @@ export const NOTIFICATION_CHANNEL_ID = 'yomite_chapter_updates';
 export const RELEASE_SERVICE_URL = 'https://yomite-parsers.onrender.com';
 const LAST_APP_UPDATE_NOTIFICATION_KEY = '@yomite_last_app_update_notification';
 const RELEASE_PUSH_TOKEN_KEY = '@yomite_release_push_token';
+const RELEASE_PUSH_DIAGNOSTICS_KEY = '@yomite_release_push_diagnostics';
+
+export interface ReleasePushDiagnostics {
+  permissionStatus: string;
+  executionEnvironment: string;
+  isExpoGo: boolean;
+  projectIdConfigured: boolean;
+  notificationsModuleAvailable: boolean;
+  storedToken: boolean;
+  lastResult?: string;
+  lastError?: string;
+  lastHttpStatus?: number;
+  lastAttemptAt?: string;
+}
+
+async function saveReleasePushDiagnostic(update: Partial<ReleasePushDiagnostics>): Promise<void> {
+  try {
+    const existing = await AsyncStorage.getItem(RELEASE_PUSH_DIAGNOSTICS_KEY);
+    const current = existing ? JSON.parse(existing) : {};
+    await AsyncStorage.setItem(
+      RELEASE_PUSH_DIAGNOSTICS_KEY,
+      JSON.stringify({ ...current, ...update, lastAttemptAt: new Date().toISOString() })
+    );
+  } catch {}
+}
+
+export async function getReleasePushDiagnostics(): Promise<ReleasePushDiagnostics> {
+  const Notifications = getNotificationsModule();
+  let permissionStatus = 'unavailable';
+
+  try {
+    permissionStatus = Notifications
+      ? String((await Notifications.getPermissionsAsync()).status || 'unknown')
+      : 'module-unavailable';
+  } catch {
+    permissionStatus = 'error';
+  }
+
+  let saved: Partial<ReleasePushDiagnostics> = {};
+  try {
+    const raw = await AsyncStorage.getItem(RELEASE_PUSH_DIAGNOSTICS_KEY);
+    saved = raw ? JSON.parse(raw) : {};
+  } catch {}
+
+  return {
+    permissionStatus,
+    executionEnvironment: String(Constants.executionEnvironment || 'unknown'),
+    isExpoGo: isExpoGo(),
+    projectIdConfigured: Boolean(Constants.expoConfig?.extra?.eas?.projectId || Constants.easConfig?.projectId),
+    notificationsModuleAvailable: Boolean(Notifications),
+    storedToken: Boolean(await AsyncStorage.getItem(RELEASE_PUSH_TOKEN_KEY).catch(() => null)),
+    ...saved,
+  };
+}
 
 let cachedIconUri: string | null = null;
 let cachedNotificationsModule: any = undefined;
@@ -229,16 +276,54 @@ export async function checkNotificationPermissions(): Promise<boolean> {
  * tokens are intentionally not requested in Expo Go on Android.
  */
 export async function registerReleasePushSubscription(appVersion: string): Promise<boolean> {
-  if (Platform.OS !== 'android' || isExpoGo() || !(await checkNotificationPermissions())) return false;
+  if (Platform.OS !== 'android') {
+    console.info('[Yomite] Release subscription skipped: non-Android platform');
+    await saveReleasePushDiagnostic({ lastResult: 'skipped', lastError: 'non-Android platform' });
+    return false;
+  }
+
+  if (isExpoGo()) {
+    console.info('[Yomite] Release subscription skipped: Expo Go/StoreClient environment');
+    await saveReleasePushDiagnostic({ lastResult: 'skipped', lastError: 'Expo Go/StoreClient environment' });
+    return false;
+  }
+
+  const notificationsGranted = await checkNotificationPermissions();
+  if (!notificationsGranted) {
+    console.warn('[Yomite] Release subscription skipped: notification permission is not granted');
+    await saveReleasePushDiagnostic({ lastResult: 'skipped', lastError: 'notification permission is not granted' });
+    return false;
+  }
 
   try {
     const Notifications = getNotificationsModule();
     const projectId = Constants.expoConfig?.extra?.eas?.projectId || Constants.easConfig?.projectId;
-    if (!Notifications?.getExpoPushTokenAsync || !projectId) return false;
+    if (!Notifications?.getExpoPushTokenAsync) {
+      console.warn('[Yomite] Release subscription failed: Expo notifications module is unavailable');
+      await saveReleasePushDiagnostic({ lastResult: 'failed', lastError: 'Expo notifications module is unavailable' });
+      return false;
+    }
+    if (!projectId) {
+      console.warn('[Yomite] Release subscription failed: EAS project ID is missing', {
+        executionEnvironment: Constants.executionEnvironment,
+      });
+      await saveReleasePushDiagnostic({ lastResult: 'failed', lastError: 'EAS project ID is missing' });
+      return false;
+    }
+
+    console.info('[Yomite] Requesting Expo release push token', {
+      appVersion,
+      executionEnvironment: Constants.executionEnvironment,
+    });
 
     const tokenResponse = await Notifications.getExpoPushTokenAsync({ projectId });
     const pushToken = tokenResponse?.data;
-    if (!pushToken) return false;
+    if (!pushToken) {
+      console.warn('[Yomite] Release subscription failed: Expo returned no push token');
+      await saveReleasePushDiagnostic({ lastResult: 'failed', lastError: 'Expo returned no push token' });
+      return false;
+    }
+    await saveReleasePushDiagnostic({ lastResult: 'token-generated', lastError: undefined });
 
     const response = await fetch(`${RELEASE_SERVICE_URL}/api/releases/subscribe`, {
       method: 'POST',
@@ -250,11 +335,26 @@ export async function registerReleasePushSubscription(appVersion: string): Promi
         appVersion,
       }),
     });
-    if (!response.ok) return false;
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      console.warn('[Yomite] Release subscription server rejected request', {
+        status: response.status,
+        body: errorBody.slice(0, 300),
+      });
+      await saveReleasePushDiagnostic({
+        lastResult: 'failed',
+        lastError: `Parser rejected subscription: ${errorBody.slice(0, 200)}`,
+        lastHttpStatus: response.status,
+      });
+      return false;
+    }
 
     await AsyncStorage.setItem(RELEASE_PUSH_TOKEN_KEY, pushToken).catch(() => {});
+    await saveReleasePushDiagnostic({ lastResult: 'registered', lastError: undefined, lastHttpStatus: response.status });
+    console.info('[Yomite] Release push subscription registered', { appVersion });
     return true;
   } catch (err) {
+    await saveReleasePushDiagnostic({ lastResult: 'failed', lastError: err instanceof Error ? err.message : String(err) });
     console.warn('[Yomite] Failed to subscribe to release notifications:', err);
     return false;
   }
