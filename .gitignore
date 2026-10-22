@@ -15,6 +15,7 @@ expo-env.d.ts
 eas.json
 credentials.json
 google-services.json
+*-firebase-adminsdk-*.json
 GoogleService-Info.plist
 
 # Compiled Mobile Binaries & Archives

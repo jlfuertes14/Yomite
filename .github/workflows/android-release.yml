@@ -165,6 +165,7 @@ jobs:
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       EXPECTED_CERT_SHA256: ${{ secrets.ANDROID_CERT_SHA256 }}
+      GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -182,7 +183,8 @@ jobs:
             ANDROID_KEYSTORE_BASE64 \
             ANDROID_KEYSTORE_PASSWORD \
             ANDROID_KEY_ALIAS \
-            ANDROID_KEY_PASSWORD; do
+            ANDROID_KEY_PASSWORD \
+            GOOGLE_SERVICES_JSON_BASE64; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::Missing required secret: $name"
               exit 1
@@ -232,6 +234,17 @@ jobs:
           echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
           keytool -list -keystore "$KEYSTORE_PATH" -alias "$ANDROID_KEY_ALIAS" -storepass "$ANDROID_KEYSTORE_PASSWORD" >/dev/null
           echo "Keystore alias validated."
+
+      - name: Decode Firebase Android configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > google-services.json
+          chmod 600 google-services.json
+          jq -e '.project_info.project_id and .client[0].client_info.android_client_info.package_name' google-services.json >/dev/null
+          test "$(jq -r '.client[0].client_info.android_client_info.package_name' google-services.json)" = "com.yomite.mangaapp"
+          echo "Firebase Android configuration validated."
 
       - name: Generate Android project
         shell: bash
@@ -315,7 +328,9 @@ jobs:
       - name: Remove keystore
         if: always()
         shell: bash
-        run: rm -f "${RUNNER_TEMP}/release.keystore"
+        run: |
+          rm -f "${RUNNER_TEMP}/release.keystore"
+          rm -f google-services.json
 
   release:
     name: Publish release
