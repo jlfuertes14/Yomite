@@ -997,10 +997,16 @@ export default function DiscoverScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      // Discover can be re-entered after a scroll-driven "See all" view hid the
+      // global bar. Reset immediately on focus so stale UI-store state cannot
+      // leave the floating menu hidden.
+      isSeeAllChromeHiddenRef.current = false;
+      setTabBarVisible(true);
+      seeAllHeaderTranslateY.setValue(0);
       return () => {
         showSeeAllChrome();
       };
-    }, [showSeeAllChrome])
+    }, [setTabBarVisible, seeAllHeaderTranslateY, showSeeAllChrome])
   );
 
   useEffect(() => {

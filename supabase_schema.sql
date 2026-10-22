@@ -181,6 +181,48 @@ CREATE POLICY "Users can delete own avatar" ON storage.objects
     );
 
 -- 10. HIGH-PERFORMANCE QUERY INDEXES
+-- 11. APP RELEASES & PUSH SUBSCRIPTIONS
+-- These tables are written by yomite-parser with the Supabase service role.
+-- Keep the service-role key exclusively in Render environment variables.
+CREATE TABLE IF NOT EXISTS public.yomite_releases (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    version TEXT NOT NULL UNIQUE,
+    tag_name TEXT NOT NULL,
+    release_title TEXT NOT NULL,
+    release_notes TEXT NOT NULL,
+    download_url TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    apk_size BIGINT DEFAULT 0,
+    published_at TIMESTAMPTZ NOT NULL,
+    html_url TEXT NOT NULL,
+    channel TEXT NOT NULL DEFAULT 'stable',
+    notifications_sent_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.yomite_release_subscriptions (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    push_token TEXT NOT NULL UNIQUE,
+    platform TEXT NOT NULL DEFAULT 'android',
+    channel TEXT NOT NULL DEFAULT 'stable',
+    app_version TEXT,
+    enabled BOOLEAN NOT NULL DEFAULT true,
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_yomite_releases_channel_published
+  ON public.yomite_releases (channel, published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_yomite_release_subscriptions_active
+  ON public.yomite_release_subscriptions (enabled, platform, channel);
+
+-- No public client access is required. The release service uses the service
+-- role, while the app talks to the protected yomite-parser HTTP endpoints.
+ALTER TABLE public.yomite_releases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.yomite_release_subscriptions ENABLE ROW LEVEL SECURITY;
+
+-- 12. HIGH-PERFORMANCE QUERY INDEXES
 -- Core user history and library indexes
 CREATE INDEX IF NOT EXISTS idx_user_history_user_updated ON public.user_history (user_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_user_library_user_cat ON public.user_library (user_id, category);

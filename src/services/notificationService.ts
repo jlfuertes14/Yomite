@@ -25,7 +25,9 @@ const isExpoGoClient = (): boolean => {
 export const isExpoGo = isExpoGoClient;
 
 export const NOTIFICATION_CHANNEL_ID = 'yomite_chapter_updates';
+export const RELEASE_SERVICE_URL = 'https://yomite-parsers.onrender.com';
 const LAST_APP_UPDATE_NOTIFICATION_KEY = '@yomite_last_app_update_notification';
+const RELEASE_PUSH_TOKEN_KEY = '@yomite_release_push_token';
 
 let cachedIconUri: string | null = null;
 let cachedNotificationsModule: any = undefined;
@@ -184,6 +186,9 @@ export async function requestNotificationPermissions(): Promise<boolean> {
     const Notifications = getNotificationsModule();
     if (!Notifications) return false;
 
+    // Android 13+ does not show the permission prompt until a channel exists.
+    await setupNotificationChannel();
+
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
 
@@ -196,7 +201,6 @@ export async function requestNotificationPermissions(): Promise<boolean> {
       return false;
     }
 
-    await setupNotificationChannel();
     return true;
   } catch (err) {
     console.warn('Failed to request notification permissions:', err);
@@ -216,6 +220,64 @@ export async function checkNotificationPermissions(): Promise<boolean> {
     const { status } = await Notifications.getPermissionsAsync();
     return status === 'granted';
   } catch {
+    return false;
+  }
+}
+
+/**
+ * Registers the opted-in device with the Yomite release service. Remote push
+ * tokens are intentionally not requested in Expo Go on Android.
+ */
+export async function registerReleasePushSubscription(appVersion: string): Promise<boolean> {
+  if (Platform.OS !== 'android' || isExpoGo() || !(await checkNotificationPermissions())) return false;
+
+  try {
+    const Notifications = getNotificationsModule();
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId || Constants.easConfig?.projectId;
+    if (!Notifications?.getExpoPushTokenAsync || !projectId) return false;
+
+    const tokenResponse = await Notifications.getExpoPushTokenAsync({ projectId });
+    const pushToken = tokenResponse?.data;
+    if (!pushToken) return false;
+
+    const response = await fetch(`${RELEASE_SERVICE_URL}/api/releases/subscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pushToken,
+        platform: 'android',
+        channel: 'stable',
+        appVersion,
+      }),
+    });
+    if (!response.ok) return false;
+
+    await AsyncStorage.setItem(RELEASE_PUSH_TOKEN_KEY, pushToken).catch(() => {});
+    return true;
+  } catch (err) {
+    console.warn('[Yomite] Failed to subscribe to release notifications:', err);
+    return false;
+  }
+}
+
+export async function unregisterReleasePushSubscription(): Promise<boolean> {
+  if (Platform.OS !== 'android') return false;
+
+  try {
+    const pushToken = await AsyncStorage.getItem(RELEASE_PUSH_TOKEN_KEY);
+    if (!pushToken) return true;
+
+    const response = await fetch(`${RELEASE_SERVICE_URL}/api/releases/unsubscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pushToken }),
+    });
+    if (!response.ok) return false;
+
+    await AsyncStorage.removeItem(RELEASE_PUSH_TOKEN_KEY).catch(() => {});
+    return true;
+  } catch (err) {
+    console.warn('[Yomite] Failed to unsubscribe from release notifications:', err);
     return false;
   }
 }

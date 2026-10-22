@@ -12,11 +12,11 @@ import { getContentUriAsync } from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { Platform } from 'react-native';
 
-export const GITHUB_REPO = 'jlfuertes14/Yomite';
-const GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
+export const RELEASE_SERVICE_URL = 'https://yomite-parsers.onrender.com';
 const STORAGE_KEY_LAST_CHECK = 'yomite_last_app_update_check';
-const STORAGE_KEY_IGNORED_VERSION = 'yomite_ignored_update_version';
+const STORAGE_KEY_SNOOZED_UPDATE = 'yomite_snoozed_update';
 const CHECK_CADENCE_MS = 12 * 60 * 60 * 1000; // 12 hours
+const SNOOZE_DURATION_MS = 24 * 60 * 60 * 1000;
 
 export interface AppReleaseInfo {
   version: string;
@@ -49,19 +49,14 @@ export function getCurrentAppVersion(): string {
  */
 export async function getLatestGitHubReleaseVersion(): Promise<string | null> {
   try {
-    const res = await fetch(GITHUB_API_URL, {
-      headers: {
-        Accept: 'application/vnd.github.v3+json',
-        'User-Agent': 'Yomite-App',
-      },
-    });
+    const res = await fetch(`${RELEASE_SERVICE_URL}/api/releases/latest`);
 
     if (!res.ok) return null;
 
     const data = await res.json();
-    if (!data?.tag_name) return null;
+    if (!data?.version) return null;
 
-    return String(data.tag_name).trim().replace(/^v/i, '');
+    return String(data.version).trim().replace(/^v/i, '');
   } catch (error) {
     console.warn('[appUpdateService] Failed to fetch latest release version:', error);
     return null;
@@ -89,16 +84,19 @@ export function isNewerVersion(remoteVersion: string, localVersion: string): boo
 }
 
 /**
- * Checks GitHub Releases for a newer version of Yomite.
- * @param force Skip the 12-hour cadence and ignored-version checks (manual "Check for Updates").
+ * Checks the Yomite release service for a newer version.
+ * @param force Skip the 12-hour cadence and temporary snooze (manual "Check for Updates").
  */
-export async function checkForAppUpdates(force = false): Promise<AppReleaseInfo | null> {
+export async function checkForAppUpdates(
+  force = false,
+  options?: { ignoreCadence?: boolean }
+): Promise<AppReleaseInfo | null> {
   // Direct APK sideloading is Android-only
   if (Platform.OS !== 'android') return null;
 
   const now = Date.now();
 
-  if (!force) {
+  if (!force && !options?.ignoreCadence) {
     try {
       const lastCheckStr = await AsyncStorage.getItem(STORAGE_KEY_LAST_CHECK);
       if (lastCheckStr) {
@@ -111,52 +109,48 @@ export async function checkForAppUpdates(force = false): Promise<AppReleaseInfo 
   }
 
   try {
-    const res = await fetch(GITHUB_API_URL, {
-      headers: {
-        Accept: 'application/vnd.github.v3+json',
-        'User-Agent': 'Yomite-App',
-      },
-    });
+    const res = await fetch(`${RELEASE_SERVICE_URL}/api/releases/latest`);
 
     if (!res.ok) return null;
 
     const data = await res.json();
-    if (!data || !data.tag_name) return null;
+    if (!data || !data.version) return null;
 
     // Persist last-check timestamp regardless of whether there's an update
     await AsyncStorage.setItem(STORAGE_KEY_LAST_CHECK, String(now)).catch(() => {});
 
-    const tagName = String(data.tag_name).trim();
-    const remoteVersion = tagName.replace(/^v/i, '');
+    const remoteVersion = String(data.version).trim().replace(/^v/i, '');
     const currentVersion = getCurrentAppVersion();
 
     if (!isNewerVersion(remoteVersion, currentVersion)) return null;
 
-    // Check if user previously dismissed this specific version
+    // "Later" is a temporary snooze. Closing the modal via X deliberately does
+    // not write anything, so the update is offered again on the next launch.
     if (!force) {
-      const ignored = await AsyncStorage.getItem(STORAGE_KEY_IGNORED_VERSION).catch(() => null);
-      if (ignored === remoteVersion) return null;
+      const snoozed = await AsyncStorage.getItem(STORAGE_KEY_SNOOZED_UPDATE).catch(() => null);
+      if (snoozed) {
+        try {
+          const parsed = JSON.parse(snoozed) as { version?: string; until?: number };
+          if (parsed.version === remoteVersion && Number(parsed.until) > now) return null;
+        } catch {
+          // Clear malformed state and continue with the update check.
+          await AsyncStorage.removeItem(STORAGE_KEY_SNOOZED_UPDATE).catch(() => {});
+        }
+      }
     }
 
-    // Prefer arm64-v8a APK (smallest, works on ~98% of modern Android), fall back to universal
-    const assets: any[] = Array.isArray(data.assets) ? data.assets : [];
-    const apkAsset =
-      assets.find((a) => typeof a.name === 'string' && a.name.includes('arm64-v8a.apk')) ||
-      assets.find((a) => typeof a.name === 'string' && a.name.includes('universal.apk')) ||
-      assets.find((a) => typeof a.name === 'string' && a.name.endsWith('.apk'));
-
-    if (!apkAsset?.browser_download_url) return null;
+    if (!data.downloadUrl) return null;
 
     return {
       version: remoteVersion,
-      tagName,
-      releaseTitle: data.name || `Yomite v${remoteVersion}`,
-      releaseNotes: data.body || 'No release notes provided for this version.',
-      downloadUrl: apkAsset.browser_download_url,
-      fileName: apkAsset.name || `Yomite-${remoteVersion}.apk`,
-      apkSize: apkAsset.size || 0,
-      publishedAt: data.published_at || new Date().toISOString(),
-      htmlUrl: data.html_url || `https://github.com/${GITHUB_REPO}/releases/tag/${tagName}`,
+      tagName: data.tagName || `v${remoteVersion}`,
+      releaseTitle: data.releaseTitle || `Yomite v${remoteVersion}`,
+      releaseNotes: data.releaseNotes || 'No release notes provided for this version.',
+      downloadUrl: data.downloadUrl,
+      fileName: data.fileName || `Yomite-${remoteVersion}.apk`,
+      apkSize: data.apkSize || 0,
+      publishedAt: data.publishedAt || new Date().toISOString(),
+      htmlUrl: data.htmlUrl || `${RELEASE_SERVICE_URL}/api/releases/latest`,
     };
   } catch (error) {
     console.warn('[appUpdateService] Failed to check for app updates:', error);
@@ -165,10 +159,13 @@ export async function checkForAppUpdates(force = false): Promise<AppReleaseInfo 
 }
 
 /**
- * Marks a version as "ignored" so the user isn't prompted again on startup.
+ * Temporarily defers a version selected with the modal's "Later" action.
  */
-export async function ignoreUpdateVersion(version: string): Promise<void> {
-  await AsyncStorage.setItem(STORAGE_KEY_IGNORED_VERSION, version).catch(() => {});
+export async function snoozeUpdateVersion(version: string): Promise<void> {
+  await AsyncStorage.setItem(
+    STORAGE_KEY_SNOOZED_UPDATE,
+    JSON.stringify({ version, until: Date.now() + SNOOZE_DURATION_MS })
+  ).catch(() => {});
 }
 
 /**

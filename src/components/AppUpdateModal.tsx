@@ -8,7 +8,6 @@ import { Image } from 'expo-image';
 import * as WebBrowser from 'expo-web-browser';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Animated,
   Easing,
   Modal,
@@ -27,7 +26,7 @@ import {
   DownloadProgress,
   downloadAndInstallUpdate,
   getCurrentAppVersion,
-  ignoreUpdateVersion,
+  snoozeUpdateVersion,
 } from '../services/appUpdateService';
 import { triggerHaptic } from '../utils/haptics';
 
@@ -35,16 +34,11 @@ interface AppUpdateModalProps {
   visible: boolean;
   release: AppReleaseInfo | null;
   onDismiss: () => void;
+  /** Development-only local progress simulation; never downloads or installs an APK. */
+  previewDownload?: boolean;
 }
 
 type UpdateStatus = 'idle' | 'downloading' | 'ready' | 'error';
-
-function formatBytes(bytes: number): string {
-  if (bytes <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
-}
 
 function formatDate(isoString: string): string {
   try {
@@ -121,7 +115,7 @@ function MarkdownChangelog({ content, textColor, textMutedColor }: { content: st
   );
 }
 
-export function AppUpdateModal({ visible, release, onDismiss }: AppUpdateModalProps) {
+export function AppUpdateModal({ visible, release, onDismiss, previewDownload = false }: AppUpdateModalProps) {
   const colors = useThemeColors();
   const colorScheme = useColorScheme();
   const insets = useSafeAreaInsets();
@@ -140,9 +134,20 @@ export function AppUpdateModal({ visible, release, onDismiss }: AppUpdateModalPr
     fraction: 0,
   });
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const previewTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const clearPreviewTimer = useCallback(() => {
+    if (previewTimerRef.current) {
+      clearInterval(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => clearPreviewTimer, [clearPreviewTimer]);
 
   useEffect(() => {
     if (visible && release) {
+      clearPreviewTimer();
       setStatus('idle');
       setProgress({ writtenBytes: 0, totalBytes: 0, fraction: 0 });
       setErrorMessage('');
@@ -179,9 +184,10 @@ export function AppUpdateModal({ visible, release, onDismiss }: AppUpdateModalPr
         }),
       ]).start();
     }
-  }, [visible, release, backdropAnim, cardOpacityAnim, cardScaleAnim, contentTranslateYAnim]);
+  }, [visible, release, backdropAnim, cardOpacityAnim, cardScaleAnim, contentTranslateYAnim, clearPreviewTimer]);
 
   const handleClose = useCallback(() => {
+    clearPreviewTimer();
     triggerHaptic();
     Animated.parallel([
       Animated.timing(backdropAnim, {
@@ -211,13 +217,31 @@ export function AppUpdateModal({ visible, release, onDismiss }: AppUpdateModalPr
     ]).start(() => {
       onDismiss();
     });
-  }, [onDismiss, backdropAnim, cardOpacityAnim, cardScaleAnim, contentTranslateYAnim]);
+  }, [onDismiss, backdropAnim, cardOpacityAnim, cardScaleAnim, contentTranslateYAnim, clearPreviewTimer]);
 
   const handleStartUpdate = useCallback(async () => {
     if (!release) return;
     triggerHaptic();
     setStatus('downloading');
     setErrorMessage('');
+
+    if (previewDownload) {
+      clearPreviewTimer();
+      let simulatedProgress = 0;
+      previewTimerRef.current = setInterval(() => {
+        simulatedProgress = Math.min(simulatedProgress + 4, 100);
+        setProgress({
+          writtenBytes: simulatedProgress,
+          totalBytes: 100,
+          fraction: simulatedProgress / 100,
+        });
+        if (simulatedProgress >= 100) {
+          clearPreviewTimer();
+          setStatus('ready');
+        }
+      }, 90);
+      return;
+    }
 
     try {
       await downloadAndInstallUpdate(release, (prog) => {
@@ -230,11 +254,11 @@ export function AppUpdateModal({ visible, release, onDismiss }: AppUpdateModalPr
       setStatus('error');
       setErrorMessage(err?.message || 'Failed to download or launch package installer.');
     }
-  }, [release]);
+  }, [clearPreviewTimer, previewDownload, release]);
 
   const handleIgnore = useCallback(async () => {
     if (release) {
-      await ignoreUpdateVersion(release.version);
+      await snoozeUpdateVersion(release.version);
     }
     handleClose();
   }, [release, handleClose]);
@@ -332,31 +356,6 @@ export function AppUpdateModal({ visible, release, onDismiss }: AppUpdateModalPr
             </View>
           </View>
 
-          {/* Download Progress Bar (When downloading) */}
-          {status === 'downloading' && (
-            <View style={styles.progressContainer}>
-              <View style={styles.progressTextRow}>
-                <Text style={[styles.progressStatusText, { color: colors.text }]}>
-                  Downloading update… {percentage}%
-                </Text>
-                <Text style={[styles.progressBytesText, { color: colors.textSecondary }]}>
-                  {formatBytes(progress.writtenBytes)} / {formatBytes(progress.totalBytes || release.apkSize)}
-                </Text>
-              </View>
-              <View style={[styles.progressBarTrack, { backgroundColor: colors.surfaceElevated }]}>
-                <View
-                  style={[
-                    styles.progressBarFill,
-                    {
-                      width: `${Math.max(percentage, 2)}%`,
-                      backgroundColor: colors.accent,
-                    },
-                  ]}
-                />
-              </View>
-            </View>
-          )}
-
           {/* Error Message */}
           {status === 'error' && (
             <View style={[styles.errorBox, { borderColor: 'rgba(239, 68, 68, 0.35)' }]}>
@@ -404,11 +403,11 @@ export function AppUpdateModal({ visible, release, onDismiss }: AppUpdateModalPr
                 },
               ]}
             >
-              {status === 'downloading' ? (
-                <View style={styles.loadingBtnContent}>
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                  <Text style={styles.confirmBtnText}>Downloading…</Text>
-                </View>
+            {status === 'downloading' ? (
+              <View style={[styles.downloadProgressButton, { backgroundColor: 'rgba(255,255,255,0.18)' }]}>
+                <View style={[styles.downloadProgressButtonFill, { width: `${Math.max(percentage, 2)}%` }]} />
+                <Text style={styles.confirmBtnText}>{percentage}%</Text>
+              </View>
               ) : (
                 <View style={styles.loadingBtnContent}>
                   <Text style={styles.confirmBtnText}>
@@ -460,9 +459,9 @@ export function AppUpdateModal({ visible, release, onDismiss }: AppUpdateModalPr
             ]}
           >
             {status === 'downloading' ? (
-              <View style={styles.loadingBtnContent}>
-                <ActivityIndicator size="small" color="#FFFFFF" />
-                <Text style={[styles.confirmBtnText, { color: isDark ? '#09090B' : '#FFFFFF' }]}>Downloadingâ€¦</Text>
+              <View style={[styles.downloadProgressButton, { backgroundColor: isDark ? 'rgba(9,9,11,0.24)' : 'rgba(255,255,255,0.22)' }]}>
+                <View style={[styles.downloadProgressButtonFill, { width: `${Math.max(percentage, 2)}%`, backgroundColor: isDark ? '#09090B' : '#FFFFFF' }]} />
+                <Text style={[styles.confirmBtnText, { color: isDark ? '#09090B' : '#FFFFFF' }]}>{percentage}%</Text>
               </View>
             ) : (
               <Text style={[styles.confirmBtnText, { color: isDark ? '#09090B' : '#FFFFFF' }]}>
@@ -657,34 +656,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginVertical: 2,
   },
-  progressContainer: {
-    marginBottom: 16,
-    width: '100%',
-  },
-  progressTextRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  progressStatusText: {
-    fontSize: 12.5,
-    fontWeight: '600',
-  },
-  progressBytesText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  progressBarTrack: {
-    height: 6,
-    borderRadius: 3,
-    overflow: 'hidden',
-    width: '100%',
-  },
-  progressBarFill: {
-    height: '100%',
-    borderRadius: 3,
-  },
   errorBox: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -750,5 +721,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  downloadProgressButton: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 28,
+  },
+  downloadProgressButtonFill: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: '#FFFFFF',
+    opacity: 0.28,
   },
 });

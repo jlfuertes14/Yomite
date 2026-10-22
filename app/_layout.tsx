@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, Platform, StyleSheet, Animated, Easing } from 'react-native';
+import { AppState, View, Text, Pressable, Platform, StyleSheet, Animated, Easing } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
@@ -16,11 +16,14 @@ import { CacheManager } from '../src/utils/cacheManager';
 import { useDocumentTitle } from '../src/utils/useDocumentTitle';
 import { webViewBridge } from '../src/sources/network/webViewBridge';
 import { DEFAULT_USER_AGENT } from '../src/sources/network/httpClient';
-import { getBackgroundScanConfig } from '../src/services/backgroundScanner';
-import { getNotificationsModule, sendAppUpdateNotification } from '../src/services/notificationService';
+import {
+  getNotificationsModule,
+  registerReleasePushSubscription,
+  requestNotificationPermissions,
+} from '../src/services/notificationService';
 import { IntroWelcomeModal } from '../src/components/IntroWelcomeModal';
 import { AppUpdateModal } from '../src/components/AppUpdateModal';
-import { checkForAppUpdates, AppReleaseInfo } from '../src/services/appUpdateService';
+import { checkForAppUpdates, AppReleaseInfo, getCurrentAppVersion } from '../src/services/appUpdateService';
 import { useColorScheme } from '../src/hooks/useColorScheme';
 import { useThemeColors } from '../src/hooks/useThemeColor';
 
@@ -147,30 +150,37 @@ export default function RootLayout() {
   });
 
   const [updateRelease, setUpdateRelease] = useState<AppReleaseInfo | null>(null);
+  const lastUpdateCheckAtRef = useRef(0);
 
-  // Tachiyomi/Mihon style in-app update check on startup (non-blocking 12h cadence)
+  // Check on every Android app open. The service still protects manual/background
+  // checks with its cadence, but an existing installation must be able to see a
+  // newly published release immediately after it is opened.
   useEffect(() => {
-    if (Platform.OS === 'android') {
-      const timer = setTimeout(() => {
-        checkForAppUpdates(false)
-          .then((release) => {
-            if (release) {
-              setUpdateRelease(release);
-              getBackgroundScanConfig().then((config) => {
-                if (config.enabled) {
-                  sendAppUpdateNotification({
-                    version: release.version,
-                    releaseTitle: release.releaseTitle,
-                    releaseNotes: release.releaseNotes,
-                  });
-                }
-              });
-            }
-          })
-          .catch(() => {});
-      }, 3500);
-      return () => clearTimeout(timer);
-    }
+    if (Platform.OS !== 'android') return;
+
+    const checkOnOpen = () => {
+      // Avoid duplicate requests from the initial timer and the first active
+      // AppState event while still checking again after a real resume.
+      if (Date.now() - lastUpdateCheckAtRef.current < 5000) return;
+      lastUpdateCheckAtRef.current = Date.now();
+      checkForAppUpdates(false, { ignoreCadence: true })
+        .then((release) => {
+          if (release) {
+            setUpdateRelease(release);
+          }
+        })
+        .catch(() => {});
+    };
+
+    const timer = setTimeout(checkOnOpen, 3500);
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') checkOnOpen();
+    });
+
+    return () => {
+      clearTimeout(timer);
+      subscription.remove();
+    };
   }, []);
 
   // Handle local notification tap response & deep-linking directly into chapter/manga
@@ -181,9 +191,16 @@ export default function RootLayout() {
       const Notifications = getNotificationsModule();
       if (!Notifications) return;
 
-      // 1. Cold start response (App opened from a closed state by tapping notification)
-      Notifications.getLastNotificationResponseAsync?.().then((response: any) => {
-        const data = response?.notification?.request?.content?.data;
+      const handleNotificationData = (data: any) => {
+        if (data?.type === 'app-update') {
+          checkForAppUpdates(true)
+            .then((release) => {
+              if (release) setUpdateRelease(release);
+            })
+            .catch(() => {});
+          return;
+        }
+
         if (data?.chapterId) {
           router.push(`/reader/${data.chapterId}`);
         } else if (data?.mangaId) {
@@ -191,18 +208,18 @@ export default function RootLayout() {
         } else if (data?.url) {
           router.push(data.url);
         }
+      };
+
+      // 1. Cold start response (App opened from a closed state by tapping notification)
+      Notifications.getLastNotificationResponseAsync?.().then((response: any) => {
+        const data = response?.notification?.request?.content?.data;
+        handleNotificationData(data);
       }).catch(() => {});
 
       // 2. Foreground / background resume listener (App active or minimized when tapped)
       const subscription = Notifications.addNotificationResponseReceivedListener?.((response: any) => {
         const data = response?.notification?.request?.content?.data;
-        if (data?.chapterId) {
-          router.push(`/reader/${data.chapterId}`);
-        } else if (data?.mangaId) {
-          router.push(`/manga/${data.mangaId}`);
-        } else if (data?.url) {
-          router.push(data.url);
-        }
+        handleNotificationData(data);
       });
 
       return () => {
@@ -243,9 +260,24 @@ export default function RootLayout() {
   }, [themeColors.background]);
 
   useEffect(() => {
-    CacheManager.cleanLegacyStorageCache();
-    requestStoragePermissionOnLaunch();
-    useUserStore.getState().initializeAuth();
+    const initializeAppPermissions = async () => {
+      CacheManager.cleanLegacyStorageCache();
+      await requestStoragePermissionOnLaunch();
+
+      // Request notification permission on the first native app launch. The
+      // service is idempotent, so Android will not show the prompt repeatedly;
+      // once granted, the device is also subscribed to server release alerts.
+      const notificationsGranted = await requestNotificationPermissions();
+      if (notificationsGranted) {
+        await registerReleasePushSubscription(getCurrentAppVersion());
+      }
+
+      useUserStore.getState().initializeAuth();
+    };
+
+    initializeAppPermissions().catch(() => {
+      useUserStore.getState().initializeAuth();
+    });
   }, []);
 
   useEffect(() => {

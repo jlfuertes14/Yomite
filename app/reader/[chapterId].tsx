@@ -642,7 +642,6 @@ export default function ReaderScreen() {
   const [resolvedMangaId, setResolvedMangaId] = useState<string | undefined>(mangaId);
   const [mangaOriginalLanguage, setMangaOriginalLanguage] = useState<string | undefined>();
   const [detectedDefaultMode, setDetectedDefaultMode] = useState<ReadingMode | null>(null);
-  const [isDetectingDefaultMode, setIsDetectingDefaultMode] = useState(false);
   const [pageHeaders, setPageHeaders] = useState<Record<string, string> | undefined>(undefined);
   const [isCloudflare, setIsCloudflare] = useState(false);
   const [isCfInAppModalOpen, setIsCfInAppModalOpen] = useState(false);
@@ -899,7 +898,6 @@ export default function ReaderScreen() {
       resumeTargetPageRef.current = 0;
       resumeRestoreAttemptsRef.current = 0;
       setDetectedDefaultMode(null);
-      setIsDetectingDefaultMode(false);
       setMangaOriginalLanguage(undefined);
       isProgrammaticScrollRef.current = false;
       webtoonJumpAttemptsRef.current = 0;
@@ -1105,12 +1103,10 @@ export default function ReaderScreen() {
   // changes a mode the user deliberately selected for this title.
   useEffect(() => {
     if (isLoading || pages.length === 0 || !readerContentKey || modeOverrides[readerContentKey]) {
-      setIsDetectingDefaultMode(false);
       return;
     }
 
     let cancelled = false;
-    setIsDetectingDefaultMode(true);
 
     classifyDefaultReadingMode({
       pages,
@@ -1120,9 +1116,6 @@ export default function ReaderScreen() {
     })
       .then((detectedMode) => {
         if (!cancelled) setDetectedDefaultMode(detectedMode);
-      })
-      .finally(() => {
-        if (!cancelled) setIsDetectingDefaultMode(false);
       });
 
     return () => {
@@ -2301,12 +2294,12 @@ export default function ReaderScreen() {
 
   // ─── Main Render ───────────────────────────────────────────────
 
-  if (isLoading || isDetectingDefaultMode) {
+  if (isLoading) {
     return (
       <View style={[styles.centerContainer, { backgroundColor: readerTheme.background }]}>
         <ActivityIndicator size="large" color={colors.accent} />
         <Text style={[styles.loadingText, { color: readerTheme.text }]}>
-          {isLoading ? 'Loading chapter pages...' : 'Analyzing reading layout...'}
+          Loading chapter pages...
         </Text>
       </View>
     );

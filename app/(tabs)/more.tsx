@@ -435,7 +435,7 @@ export default function MoreScreen() {
                   <FlatRowItem
                     icon="bug-outline"
                     title="Test Update Modal"
-                    subtitle="Preview the GitHub release update dialog"
+                    subtitle="Preview the update progress bar in Expo"
                     onPress={handleTestAppUpdateModal}
                   />
                 </>
@@ -477,6 +477,7 @@ export default function MoreScreen() {
         <AppUpdateModal
           visible={Boolean(appUpdateRelease)}
           release={appUpdateRelease}
+          previewDownload={__DEV__ && Constants.executionEnvironment === 'storeClient'}
           onDismiss={() => setAppUpdateRelease(null)}
         />
       </View>

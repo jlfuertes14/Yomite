@@ -34,7 +34,9 @@ import {
 } from '../../src/services/backgroundScanner';
 import {
   requestNotificationPermissions,
+  registerReleasePushSubscription,
   sendNewChapterNotification,
+  unregisterReleasePushSubscription,
 } from '../../src/services/notificationService';
 import { getUniversalMangaChapters, isExternalSource } from '../../src/sources/adapter';
 import { SourceManager } from '../../src/sources/SourceManager';
@@ -192,9 +194,12 @@ export default function SettingsScreen() {
         setNotificationsEnabled(cfg.enabled);
         setScanIntervalMinutes(cfg.intervalMinutes);
         setLastScanTimestamp(cfg.lastScanTimestamp);
+        if (cfg.enabled) {
+          registerReleasePushSubscription(currentAppVersion).catch(() => {});
+        }
       })
       .catch(() => { });
-  }, []);
+  }, [currentAppVersion]);
 
   // Custom Confirmation Dialog State
   const [confirmModalConfig, setConfirmModalConfig] = useState<{
@@ -255,6 +260,7 @@ export default function SettingsScreen() {
       const granted = await requestNotificationPermissions();
       if (granted) {
         setNotificationsEnabled(true);
+        await registerReleasePushSubscription(currentAppVersion);
         await registerLibraryScanTask(scanIntervalMinutes);
         setConfirmModalConfig({
           visible: true,
@@ -281,6 +287,7 @@ export default function SettingsScreen() {
       }
     } else {
       setNotificationsEnabled(false);
+      await unregisterReleasePushSubscription();
       await unregisterLibraryScanTask();
     }
   };
