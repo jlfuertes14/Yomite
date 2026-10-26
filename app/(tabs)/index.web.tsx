@@ -389,7 +389,7 @@ const WebHeader: React.FC<WebHeaderProps> = ({
                       </View>
 
                       {/* Dropdown Live Results List */}
-                      {isSearching ? (
+                      {isSearching && searchResults.length === 0 ? (
                         <View style={styles.webDropdownLoading}>
                           <ActivityIndicator size="small" color={colors.accent || '#8B5CF6'} />
                         </View>
@@ -740,6 +740,7 @@ export default function DiscoverScreen() {
     mangaList: Manga[];
   } | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+  const searchSeqRef = useRef(0);
   const [isChangingPage, setIsChangingPage] = useState(false);
   const [activeFeedTitle, setActiveFeedTitle] = useState('Recently Added');
   const [activeNavId, setActiveNavId] = useState('recently_added');
@@ -1063,30 +1064,52 @@ export default function DiscoverScreen() {
       setActiveSeeAllExtension(null);
       return;
     }
+
+    const currentSeq = ++searchSeqRef.current;
+
     try {
       setIsSearching(true);
       setCurrentPage(1);
       setActiveFeedTitle('Search Results');
       setActiveNavId('search_results');
       setActiveSeeAllExtension(null);
+      setGroupedExtensionResults([]);
+      setSearchResults([]);
 
-      const rawResults = await SourceManager.searchAll(query);
-      const grouped = rawResults
-        .map((item) => ({
-          source: item.source,
-          mangaList: dedupeMangaList((item.results || []).map((sm) => sourceMangaToAppManga(sm))),
-        }))
-        .filter((item) => item.mangaList.length > 0);
+      await SourceManager.searchAllProgressive(
+        query,
+        ({ source, results }) => {
+          if (currentSeq !== searchSeqRef.current) return;
+          if (!results || results.length === 0) return;
 
-      setGroupedExtensionResults(grouped);
-      const allFoundManga = grouped.flatMap((g) => g.mangaList);
-      setSearchResults(allFoundManga);
-      setTotalMangaCount(allFoundManga.length);
-      fetchStatsForList(allFoundManga);
+          const mangaList = dedupeMangaList(results.map((sm) => sourceMangaToAppManga(sm)));
+          if (mangaList.length === 0) return;
+
+          setGroupedExtensionResults((prev) => {
+            const exists = prev.some((g) => g.source.id === source.id);
+            if (exists) {
+              return prev.map((g) => (g.source.id === source.id ? { source, mangaList } : g));
+            }
+            return [...prev, { source, mangaList }];
+          });
+
+          setSearchResults((prev) => {
+            const existingIds = new Set(prev.map((m) => m.id));
+            const newItems = mangaList.filter((m) => !existingIds.has(m.id));
+            const combined = [...prev, ...newItems];
+            setTotalMangaCount(combined.length);
+            return combined;
+          });
+
+          fetchStatsForList(mangaList);
+        }
+      );
     } catch (err) {
       console.error('Search failed:', err);
     } finally {
-      setIsSearching(false);
+      if (currentSeq === searchSeqRef.current) {
+        setIsSearching(false);
+      }
     }
   }, [searchQuery]);
 
@@ -1505,7 +1528,7 @@ export default function DiscoverScreen() {
                         )}
                       </View>
 
-                      {isSearching ? (
+                      {isSearching && groupedExtensionResults.length === 0 ? (
                         <View style={{ gap: 20 }}>
                           {Array.from({ length: 3 }).map((_, i) => (
                             <View key={i} style={{ gap: 10 }}>
@@ -1588,6 +1611,12 @@ export default function DiscoverScreen() {
                             </ScrollView>
                           </View>
                         ))
+                      )}
+                      {isSearching && groupedExtensionResults.length > 0 && (
+                        <View style={{ paddingVertical: 24, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8 }}>
+                          <ActivityIndicator size="small" color={colors.accent} />
+                          <Text style={{ fontSize: 13, color: colors.textMuted }}>Searching more extensions…</Text>
+                        </View>
                       )}
                     </>
                   )}

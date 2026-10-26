@@ -124,6 +124,10 @@ class ApiLoggerService {
       console.warn(
         `\n⛔ [${sourceLabel}] RATE LIMITED (429) | ${entry.method} ${path} (${duration}) | Retry-After: ${retryAfter}s${quotaInfo}`
       );
+    } else if (entry.statusText?.includes('Cloudflare') || entry.error?.includes('Cloudflare')) {
+      console.warn(
+        `🛡️ [${sourceLabel}] Cloudflare Challenge (${entry.status ?? 403}) | ${entry.method} ${path} | Solvable on native WebView`
+      );
     } else if (isError) {
       console.error(
         `\n❌ [${sourceLabel} ERROR] ${entry.method} ${path} | Status: ${entry.status ?? 'NET_ERR'} | ${entry.error || 'Failed'}`

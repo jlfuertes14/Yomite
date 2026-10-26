@@ -133,6 +133,7 @@ export class MangaFireParser extends BaseParser {
         const apiUrl = `${this.metadata.baseUrl}/api/titles?keyword=${q}&page=${page}`;
         const res = await sourceHttpClient.get<any>(apiUrl, {
           headers: this.getApiHeaders(),
+          silent: true,
         });
         const items = res.data?.data?.items || res.data?.data || res.data?.items;
         if (Array.isArray(items) && items.length > 0) {

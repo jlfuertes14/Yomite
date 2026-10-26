@@ -14,6 +14,7 @@ import {
   SourceTag,
 } from '../types';
 import { sourceHttpClient, DEFAULT_USER_AGENT } from '../network/httpClient';
+import { loadHtml } from '../network/htmlParser';
 
 export class HitomiLaParser extends BaseParser {
   public readonly metadata: MangaSourceMetadata;
@@ -326,52 +327,9 @@ export class HitomiLaParser extends BaseParser {
         };
       }
     } catch {
-      // Fall through to HTML fallback
+      // In Hitomi, galleries/:id.js is the canonical metadata endpoint; if unavailable, return null
     }
-
-    // HTML fallback for Hitomi gallery details
-    try {
-      const $ = await this.fetchHtml(`https://hitomi.la/doujinshi/${id}.html`);
-      const title = this.cleanText($('h1').first().text() || `Gallery #${id}`);
-      const authors: string[] = [];
-      $('h2 a[href*="/artist/"], a[href*="/group/"], td:contains("Artist") + td a').each((_, a) => {
-        const name = this.cleanText(a.text());
-        if (name && !authors.includes(name)) authors.push(name);
-      });
-
-      const tags: string[] = [];
-      $('a[href*="/tag/"]').each((_, a) => {
-        const name = this.cleanText(a.text());
-        if (name && !tags.includes(name)) tags.push(name);
-      });
-
-      const series: string[] = [];
-      $('a[href*="/series/"]').each((_, a) => {
-        const name = this.cleanText(a.text());
-        if (name && !series.includes(name)) series.push(name);
-      });
-
-      const descParts: string[] = [];
-      if (series.length) descParts.push(`Series: ${series.join(', ')}`);
-      if (authors.length) descParts.push(`Artist: ${authors.join(', ')}`);
-      if (tags.length) descParts.push(`Tags: ${tags.slice(0, 5).join(', ')}`);
-
-      return {
-        id: `${this.metadata.id}:${id}`,
-        sourceId: this.metadata.id,
-        title,
-        url: `/doujinshi/${id}`,
-        publicUrl: `https://hitomi.la/doujinshi/${id}.html`,
-        coverUrl: null,
-        coverHeaders: { Referer: 'https://hitomi.la/' },
-        tags: tags.slice(0, 15),
-        authors: authors.length ? authors : undefined,
-        description: descParts.length ? descParts.join(' · ') : undefined,
-        state: 'completed' as const,
-      };
-    } catch {
-      return null;
-    }
+    return null;
   }
 
   private toDataView(bufferOrView: any): DataView {
@@ -430,8 +388,14 @@ export class HitomiLaParser extends BaseParser {
 
     if (ids.length === 0) return [];
 
-    // Fetch gallery info in parallel
-    const results = await Promise.allSettled(ids.map((id) => this.fetchGallery(id)));
+    // Fetch gallery info in batches of 4 to avoid browser socket exhaustion
+    const results: PromiseSettledResult<SourceManga | null>[] = [];
+    const BATCH_SIZE = 4;
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+      const chunk = ids.slice(i, i + BATCH_SIZE);
+      const chunkResults = await Promise.allSettled(chunk.map((id) => this.fetchGallery(id)));
+      results.push(...chunkResults);
+    }
     const mangas: SourceManga[] = [];
 
     for (const res of results) {
@@ -487,9 +451,10 @@ export class HitomiLaParser extends BaseParser {
     await this.refreshGg();
 
     const url = `${this.ltnBaseUrl}/galleries/${id}.js`;
-    const resText = await sourceHttpClient.fetchJson<string>(url, {
+    const resText = await sourceHttpClient.fetchText(url, {
       sourceId: this.metadata.name,
       referer: 'https://hitomi.la/',
+      silent: true,
     });
 
     const jsonStr = resText.replace(/^var\s+galleryinfo\s*=\s*/, '').replace(/;\s*$/, '');

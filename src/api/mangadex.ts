@@ -298,6 +298,11 @@ export function getMangaDexCoversBase(): string {
   return 'https://uploads.mangadex.org/covers';
 }
 
+export function cleanMangaDexId(id: string): string {
+  if (!id) return '';
+  return id.replace(/^mangadex:/, '');
+}
+
 export function getCoverUrl(
   mangaId: string,
   coverFileName: string | null,
@@ -309,7 +314,8 @@ export function getCoverUrl(
   }
   const suffix = size === 'original' ? '' : `.${size}.jpg`;
   const base = getMangaDexCoversBase();
-  return `${base}/${mangaId}/${coverFileName}${suffix}`;
+  const cleanId = cleanMangaDexId(mangaId);
+  return `${base}/${cleanId}/${coverFileName}${suffix}`;
 }
 
 export function extractCoverFileName(manga: Manga): string | null {
@@ -587,11 +593,12 @@ export async function getRandomManga(): Promise<Manga> {
 // ─── Manga Details ───────────────────────────────────────────────
 
 export async function getMangaDetails(mangaId: string): Promise<Manga> {
-  const cacheKey = `manga_detail_${mangaId}`;
+  const cleanId = cleanMangaDexId(mangaId);
+  const cacheKey = `manga_detail_${cleanId}`;
   const cached = await CacheManager.get<Manga>(cacheKey);
   if (cached) return cached;
 
-  const res = await api.get<MangaDexResponse<Manga>>(`/manga/${mangaId}`, {
+  const res = await api.get<MangaDexResponse<Manga>>(`/manga/${cleanId}`, {
     params: { includes: ['cover_art', 'author', 'artist'] },
   });
 
@@ -601,11 +608,12 @@ export async function getMangaDetails(mangaId: string): Promise<Manga> {
 }
 
 export async function getChapterDetails(chapterId: string): Promise<Chapter> {
-  const cacheKey = `chapter_detail_${chapterId}`;
+  const cleanId = cleanMangaDexId(chapterId);
+  const cacheKey = `chapter_detail_${cleanId}`;
   const cached = await CacheManager.get<Chapter>(cacheKey);
   if (cached) return cached;
 
-  const res = await api.get<MangaDexResponse<Chapter>>(`/chapter/${chapterId}`, {
+  const res = await api.get<MangaDexResponse<Chapter>>(`/chapter/${cleanId}`, {
     params: { includes: ['manga', 'scanlation_group'] },
   });
 
@@ -632,13 +640,14 @@ export interface MangaStatistics {
 export async function getMangaStatistics(
   mangaId: string
 ): Promise<MangaStatistics | null> {
-  const cacheKey = `stats_${mangaId}`;
+  const cleanId = cleanMangaDexId(mangaId);
+  const cacheKey = `stats_${cleanId}`;
   const cached = await CacheManager.get<MangaStatistics>(cacheKey);
   if (cached) return cached;
 
   try {
-    const res = await api.get(`/statistics/manga/${mangaId}`);
-    const stats = res.data.statistics?.[mangaId] ?? null;
+    const res = await api.get(`/statistics/manga/${cleanId}`);
+    const stats = res.data.statistics?.[cleanId] ?? null;
     if (stats) {
       await CacheManager.set(cacheKey, stats, 15 * 60 * 1000); // 15 min TTL
     }
@@ -661,7 +670,7 @@ export async function getBatchMangaStatistics(
     if (cached) {
       resultStats[id] = cached;
     } else {
-      missingIds.push(id);
+      missingIds.push(cleanMangaDexId(id));
     }
   }
 
@@ -697,13 +706,14 @@ export async function getMangaChapters(
     offset = Math.max(0, 10000 - limit);
   }
 
-  const cacheKey = `manga_chapters_${mangaId}_${language}_${limit}_${offset}_${order}`;
+  const cleanId = cleanMangaDexId(mangaId);
+  const cacheKey = `manga_chapters_${cleanId}_${language}_${limit}_${offset}_${order}`;
   const cached = await CacheManager.get<{ data: Chapter[]; total: number }>(cacheKey);
   if (cached) return cached;
 
   const languages = language === 'en' ? ['en', 'en-us', 'en-gb'] : [language];
 
-  const res = await api.get<MangaDexResponse<Chapter[]>>(`/manga/${mangaId}/feed`, {
+  const res = await api.get<MangaDexResponse<Chapter[]>>(`/manga/${cleanId}/feed`, {
     params: {
       'translatedLanguage[]': languages,
       limit: Math.min(limit, 500),
@@ -727,12 +737,13 @@ export async function getChapterPages(
   chapterId: string,
   dataSaver = false
 ): Promise<{ pages: string[]; hash: string; baseUrl: string }> {
-  const cacheKey = `chapter_pages_${chapterId}_${dataSaver ? 'saver' : 'full'}`;
+  const cleanId = cleanMangaDexId(chapterId);
+  const cacheKey = `chapter_pages_${cleanId}_${dataSaver ? 'saver' : 'full'}`;
   const cached = await CacheManager.get<{ pages: string[]; hash: string; baseUrl: string }>(cacheKey);
   if (cached) return cached;
 
   const res = await api.get<{ baseUrl: string; chapter: ChapterPages['chapter'] }>(
-    `/at-home/server/${chapterId}`
+    `/at-home/server/${cleanId}`
   );
   const { baseUrl, chapter } = res.data;
   const quality = dataSaver ? 'data-saver' : 'data';

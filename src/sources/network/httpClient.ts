@@ -28,6 +28,43 @@ export interface RequestOptions extends AxiosRequestConfig {
   silent?: boolean;
 }
 
+/**
+ * Resolves proxy URL for Web environments to bypass CORS restrictions on third-party manga sources.
+ */
+export function resolveWebProxyUrl(
+  url: string,
+  referer?: string
+): { url: string; headers?: Record<string, string> } {
+  if (Platform.OS !== 'web') {
+    return { url };
+  }
+  if (!url || typeof url !== 'string') {
+    return { url };
+  }
+  if (url.startsWith('data:') || url.startsWith('blob:') || !url.startsWith('http')) {
+    return { url };
+  }
+  if (url.includes('api.mangadex.org')) {
+    return { url };
+  }
+
+  const proxyBase = process.env.EXPO_PUBLIC_CORS_PROXY_URL || '/api/proxy';
+  let proxiedUrl = proxyBase.includes('?')
+    ? `${proxyBase}&url=${encodeURIComponent(url)}`
+    : `${proxyBase}?url=${encodeURIComponent(url)}`;
+
+  if (referer) {
+    proxiedUrl += `&referer=${encodeURIComponent(referer)}`;
+  }
+
+  const headers: Record<string, string> = {};
+  if (referer) {
+    headers['x-proxy-referer'] = referer;
+  }
+
+  return { url: proxiedUrl, headers };
+}
+
 export class SourceHttpClient {
   private static instance: SourceHttpClient;
 
@@ -117,7 +154,9 @@ export class SourceHttpClient {
       }
     }
 
+    const { url: requestUrl, headers: proxyHeaders } = resolveWebProxyUrl(url, options.referer);
     const headers = this.prepareHeaders(url, {
+      ...proxyHeaders,
       'User-Agent': DEFAULT_USER_AGENT,
       Accept:
         'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
@@ -129,7 +168,7 @@ export class SourceHttpClient {
     });
 
     try {
-      const response: AxiosResponse<string> = await axios.get(url, {
+      const response: AxiosResponse<string> = await axios.get(requestUrl, {
         timeout: 15000,
         ...options,
         maxContentLength: MAX_HTML_RESPONSE_BYTES,
@@ -137,6 +176,17 @@ export class SourceHttpClient {
         headers,
         responseType: 'text',
       });
+
+      const upstreamStatus = Number(response.headers?.['x-upstream-status']) || response.status;
+      if (upstreamStatus >= 400) {
+        const fakeErr: any = new Error(`Request failed with status code ${upstreamStatus}`);
+        fakeErr.response = {
+          status: upstreamStatus,
+          data: response.data,
+          headers: response.headers,
+        };
+        throw fakeErr;
+      }
 
       const durationMs = Date.now() - startTime;
       ApiLogger.logRequest({
@@ -242,7 +292,9 @@ export class SourceHttpClient {
       }
     }
 
+    const { url: requestUrl, headers: proxyHeaders } = resolveWebProxyUrl(url, options.referer);
     const headers = this.prepareHeaders(url, {
+      ...proxyHeaders,
       'User-Agent': DEFAULT_USER_AGENT,
       Accept: 'application/json, text/plain, */*',
       ...(options.referer ? { Referer: options.referer } : {}),
@@ -250,11 +302,22 @@ export class SourceHttpClient {
     });
 
     try {
-      const response = await axios.get<T>(url, {
+      const response = await axios.get<T>(requestUrl, {
         timeout: 15000,
         ...options,
         headers,
       });
+
+      const upstreamStatus = Number(response.headers?.['x-upstream-status']) || response.status;
+      if (upstreamStatus >= 400) {
+        const fakeErr: any = new Error(`Request failed with status code ${upstreamStatus}`);
+        fakeErr.response = {
+          status: upstreamStatus,
+          data: response.data,
+          headers: response.headers,
+        };
+        throw fakeErr;
+      }
 
       if (!options.silent) {
         ApiLogger.logRequest({
@@ -311,7 +374,9 @@ export class SourceHttpClient {
     const startTime = Date.now();
     const sourceId = options.sourceId || 'Source';
 
+    const { url: requestUrl, headers: proxyHeaders } = resolveWebProxyUrl(url, options.referer);
     const headers = this.prepareHeaders(url, {
+      ...proxyHeaders,
       'User-Agent': DEFAULT_USER_AGENT,
       Accept: 'text/plain, application/javascript, */*',
       ...(options.referer ? { Referer: options.referer } : {}),
@@ -319,12 +384,23 @@ export class SourceHttpClient {
     });
 
     try {
-      const response = await axios.get<string>(url, {
+      const response = await axios.get<string>(requestUrl, {
         timeout: 15000,
         ...options,
         headers,
         responseType: 'text',
       });
+
+      const upstreamStatus = Number(response.headers?.['x-upstream-status']) || response.status;
+      if (upstreamStatus >= 400) {
+        const fakeErr: any = new Error(`Request failed with status code ${upstreamStatus}`);
+        fakeErr.response = {
+          status: upstreamStatus,
+          data: response.data,
+          headers: response.headers,
+        };
+        throw fakeErr;
+      }
 
       if (!options.silent) {
         ApiLogger.logRequest({
@@ -381,14 +457,16 @@ export class SourceHttpClient {
     const startTime = Date.now();
     const sourceId = options.sourceId || 'Source';
 
+    const { url: requestUrl, headers: proxyHeaders } = resolveWebProxyUrl(url, options.referer);
     const headers = this.prepareHeaders(url, {
+      ...proxyHeaders,
       'User-Agent': DEFAULT_USER_AGENT,
       ...(options.referer ? { Referer: options.referer } : {}),
       ...(options.headers as Record<string, string>),
     });
 
     try {
-      const response = await axios.get(url, {
+      const response = await axios.get(requestUrl, {
         timeout: 15000,
         ...options,
         headers,
@@ -429,7 +507,9 @@ export class SourceHttpClient {
     data: any,
     options: RequestOptions = {}
   ): Promise<string> {
+    const { url: requestUrl, headers: proxyHeaders } = resolveWebProxyUrl(url, options.referer);
     const headers = this.prepareHeaders(url, {
+      ...proxyHeaders,
       'User-Agent': DEFAULT_USER_AGENT,
       'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
       'X-Requested-With': 'XMLHttpRequest',
@@ -440,7 +520,7 @@ export class SourceHttpClient {
     const startTime = Date.now();
     const sourceId = options.sourceId || 'Source';
     try {
-      const response = await axios.post(url, data, {
+      const response = await axios.post(requestUrl, data, {
         timeout: 15000,
         ...options,
         headers,
@@ -480,7 +560,9 @@ export class SourceHttpClient {
     const startTime = Date.now();
     const sourceId = options.sourceId || 'Source';
 
+    const { url: requestUrl, headers: proxyHeaders } = resolveWebProxyUrl(url, options.referer);
     const headers = this.prepareHeaders(url, {
+      ...proxyHeaders,
       'User-Agent': DEFAULT_USER_AGENT,
       'Content-Type': 'application/json',
       Accept: 'application/json, text/plain, */*',
@@ -489,11 +571,22 @@ export class SourceHttpClient {
     });
 
     try {
-      const response = await axios.post<T>(url, data, {
+      const response = await axios.post<T>(requestUrl, data, {
         timeout: 15000,
         ...options,
         headers,
       });
+
+      const upstreamStatus = Number(response.headers?.['x-upstream-status']) || response.status;
+      if (upstreamStatus >= 400) {
+        const fakeErr: any = new Error(`Request failed with status code ${upstreamStatus}`);
+        fakeErr.response = {
+          status: upstreamStatus,
+          data: response.data,
+          headers: response.headers,
+        };
+        throw fakeErr;
+      }
 
       if (!options.silent) {
         ApiLogger.logRequest({
@@ -528,16 +621,25 @@ export class SourceHttpClient {
     url: string,
     options: RequestOptions = {}
   ): Promise<AxiosResponse<T>> {
+    const { url: requestUrl, headers: proxyHeaders } = resolveWebProxyUrl(url, options.referer);
     const headers = this.prepareHeaders(url, {
+      ...proxyHeaders,
       'User-Agent': DEFAULT_USER_AGENT,
       ...(options.referer ? { Referer: options.referer } : {}),
       ...(options.headers as Record<string, string>),
     });
-    return axios.get<T>(url, {
+    const response = await axios.get<T>(requestUrl, {
       timeout: 15000,
       ...options,
       headers,
     });
+    const upstreamStatus = Number(response.headers?.['x-upstream-status']) || response.status;
+    if (upstreamStatus >= 400) {
+      const err: any = new Error(`Request failed with status code ${upstreamStatus}`);
+      err.response = { status: upstreamStatus, data: response.data, headers: response.headers };
+      throw err;
+    }
+    return response;
   }
 
   /**
@@ -548,17 +650,26 @@ export class SourceHttpClient {
     data: any = {},
     options: RequestOptions = {}
   ): Promise<AxiosResponse<T>> {
+    const { url: requestUrl, headers: proxyHeaders } = resolveWebProxyUrl(url, options.referer);
     const headers = this.prepareHeaders(url, {
+      ...proxyHeaders,
       'User-Agent': DEFAULT_USER_AGENT,
       'Content-Type': 'application/json',
       ...(options.referer ? { Referer: options.referer } : {}),
       ...(options.headers as Record<string, string>),
     });
-    return axios.post<T>(url, data, {
+    const response = await axios.post<T>(requestUrl, data, {
       timeout: 15000,
       ...options,
       headers,
     });
+    const upstreamStatus = Number(response.headers?.['x-upstream-status']) || response.status;
+    if (upstreamStatus >= 400) {
+      const err: any = new Error(`Request failed with status code ${upstreamStatus}`);
+      err.response = { status: upstreamStatus, data: response.data, headers: response.headers };
+      throw err;
+    }
+    return response;
   }
 }
 

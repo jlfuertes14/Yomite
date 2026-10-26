@@ -163,11 +163,12 @@ export abstract class BaseParser implements MangaParser {
    * Scrapes HTML from a given URL using the source's headers.
    * Automatically normalizes relative paths or slugs into absolute URLs.
    */
-  protected async fetchHtml(url: string): Promise<ParsedHtml> {
+  protected async fetchHtml(url: string, options: any = {}): Promise<ParsedHtml> {
     const fullUrl = this.toAbsoluteUrl(url);
     return sourceHttpClient.fetchHtml(fullUrl, {
       referer: this.metadata.baseUrl,
       sourceId: this.metadata.name,
+      ...options,
     });
   }
 

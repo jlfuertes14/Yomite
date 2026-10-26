@@ -134,6 +134,20 @@ function getDefaultHeadersForUri(uri: string): Record<string, string> | undefine
 }
 
 
+export function getWebProxiedImageUri(uri: string, referer?: string): string {
+  if (Platform.OS !== 'web' || !uri || typeof uri !== 'string') return uri;
+  if (uri.startsWith('data:') || uri.startsWith('blob:') || uri.startsWith('/api/')) return uri;
+  if (!uri.startsWith('http')) return uri;
+  if (uri.includes('mangadex.org')) return uri;
+
+  const proxyBase = process.env.EXPO_PUBLIC_CORS_PROXY_URL || '/api/proxy';
+  let proxied = `${proxyBase}?url=${encodeURIComponent(uri)}`;
+  if (referer) {
+    proxied += `&referer=${encodeURIComponent(referer)}`;
+  }
+  return proxied;
+}
+
 export interface BridgedImageProps extends Omit<ImageProps, 'source'> {
   uri?: string | null;
   headers?: Record<string, string>;
@@ -170,10 +184,16 @@ function BridgedImageComponent({
 
   const defaultHeaders = resolvedUri ? getDefaultHeadersForUri(resolvedUri) : undefined;
   const resolvedHeaders = headers || sourceObj?.headers || defaultHeaders;
+  const webReferer = resolvedHeaders?.Referer || defaultHeaders?.Referer;
 
   const [displayUri, setDisplayUri] = useState<string | null>(() => {
     if (!resolvedUri) return null;
-    return imageBridgeCache.get(resolvedUri) || resolvedUri;
+    const cached = imageBridgeCache.get(resolvedUri);
+    if (cached) return cached;
+    if (Platform.OS === 'web' && webReferer) {
+      return getWebProxiedImageUri(resolvedUri, webReferer);
+    }
+    return resolvedUri;
   });
 
   const isBridgingRef = useRef(false);
@@ -188,6 +208,13 @@ function BridgedImageComponent({
     const cached = imageBridgeCache.get(resolvedUri);
     if (cached) {
       setDisplayUri(cached);
+      return;
+    }
+
+    // 2. Proactively route through web proxy if Web requires a Referer
+    if (Platform.OS === 'web' && webReferer) {
+      const proxied = getWebProxiedImageUri(resolvedUri, webReferer);
+      setDisplayUri(proxied);
       return;
     }
 
@@ -219,7 +246,7 @@ function BridgedImageComponent({
     }
 
     // 3. If JXL / Kagane kstatic image, proactively fetch buffer as data uri
-    if (resolvedUri.includes('.jxl') || resolvedUri.includes('kstatic.to')) {
+    if (Platform.OS !== 'web' && (resolvedUri.includes('.jxl') || resolvedUri.includes('kstatic.to'))) {
       let isMounted = true;
       fetchBufferAsDataUri(resolvedUri, resolvedHeaders)
         .then((dataUri) => {
@@ -260,6 +287,7 @@ function BridgedImageComponent({
     // 2. Resilient direct HTTP buffer fetch for any image that failed in native decoder
     if (
       resolvedUri &&
+      Platform.OS !== 'web' &&
       !displayUri?.startsWith('data:')
     ) {
       try {
@@ -270,6 +298,19 @@ function BridgedImageComponent({
           return;
         }
       } catch {}
+    }
+
+    // 3. Resilient web fallback: route through web proxy to bypass CDN hotlinking / CORS
+    if (
+      resolvedUri &&
+      Platform.OS === 'web' &&
+      !displayUri?.includes('/api/proxy')
+    ) {
+      const proxied = getWebProxiedImageUri(resolvedUri, resolvedHeaders?.Referer || defaultHeaders?.Referer);
+      if (proxied && proxied !== displayUri) {
+        setDisplayUri(proxied);
+        return;
+      }
     }
 
     onError?.(event);

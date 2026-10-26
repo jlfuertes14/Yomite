@@ -190,7 +190,7 @@ export class ManganatoParser extends BaseParser {
         if (!s) continue;
         try {
           const directUrl = `${this.metadata.baseUrl}/manga/${s}`;
-          const $ = await this.fetchHtml(directUrl);
+          const $ = await this.fetchHtml(directUrl, { silent: true });
           const title = this.cleanText(
             $('.story-info-right h1, .manga-info-text h1, .manga-info-top h1, h1').first().text()
           );

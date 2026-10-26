@@ -94,14 +94,51 @@ async function getPageDimensions(
 ): Promise<ImageDimensions | null> {
   if (!url) return null;
 
-  try {
-    if (headers && Object.keys(headers).length > 0) {
-      return await NativeImage.getSizeWithHeaders(url, headers);
-    }
-    return await NativeImage.getSize(url);
-  } catch {
-    return null;
+  // On Web, use standard browser Image to avoid react-native-web's unhandled 16ms setInterval loop
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return new Promise((resolve) => {
+      try {
+        const img = new window.Image();
+        img.onload = () => {
+          if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+            resolve({ width: img.naturalWidth, height: img.naturalHeight });
+          } else {
+            resolve(null);
+          }
+        };
+        img.onerror = () => resolve(null);
+        img.src = url;
+      } catch {
+        resolve(null);
+      }
+    });
   }
+
+  // On Native, provide explicit success & failure callbacks
+  return new Promise((resolve) => {
+    try {
+      if (
+        headers &&
+        Object.keys(headers).length > 0 &&
+        typeof (NativeImage as any).getSizeWithHeaders === 'function'
+      ) {
+        (NativeImage as any).getSizeWithHeaders(
+          url,
+          headers,
+          (width: number, height: number) => resolve({ width, height }),
+          () => resolve(null)
+        );
+        return;
+      }
+      NativeImage.getSize(
+        url,
+        (width: number, height: number) => resolve({ width, height }),
+        () => resolve(null)
+      );
+    } catch {
+      resolve(null);
+    }
+  });
 }
 
 async function classifyDefaultReadingMode({

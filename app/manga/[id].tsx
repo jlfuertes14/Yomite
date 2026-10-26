@@ -612,9 +612,10 @@ export default function MangaDetailScreen() {
       setIsLoading(true);
       setError(null);
       const isExt = isExternalSource(id!);
+      const cleanId = (id || '').replace(/^mangadex:/, '');
       const [data, statistics] = await Promise.all([
-        isExt ? getUniversalMangaDetails(id!, initialCoverUrl, initialTitle) : getMangaDetails(id!),
-        !isExt ? getMangaStatistics(id!) : Promise.resolve(null),
+        isExt ? getUniversalMangaDetails(id!, initialCoverUrl, initialTitle) : getMangaDetails(cleanId),
+        !isExt ? getMangaStatistics(cleanId) : Promise.resolve(null),
       ]);
       setManga(data);
       setStats(statistics);
@@ -697,7 +698,8 @@ export default function MangaDetailScreen() {
           );
         }
       } else {
-        const result = await getMangaChapters(id!, lang, 100, 0, order);
+        const cleanId = (id || '').replace(/^mangadex:/, '');
+        const result = await getMangaChapters(cleanId, lang, 100, 0, order);
         chs = result.data || [];
       }
 

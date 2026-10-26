@@ -12,6 +12,14 @@
       "destination": "/api/cover?path=:path*"
     },
     {
+      "source": "/api/proxy",
+      "destination": "/api/proxy"
+    },
+    {
+      "source": "/api/anime-news",
+      "destination": "/api/anime-news"
+    },
+    {
       "source": "/auth/callback",
       "destination": "/index.html"
     },
