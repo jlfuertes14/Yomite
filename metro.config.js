@@ -1,4 +1,4 @@
-const { getDefaultConfig } = require('expo/metro-config');
+  const { getDefaultConfig } = require('expo/metro-config');
 const http = require('http');
 const https = require('https');
 

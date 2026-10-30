@@ -8,6 +8,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import * as SystemUI from 'expo-system-ui';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ThemeProvider, DarkTheme } from 'expo-router/react-navigation';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { Colors } from '../constants/Colors';
 import { requestStoragePermissionOnLaunch } from '../src/services/storagePermission';
@@ -48,6 +49,14 @@ function AuthSuccessToast({
   message: string;
   onDismiss: () => void;
 }) {
+  let insetsTop = 0;
+  try {
+    const insets = useSafeAreaInsets();
+    insetsTop = insets?.top || 0;
+  } catch (_) {
+    insetsTop = 0;
+  }
+
   const translateY = useRef(new Animated.Value(-16)).current;
   const opacity = useRef(new Animated.Value(0)).current;
   const isClosingRef = useRef(false);
@@ -95,16 +104,23 @@ function AuthSuccessToast({
 
     const timer = setTimeout(() => {
       handleDismiss();
-    }, 3800);
+    }, 2500);
 
     return () => clearTimeout(timer);
   }, [message]);
 
   // Strip any emoji characters to guarantee clean typography
   const cleanMessage = message.replace(/[^\p{L}\p{N}\p{P}\p{Z}\n]/gu, '').trim();
+  const isSignOut = cleanMessage.toLowerCase().includes('sign out') || cleanMessage.toLowerCase().includes('signed out');
 
   return (
-    <View style={styles.toastOverlay} pointerEvents="box-none">
+    <View
+      style={[
+        styles.toastOverlay,
+        { top: Platform.OS === 'web' ? 16 : Math.max(insetsTop + 8, 48) },
+      ]}
+      pointerEvents="box-none"
+    >
       <Animated.View
         style={[
           styles.toastContainer,
@@ -114,21 +130,12 @@ function AuthSuccessToast({
           },
         ]}
       >
-        <Ionicons name="checkmark-circle" size={17} color="#10B981" />
+        <Ionicons
+          name={isSignOut ? 'log-out-outline' : 'checkmark-circle'}
+          size={17}
+          color={isSignOut ? '#A1A1AA' : '#10B981'}
+        />
         <Text style={styles.toastText}>{cleanMessage}</Text>
-        <Pressable
-          onPress={handleDismiss}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel="Dismiss message"
-          style={({ pressed, hovered }: any) => [
-            styles.toastCloseBtn,
-            (pressed || hovered) && { opacity: 0.6 },
-            Platform.OS === 'web' && { cursor: 'pointer' as any },
-          ]}
-        >
-          <Ionicons name="close" size={15} color="#A1A1AA" />
-        </Pressable>
       </Animated.View>
     </View>
   );
@@ -301,13 +308,8 @@ export default function RootLayout() {
               : styles.nativeGlobalContainer
           }
         >
-          {authSuccessMessage && (
-            <AuthSuccessToast
-              message={authSuccessMessage}
-              onDismiss={clearAuthSuccessMessage}
-            />
-          )}
           <Stack
+            id="root"
             screenOptions={{
               headerShown: false,
               contentStyle: { backgroundColor: '#09090B' },
@@ -361,6 +363,12 @@ export default function RootLayout() {
               options={{ title: 'Not Found', headerShown: true }}
             />
           </Stack>
+          {authSuccessMessage && (
+            <AuthSuccessToast
+              message={authSuccessMessage}
+              onDismiss={clearAuthSuccessMessage}
+            />
+          )}
 
           {/* First-Install Introductory Welcome Screen (1-Tap) */}
           {Platform.OS !== 'web' && <IntroWelcomeModal />}

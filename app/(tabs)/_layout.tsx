@@ -6,7 +6,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Tabs } from 'expo-router';
+import { Tabs, router, useNavigation } from 'expo-router';
 import React, { useEffect, useMemo } from 'react';
 import {
   Easing,
@@ -33,7 +33,11 @@ import { useUIStore } from '../../src/store/uiStore';
 import { triggerHaptic } from '../../src/utils/haptics';
 
 type TabIcon = React.ComponentProps<typeof Ionicons>['name'];
-type NavigationBarProps = Parameters<NonNullable<React.ComponentProps<typeof Tabs>['tabBar']>>[0];
+type NavigationBarProps = Parameters<NonNullable<React.ComponentProps<typeof Tabs>['tabBar']>>[0] & {
+  navigation?: any;
+  emitter?: any;
+  navigateToTab?: (routeKey: string) => void;
+};
 
 interface TabConfig {
   name: string;
@@ -262,7 +266,9 @@ function AnimatedTabItem({
 /**
  * Floating Bottom Tab Bar — frosted glass, 5 primary tabs with Isleetc-style active oval pill backdrops
  */
-function FloatingTabBar({ state, descriptors, navigation }: NavigationBarProps) {
+function FloatingTabBar({ state, descriptors, emitter, navigateToTab, navigation: navProp }: NavigationBarProps) {
+  const routerNav = useNavigation<any>();
+  const navigation = navProp || routerNav;
   const insets = useSafeAreaInsets();
   const colors = useThemeColors();
   const navigationAccent = colors.accent;
@@ -397,28 +403,56 @@ function FloatingTabBar({ state, descriptors, navigation }: NavigationBarProps) 
                   triggerHaptic();
 
                   if (tab.name === 'more' && isSecondaryActive) {
-                    navigation.navigate('more');
+                    if (route && navigateToTab) {
+                      navigateToTab(route.key);
+                    } else if (navigation?.navigate) {
+                      navigation.navigate('more');
+                    } else {
+                      router.navigate('/(tabs)/more' as any);
+                    }
                     return;
                   }
 
                   if (route) {
-                    const event = navigation.emit({
-                      type: 'tabPress',
-                      target: route.key,
-                      canPreventDefault: true,
-                    });
+                    const event = emitter?.emit
+                      ? emitter.emit({
+                          type: 'tabPress',
+                          target: route.key,
+                          canPreventDefault: true,
+                        })
+                      : navigation?.emit
+                      ? navigation.emit({
+                          type: 'tabPress',
+                          target: route.key,
+                          canPreventDefault: true,
+                        })
+                      : { defaultPrevented: false };
 
-                    if (!isFocused && !event.defaultPrevented) {
-                      navigation.navigate(route.name);
+                    if (!isFocused && !event?.defaultPrevented) {
+                      if (navigateToTab) {
+                        navigateToTab(route.key);
+                      } else if (navigation?.navigate) {
+                        navigation.navigate(route.name);
+                      } else {
+                        router.navigate(`/(tabs)/${route.name}` as any);
+                      }
                     }
                   } else {
-                    navigation.navigate(tab.name);
+                    if (navigation?.navigate) {
+                      navigation.navigate(tab.name);
+                    } else {
+                      router.navigate(`/(tabs)/${tab.name}` as any);
+                    }
                   }
                 };
 
                 const onLongPress = () => {
                   if (route) {
-                    navigation.emit({ type: 'tabLongPress', target: route.key });
+                    if (emitter?.emit) {
+                      emitter.emit({ type: 'tabLongPress', target: route.key });
+                    } else if (navigation?.emit) {
+                      navigation.emit({ type: 'tabLongPress', target: route.key });
+                    }
                   }
                 };
 
@@ -464,6 +498,7 @@ export default function TabLayout() {
 
   return (
     <Tabs
+      id="tabs"
       backBehavior="history"
       tabBar={(props) =>
         Platform.OS === 'web' ? null : <FloatingTabBar {...props} />

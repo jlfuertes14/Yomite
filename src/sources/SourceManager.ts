@@ -45,6 +45,7 @@ import { WeebCentralParser } from './parsers/WeebCentralParser';
 import { MangaKParser } from './parsers/MangaKParser';
 import { OniSagaParser } from './parsers/OniSagaParser';
 import { ToonkotsuParser } from './parsers/ToonkotsuParser';
+import { getSourceContentType } from './classification';
 import rawCatalog from './catalog/sourcesCatalog.json';
 
 const STORAGE_KEY_ENABLED_SOURCES = '@mangaapp_enabled_sources_v2';
@@ -115,8 +116,9 @@ class SourceManagerService {
   private initialized = false;
 
   constructor() {
-    // Index catalog by ID for O(1) lookups
+    // Index catalog by ID for O(1) lookups and normalize content types (accurate manhwa categorization)
     for (const item of this.catalog) {
+      item.contentType = getSourceContentType(item);
       this.catalogById.set(item.id, item);
       this.catalogById.set(item.name.toLowerCase(), item);
     }
@@ -624,6 +626,7 @@ class SourceManagerService {
         baseUrl: catalogItem.baseUrl || `https://${catalogItem.domain}`,
         locale: (catalogItem.locale as any) || 'en',
         isNsfw: catalogItem.contentType === 'hentai',
+        contentType: catalogItem.contentType,
         version: '1.0.0',
         icon: catalogItem.icon,
         description: `${catalogItem.title} (${catalogItem.domain})`,
@@ -658,6 +661,7 @@ class SourceManagerService {
       baseUrl: item.baseUrl || `https://${item.domain}`,
       locale: (item.locale as any) || 'en',
       isNsfw: item.contentType === 'hentai',
+      contentType: item.contentType,
       version: '1.0.0',
       icon: item.icon,
       description: `${item.title} (${item.domain}) · ${item.locale.toUpperCase()} · ${item.engine.toUpperCase()}`,

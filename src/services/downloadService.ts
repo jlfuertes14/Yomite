@@ -2,6 +2,8 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import { useDownloadStore } from '../store/downloadStore';
 import { getChapterPages } from '../api/mangadex';
+import { getUniversalChapterPages, isExternalSource } from '../sources/adapter';
+import { SourceManager } from '../sources/SourceManager';
 
 /**
  * Returns the active base download folder path
@@ -154,8 +156,35 @@ export async function downloadChapter(params: {
       totalFiles: 0,
     });
 
-    // 3. Fetch page image URLs from MangaDex API
-    const { pages } = await getChapterPages(chapterId, false);
+    // 3. Fetch page image URLs (supports MangaDex and all external sources like AsuraScans)
+    let pages: string[] = [];
+    let headers: Record<string, string> | undefined;
+
+    if (isExternalSource(chapterId)) {
+      const result = await getUniversalChapterPages(chapterId);
+      pages = (result.pages || []).map((p) => {
+        if (!p) return p;
+        if (p.startsWith('http') || p.startsWith('data:') || p.startsWith('file:')) {
+          return p;
+        }
+        if (p.startsWith('/api/media/') || chapterId.includes('philia')) {
+          return `https://philiascans.org/${p.replace(/^\/+/, '')}`;
+        }
+        return p;
+      });
+      headers = result.headers;
+      if (!headers) {
+        const resolved = SourceManager.resolveSource(chapterId);
+        if (resolved?.parser && (resolved.parser as any).getRequestHeaders) {
+          headers = (resolved.parser as any).getRequestHeaders();
+        }
+      }
+    } else {
+      const cleanId = chapterId.replace(/^mangadex:/, '');
+      const res = await getChapterPages(cleanId, false);
+      pages = res.pages || [];
+    }
+
     if (!pages || pages.length === 0) {
       throw new Error('No page URLs returned for this chapter.');
     }
@@ -168,7 +197,7 @@ export async function downloadChapter(params: {
 
     // 4. On Web platform: use browser CacheStorage / Blob caching
     if (Platform.OS === 'web') {
-      await downloadChapterWeb(params, pages, signal);
+      await downloadChapterWeb(params, pages, signal, headers);
       return;
     }
 
@@ -178,7 +207,7 @@ export async function downloadChapter(params: {
     // 5. Try SAF download if user configured a SAF content:// URI (Android only)
     if (isSaf && (FileSystem as any).StorageAccessFramework) {
       try {
-        await downloadChapterSaf(params, pages, baseDir);
+        await downloadChapterSaf(params, pages, baseDir, headers);
         return;
       } catch (safErr: any) {
         console.warn(
@@ -191,7 +220,7 @@ export async function downloadChapter(params: {
     }
 
     // 6. Standard FileSystem download (file://...)
-    await downloadChapterStandard(params, pages, baseDir, signal);
+    await downloadChapterStandard(params, pages, baseDir, signal, headers);
   } catch (error: any) {
     if (signal.aborted || pausedChapterIds.has(chapterId) || error?.name === 'AbortError') {
       console.log(`[DownloadService] Download cancelled/paused for chapter ${chapterId}`);
@@ -210,7 +239,8 @@ export async function downloadChapter(params: {
 async function downloadChapterWeb(
   params: any,
   pages: string[],
-  signal: AbortSignal
+  signal: AbortSignal,
+  headers?: Record<string, string>
 ): Promise<void> {
   const { chapterId } = params;
   const store = useDownloadStore.getState();
@@ -226,6 +256,16 @@ async function downloadChapterWeb(
     } catch (_err) {}
   }
 
+  // Filter out headers forbidden by browser fetch
+  const fetchHeaders: Record<string, string> = {};
+  if (headers) {
+    for (const [k, v] of Object.entries(headers)) {
+      if (!['user-agent', 'referer', 'host', 'origin'].includes(k.toLowerCase())) {
+        fetchHeaders[k] = v;
+      }
+    }
+  }
+
   for (let i = startIndex; i < pages.length; i++) {
     // Check if user paused the download or signal aborted
     if (signal.aborted || pausedChapterIds.has(chapterId) || useDownloadStore.getState().chapters[chapterId]?.status === 'paused') {
@@ -237,7 +277,11 @@ async function downloadChapterWeb(
     let finalPageUri = pageUrl;
 
     try {
-      const response = await fetch(pageUrl, { mode: 'cors', signal });
+      const response = await fetch(pageUrl, {
+        headers: Object.keys(fetchHeaders).length > 0 ? fetchHeaders : undefined,
+        mode: 'cors',
+        signal,
+      });
       if (response.ok) {
         const blob = await response.blob();
         const blobSize = blob.size || 350000;
@@ -290,10 +334,13 @@ async function downloadChapterStandard(
   params: any,
   pages: string[],
   baseDir: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  headers?: Record<string, string>
 ): Promise<void> {
   const { chapterId, mangaId, mangaTitle, chapterNum, chapterTitle } = params;
-  const chapterDir = `${baseDir}${mangaId}/${chapterId}/`;
+  const safeMangaId = (mangaId || 'manga').replace(/[:\/\\?%*|"<>]/g, '_');
+  const safeChapterId = (chapterId || 'chapter').replace(/[:\/\\?%*|"<>]/g, '_');
+  const chapterDir = `${baseDir}${safeMangaId}/${safeChapterId}/`;
   await FileSystem.makeDirectoryAsync(chapterDir, { intermediates: true });
 
   const store = useDownloadStore.getState();
@@ -313,7 +360,11 @@ async function downloadChapterStandard(
     const ext = pageUrl.split('.').pop()?.split('?')[0] || 'jpg';
     const localFilePath = `${chapterDir}page_${i + 1}.${ext}`;
 
-    const downloadResult = await FileSystem.downloadAsync(pageUrl, localFilePath);
+    const downloadResult = await FileSystem.downloadAsync(
+      pageUrl,
+      localFilePath,
+      headers ? { headers } : undefined
+    );
     localPages.push(downloadResult.uri);
 
     try {
@@ -344,7 +395,6 @@ async function downloadChapterStandard(
         downloadedAt: new Date().toISOString(),
       })
     );
-    localPages.push(metaPath);
     useDownloadStore.getState().setCompleted(chapterId, localPages, totalSizeBytes);
   }
 }
@@ -355,25 +405,28 @@ async function downloadChapterStandard(
 async function downloadChapterSaf(
   params: any,
   pages: string[],
-  baseDir: string
+  baseDir: string,
+  headers?: Record<string, string>
 ): Promise<void> {
   const { chapterId, mangaId, mangaTitle, chapterNum, chapterTitle } = params;
   const SAF = (FileSystem as any).StorageAccessFramework;
 
   const parentUri = baseDir.replace(/\/$/, '');
+  const safeMangaId = (mangaId || 'manga').replace(/[:\/\\?%*|"<>]/g, '_');
+  const safeChapterId = (chapterId || 'chapter').replace(/[:\/\\?%*|"<>]/g, '_');
 
   let mangaFolderUri: string;
   try {
-    mangaFolderUri = await SAF.makeDirectoryAsync(parentUri, mangaId);
+    mangaFolderUri = await SAF.makeDirectoryAsync(parentUri, safeMangaId);
   } catch (_e) {
-    mangaFolderUri = `${parentUri}%2F${mangaId}`;
+    mangaFolderUri = `${parentUri}%2F${encodeURIComponent(safeMangaId)}`;
   }
 
   let chapterFolderUri: string;
   try {
-    chapterFolderUri = await SAF.makeDirectoryAsync(mangaFolderUri, chapterId);
+    chapterFolderUri = await SAF.makeDirectoryAsync(mangaFolderUri, safeChapterId);
   } catch (_e) {
-    chapterFolderUri = `${mangaFolderUri}%2F${chapterId}`;
+    chapterFolderUri = `${mangaFolderUri}%2F${encodeURIComponent(safeChapterId)}`;
   }
 
   const localPages: string[] = [];
@@ -385,7 +438,11 @@ async function downloadChapterSaf(
     const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
     const tempFile = `${(FileSystem as any).cacheDirectory || ''}temp_dl_${Date.now()}_${i}.${ext}`;
 
-    const tempRes = await FileSystem.downloadAsync(pageUrl, tempFile);
+    const tempRes = await FileSystem.downloadAsync(
+      pageUrl,
+      tempFile,
+      headers ? { headers } : undefined
+    );
 
     const base64Data = await FileSystem.readAsStringAsync(tempRes.uri, {
       encoding: (FileSystem as any).EncodingType?.Base64 || 'base64',
@@ -423,7 +480,6 @@ async function downloadChapterSaf(
         downloadedAt: new Date().toISOString(),
       })
     );
-    localPages.push(metaFileUri);
   } catch (_e) {}
 
   useDownloadStore.getState().setCompleted(chapterId, localPages, totalSizeBytes);
@@ -454,6 +510,8 @@ export async function removeDownloadedChapter(chapterId: string, mangaId: string
 
     const baseDir = getBaseDownloadDirectory();
     const SAF = (FileSystem as any).StorageAccessFramework;
+    const safeMangaId = mangaId ? mangaId.replace(/[:\/\\?%*|"<>]/g, '_') : '';
+    const safeChapterId = chapterId ? chapterId.replace(/[:\/\\?%*|"<>]/g, '_') : '';
 
     // 1. Delete all recorded page file URIs directly from disk / SAF
     if (chapterObj && chapterObj.localPages && chapterObj.localPages.length > 0) {
@@ -472,10 +530,18 @@ export async function removeDownloadedChapter(chapterId: string, mangaId: string
     // 2. Delete standard internal documentDirectory folder (file://)
     const docDir = (FileSystem as any).documentDirectory || '';
     if (docDir) {
-      const internalChapterDir = `${docDir}Yomite/${mangaId}/${chapterId}/`;
-      try {
-        await FileSystem.deleteAsync(internalChapterDir, { idempotent: true });
-      } catch (_e) {}
+      if (safeMangaId) {
+        const internalChapterDir = `${docDir}Yomite/${safeMangaId}/${safeChapterId}/`;
+        try {
+          await FileSystem.deleteAsync(internalChapterDir, { idempotent: true });
+        } catch (_e) {}
+      }
+      if (mangaId !== safeMangaId || chapterId !== safeChapterId) {
+        const legacyChapterDir = `${docDir}Yomite/${mangaId}/${chapterId}/`;
+        try {
+          await FileSystem.deleteAsync(legacyChapterDir, { idempotent: true });
+        } catch (_e) {}
+      }
     }
 
     // 3. Clean up SAF directory entries if custom SAF folder is active
@@ -484,7 +550,12 @@ export async function removeDownloadedChapter(chapterId: string, mangaId: string
         const parentUri = baseDir.replace(/\/$/, '');
         const folderFiles = await SAF.readDirectoryAsync(parentUri);
         for (const fileUri of folderFiles) {
-          if (fileUri.includes(chapterId) || fileUri.includes(mangaId)) {
+          if (
+            fileUri.includes(encodeURIComponent(safeChapterId)) ||
+            fileUri.includes(safeChapterId) ||
+            fileUri.includes(chapterId) ||
+            (safeMangaId && (fileUri.includes(encodeURIComponent(safeMangaId)) || fileUri.includes(safeMangaId)))
+          ) {
             try {
               await SAF.deleteAsync(fileUri, { idempotent: true });
             } catch (_e) {}

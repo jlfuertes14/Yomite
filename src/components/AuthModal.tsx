@@ -23,7 +23,7 @@ import { Colors, Spacing, Radius, Typography } from '../../constants/Colors';
 import { useThemeColors } from '../hooks/useThemeColor';
 import { GoogleLogoIcon } from './GoogleLogoIcon';
 import { MobileModalRoot, MobileSheetPanel, MobileSheetPanelRef } from './MobileBottomSheet';
-import { useUserStore } from '../store/userStore';
+import { getSignInToastMessage, useUserStore } from '../store/userStore';
 
 interface AuthModalProps {
   visible: boolean;
@@ -70,6 +70,8 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
       if (error) {
         Alert.alert('Google Sign In Error', error.message || 'Failed to authenticate with Google.');
       } else {
+        const u = useUserStore.getState().user;
+        useUserStore.getState().setAuthSuccessMessage(getSignInToastMessage(u));
         closeModal();
       }
     } catch (err: any) {
@@ -117,6 +119,8 @@ export function AuthModal({ visible, onClose }: AuthModalProps) {
         if (error) {
           Alert.alert('Sign In Failed', error.message || 'Invalid credentials or connection error.');
         } else {
+          const u = useUserStore.getState().user;
+          useUserStore.getState().setAuthSuccessMessage(getSignInToastMessage(u));
           onClose();
         }
       }

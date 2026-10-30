@@ -198,6 +198,28 @@ export class SourceHttpClient {
         durationMs,
       });
 
+      if (typeof response.data === 'string' && CloudFlareDetector.isChallengePage(response.data)) {
+        const cfErr = new CloudFlareError(
+          `[${sourceId}] Cloudflare verification challenge detected at ${url}. Solve the challenge in browser or configure clearance cookie to continue.`,
+          sourceId,
+          url,
+          domain,
+          CloudFlareStatus.CAPTCHA_CHALLENGE
+        );
+        throw cfErr;
+      }
+
+      if (typeof response.data === 'string' && CloudFlareDetector.isChallengePage(response.data)) {
+        const cfErr = new CloudFlareError(
+          `[${sourceId}] Cloudflare verification challenge detected at ${url}. Solve the challenge in browser or configure clearance cookie to continue.`,
+          sourceId,
+          url,
+          domain,
+          CloudFlareStatus.CAPTCHA_CHALLENGE
+        );
+        throw cfErr;
+      }
+
       return loadHtml(response.data);
     } catch (err: any) {
       const durationMs = Date.now() - startTime;
@@ -329,6 +351,17 @@ export class SourceHttpClient {
         });
       }
 
+      if (typeof response.data === 'string' && CloudFlareDetector.isChallengePage(response.data)) {
+        const cfErr = new CloudFlareError(
+          `[${sourceId}] Cloudflare verification challenge detected at ${url}.`,
+          sourceId,
+          url,
+          domain,
+          CloudFlareStatus.CAPTCHA_CHALLENGE
+        );
+        throw cfErr;
+      }
+
       return response.data;
     } catch (err: any) {
       const durationMs = Date.now() - startTime;
@@ -410,6 +443,18 @@ export class SourceHttpClient {
           status: response.status,
           durationMs: Date.now() - startTime,
         });
+      }
+
+      if (typeof response.data === 'string' && CloudFlareDetector.isChallengePage(response.data)) {
+        const domain = this.extractDomain(url);
+        const cfErr = new CloudFlareError(
+          `[${sourceId}] Cloudflare verification challenge detected at ${url}.`,
+          sourceId,
+          url,
+          domain,
+          CloudFlareStatus.CAPTCHA_CHALLENGE
+        );
+        throw cfErr;
       }
 
       return response.data;

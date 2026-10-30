@@ -2,7 +2,7 @@
  * History Screen — Clean & Flat Design (Google Stitch Style)
  * Container-free, borderless, modern reading history with date headers, progress bars, search, and selective deletion.
  */
-import React, { useCallback, useState, useEffect, useMemo } from 'react';
+import React, { useCallback, useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,8 +13,11 @@ import {
   TextInput,
   ActivityIndicator,
   useWindowDimensions,
+  Animated,
+  Easing,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useUIStore } from '../../src/store/uiStore';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -86,7 +89,32 @@ function HistoryRowItem({
   const isDownloading = dlItem?.status === 'downloading';
   const isDownloaded = dlItem?.status === 'completed';
 
+  // Smooth slide & checkbox entrance animations
+  const selectAnim = useRef(new Animated.Value(isSelectMode ? 1 : 0)).current;
+  const checkScaleAnim = useRef(new Animated.Value(isSelected ? 1 : 0.8)).current;
 
+  useEffect(() => {
+    Animated.timing(selectAnim, {
+      toValue: isSelectMode ? 1 : 0,
+      duration: 220,
+      easing: Easing.bezier(0.23, 1, 0.32, 1),
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
+  }, [isSelectMode, selectAnim]);
+
+  useEffect(() => {
+    if (isSelected) {
+      checkScaleAnim.setValue(0.75);
+      Animated.spring(checkScaleAnim, {
+        toValue: 1,
+        friction: 6,
+        tension: 200,
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
+    } else {
+      checkScaleAnim.setValue(1);
+    }
+  }, [isSelected, checkScaleAnim]);
 
   const coverHeaders = useMemo(() => {
     if (!item.mangaId) return undefined;
@@ -183,7 +211,11 @@ function HistoryRowItem({
           }
         }}
         accessibilityRole="button"
-        accessibilityLabel={`Resume reading ${item.title}`}
+        accessibilityLabel={
+          isSelectMode
+            ? `${isSelected ? 'Selected' : 'Not selected'}: ${item.title}`
+            : `Resume reading ${item.title}`
+        }
         style={({ pressed, hovered }: any) => [
           styles.flatHistoryRow,
           isSelected && { backgroundColor: `${colors.accent}14` },
@@ -191,116 +223,249 @@ function HistoryRowItem({
           Platform.OS === 'web' && { cursor: 'pointer' as any },
         ]}
       >
-        {/* Selection Checkbox in Select Mode */}
-        {isSelectMode && (
-          <Ionicons
-            name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
-            size={22}
-            color={isSelected ? colors.accent : '#71717A'}
-            style={styles.selectCheckbox}
-          />
-        )}
-
-        {/* Manga Cover Thumbnail */}
-        <View style={styles.coverThumbnail}>
-          <Skeleton
-            width="100%"
-            height="100%"
-            borderRadius={8}
-            style={StyleSheet.absoluteFill as any}
-          />
-          {coverUrl ? (
-            <BridgedImage
-              source={{ uri: coverUrl, headers: coverHeaders }}
-              style={styles.coverImg}
-              contentFit="cover"
-              transition={200}
+        {/* Animated Selection Checkbox on the Left */}
+        <Animated.View
+          pointerEvents={isSelectMode ? 'auto' : 'none'}
+          style={[
+            styles.selectCheckboxContainer,
+            {
+              opacity: selectAnim,
+              transform: [
+                {
+                  translateX: selectAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-24, 0],
+                  }),
+                },
+                {
+                  scale: selectAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.6, 1],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          <Animated.View style={{ transform: [{ scale: checkScaleAnim }] }}>
+            <Ionicons
+              name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
+              size={22}
+              color={isSelected ? colors.accent : '#71717A'}
             />
-          ) : null}
-        </View>
+          </Animated.View>
+        </Animated.View>
 
-        {/* Metadata & Progress Bar */}
-        <View style={styles.itemMetaCol}>
-          <Text style={[styles.mangaTitle, { color: colors.text }]} numberOfLines={1}>
-            {item.title}
-          </Text>
-          <View style={styles.subtitleRow}>
-            <Text
-              style={[styles.chapterSubtitle, { color: colors.textSecondary }]}
-              numberOfLines={1}
-            >
-              {item.chapterTitle || `Page ${item.pageIndex + 1}`}
-            </Text>
-          </View>
-
-          {/* Reading Progress Bar & Timestamp */}
-          <View style={styles.progressRow}>
-            <View style={[styles.progressBarTrack, { backgroundColor: progressTrackColor }]}>
-              <View
-                style={[
-                  styles.progressBarFill,
-                  { width: `${progressPercent}%`, backgroundColor: colors.accent },
-                ]}
+        {/* Smoothly Sliding Main Content Wrapper (Cover + Metadata) */}
+        <Animated.View
+          style={[
+            styles.rowContentWrapper,
+            {
+              transform: [
+                {
+                  translateX: selectAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, 36],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          {/* Manga Cover Thumbnail */}
+          <View style={styles.coverThumbnail}>
+            <Skeleton
+              width="100%"
+              height="100%"
+              borderRadius={8}
+              style={StyleSheet.absoluteFill as any}
+            />
+            {coverUrl ? (
+              <BridgedImage
+                source={{ uri: coverUrl, headers: coverHeaders }}
+                style={styles.coverImg}
+                contentFit="cover"
+                transition={200}
               />
-            </View>
-            <Text style={[styles.progressInfoText, { color: colors.textMuted }]}>
-              {isCompleted
-                ? `Completed · ${formatTimeAgo(item.timestamp)}`
-                : `Page ${item.pageIndex + 1}/${item.totalPages} · ${formatTimeAgo(item.timestamp)}`}
+            ) : null}
+          </View>
+
+          {/* Metadata & Progress Bar */}
+          <View style={styles.itemMetaCol}>
+            <Text style={[styles.mangaTitle, { color: colors.text }]} numberOfLines={1}>
+              {item.title}
             </Text>
-          </View>
-        </View>
+            <View style={styles.subtitleRow}>
+              <Text
+                style={[styles.chapterSubtitle, { color: colors.textSecondary }]}
+                numberOfLines={1}
+              >
+                {item.chapterTitle || `Page ${item.pageIndex + 1}`}
+              </Text>
+            </View>
 
-        {/* Inline Flat Actions */}
-        {!isSelectMode && (
-          <View style={styles.inlineActions}>
-            <Pressable
-              onPress={handleDownload}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel="Download options"
-              style={({ pressed, hovered }: any) => [
-                styles.actionBtn,
-                (pressed || hovered) && { opacity: 0.7 },
-                Platform.OS === 'web' && { cursor: 'pointer' as any },
-              ]}
-            >
-              {isDownloading ? (
-                <ActivityIndicator size="small" color={colors.accent} />
-              ) : isDownloaded ? (
-                <Ionicons name="checkmark-circle" size={18} color="#10B981" />
-              ) : (
-                <Ionicons name="download-outline" size={18} color={colors.textMuted} />
-              )}
-            </Pressable>
-
-            <Pressable
-              onPress={(e) => {
-                e.stopPropagation();
-                onDeleteSingle(item);
-              }}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel="Remove from history"
-              style={({ pressed, hovered }: any) => [
-                styles.actionBtn,
-                (pressed || hovered) && { opacity: 0.7 },
-                Platform.OS === 'web' && { cursor: 'pointer' as any },
-              ]}
-            >
-              <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
-            </Pressable>
-
-            <View style={styles.chevronWrapper}>
-              <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+            {/* Reading Progress Bar & Timestamp */}
+            <View style={styles.progressRow}>
+              <View style={[styles.progressBarTrack, { backgroundColor: progressTrackColor }]}>
+                <View
+                  style={[
+                    styles.progressBarFill,
+                    { width: `${progressPercent}%`, backgroundColor: colors.accent },
+                  ]}
+                />
+              </View>
+              <Text style={[styles.progressInfoText, { color: colors.textMuted }]}>
+                {isCompleted
+                  ? `Completed · ${formatTimeAgo(item.timestamp)}`
+                  : `Page ${item.pageIndex + 1}/${item.totalPages} · ${formatTimeAgo(item.timestamp)}`}
+              </Text>
             </View>
           </View>
-        )}
+        </Animated.View>
+
+        {/* Inline Flat Actions (Smoothly Fades Out & Slides Away in Select Mode) */}
+        <Animated.View
+          pointerEvents={isSelectMode ? 'none' : 'auto'}
+          style={[
+            styles.inlineActions,
+            {
+              opacity: selectAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [1, 0],
+              }),
+              transform: [
+                {
+                  translateX: selectAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, 16],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          <Pressable
+            onPress={handleDownload}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Download options"
+            style={({ pressed, hovered }: any) => [
+              styles.actionBtn,
+              (pressed || hovered) && { opacity: 0.7 },
+              Platform.OS === 'web' && { cursor: 'pointer' as any },
+            ]}
+          >
+            {isDownloading ? (
+              <ActivityIndicator size="small" color={colors.accent} />
+            ) : isDownloaded ? (
+              <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+            ) : (
+              <Ionicons name="download-outline" size={18} color={colors.textMuted} />
+            )}
+          </Pressable>
+
+          <Pressable
+            onPress={(e) => {
+              e.stopPropagation();
+              onDeleteSingle(item);
+            }}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Remove from history"
+            style={({ pressed, hovered }: any) => [
+              styles.actionBtn,
+              (pressed || hovered) && { opacity: 0.7 },
+              Platform.OS === 'web' && { cursor: 'pointer' as any },
+            ]}
+          >
+            <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
+          </Pressable>
+        </Animated.View>
       </Pressable>
 
       {/* Hairline Divider between items */}
       <View style={styles.hairlineDivider} />
     </View>
+  );
+}
+
+function FloatingDeleteBar({
+  visible,
+  count,
+  bottomOffset,
+  onDelete,
+  accentColor,
+  accentForegroundColor,
+}: {
+  visible: boolean;
+  count: number;
+  bottomOffset: number;
+  onDelete: () => void;
+  accentColor: string;
+  accentForegroundColor: string;
+}) {
+  const anim = useRef(new Animated.Value(0)).current;
+  const [rendered, setRendered] = useState(visible);
+
+  useEffect(() => {
+    if (visible) {
+      setRendered(true);
+      Animated.timing(anim, {
+        toValue: 1,
+        duration: 240,
+        easing: Easing.bezier(0.23, 1, 0.32, 1),
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
+    } else {
+      Animated.timing(anim, {
+        toValue: 0,
+        duration: 240,
+        easing: Easing.bezier(0.23, 1, 0.32, 1),
+        useNativeDriver: Platform.OS !== 'web',
+      }).start(() => {
+        setRendered(false);
+      });
+    }
+  }, [visible, anim]);
+
+  if (!rendered) return null;
+
+  return (
+    <Animated.View
+      style={[
+        styles.floatingDeleteBar,
+        {
+          bottom: bottomOffset,
+          opacity: anim,
+          transform: [
+            {
+              translateY: anim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [120, 0],
+              }),
+            },
+          ],
+        },
+      ]}
+    >
+      <Text style={styles.floatingBarText}>
+        {count} {count === 1 ? 'item' : 'items'} selected
+      </Text>
+      <Pressable
+        onPress={onDelete}
+        accessibilityRole="button"
+        accessibilityLabel="Delete selected items"
+        style={({ pressed }: any) => [
+          styles.deleteSelectedBtn,
+          { backgroundColor: accentColor, opacity: pressed ? 0.8 : 1 },
+          Platform.OS === 'web' && { cursor: 'pointer' as any },
+        ]}
+      >
+        <Text style={[styles.deleteSelectedText, { color: accentForegroundColor }]}>
+          Delete
+        </Text>
+      </Pressable>
+    </Animated.View>
   );
 }
 
@@ -310,6 +475,8 @@ export default function HistoryScreen() {
   const colors = useThemeColors();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 860;
+  const insets = useSafeAreaInsets();
+  const bottomOffset = Math.max(insets.bottom, 12) + 8;
 
   const [drawerVisible, setDrawerVisible] = useState(false);
   const rawEntries = useHistoryStore((s) => s.entries);
@@ -335,6 +502,19 @@ export default function HistoryScreen() {
   // Selection state
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Coordinate floating tab bar curtain down when items are selected
+  useEffect(() => {
+    const shouldHideTabBar = isSelectMode && selectedIds.size > 0;
+    useUIStore.getState().setTabBarVisible(!shouldHideTabBar);
+  }, [isSelectMode, selectedIds.size]);
+
+  // Ensure tab bar is restored on unmount
+  useEffect(() => {
+    return () => {
+      useUIStore.getState().setTabBarVisible(true);
+    };
+  }, []);
 
   // Confirmation Modal state
   const [confirmModalConfig, setConfirmModalConfig] = useState<{
@@ -375,7 +555,11 @@ export default function HistoryScreen() {
 
   const handleResume = useCallback(
     (entry: HistoryEntry) => {
-      router.push(`/reader/${encodeURIComponent(entry.chapterId)}?mangaId=${encodeURIComponent(entry.mangaId)}&page=${entry.pageIndex}` as any);
+      const resumeScroll =
+        entry.scrollOffset && entry.scrollOffset > 0
+          ? `&scrollOffset=${Math.round(entry.scrollOffset)}`
+          : '';
+      router.push(`/reader/${encodeURIComponent(entry.chapterId)}?mangaId=${encodeURIComponent(entry.mangaId)}&page=${entry.pageIndex}${resumeScroll}` as any);
     },
     [router]
   );
@@ -427,7 +611,7 @@ export default function HistoryScreen() {
       title: 'Delete Selected?',
       message: `Remove ${count} selected ${count === 1 ? 'item' : 'items'} from your reading history?`,
       iconName: 'trash-outline',
-      confirmText: `Delete (${count})`,
+      confirmText: 'Delete',
       onConfirm: () => {
         removeEntries(Array.from(selectedIds));
         setSelectedIds(new Set());
@@ -493,6 +677,7 @@ export default function HistoryScreen() {
                   </Pressable>
                   <Pressable
                     onPress={() => {
+                      triggerHaptic();
                       setIsSelectMode(false);
                       setSelectedIds(new Set());
                     }}
@@ -508,7 +693,10 @@ export default function HistoryScreen() {
               ) : (
                 <>
                   <Pressable
-                    onPress={() => setIsSelectMode(true)}
+                    onPress={() => {
+                      triggerHaptic();
+                      setIsSelectMode(true);
+                    }}
                     style={styles.headerBtn}
                     accessibilityRole="button"
                     accessibilityLabel="Enter selection mode"
@@ -669,27 +857,15 @@ export default function HistoryScreen() {
               }
             />
 
-            {/* Floating Delete Selected Bar (Only in Selection Mode) */}
-            {isSelectMode && selectedIds.size > 0 && (
-              <View style={styles.floatingDeleteBar}>
-                <Text style={styles.floatingBarText}>
-                  {selectedIds.size} {selectedIds.size === 1 ? 'item' : 'items'} selected
-                </Text>
-                <Pressable
-                  onPress={handleDeleteSelected}
-                  accessibilityRole="button"
-                  accessibilityLabel="Delete selected reading history items"
-                  style={({ pressed }: any) => [
-                    styles.deleteSelectedBtn,
-                    { backgroundColor: colors.accent, opacity: pressed ? 0.8 : 1 },
-                    Platform.OS === 'web' && { cursor: 'pointer' as any },
-                  ]}
-                >
-                  <Ionicons name="trash" size={16} color={colors.accentForeground} />
-                  <Text style={[styles.deleteSelectedText, { color: colors.accentForeground }]}>Delete Selected</Text>
-                </Pressable>
-              </View>
-            )}
+            {/* Floating Delete Selected Bar (Animated Entrance/Exit) */}
+            <FloatingDeleteBar
+              visible={isSelectMode && selectedIds.size > 0}
+              count={selectedIds.size}
+              bottomOffset={bottomOffset}
+              onDelete={handleDeleteSelected}
+              accentColor={colors.accent}
+              accentForegroundColor={colors.accentForeground}
+            />
           </View>
         )}
 
@@ -828,6 +1004,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 8,
     borderRadius: 12,
+    position: 'relative',
+    overflow: 'hidden',
     gap: 14,
   },
   hairlineDivider: {
@@ -835,8 +1013,22 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(39, 39, 42, 0.4)',
     marginHorizontal: 4,
   },
-  selectCheckbox: {
-    marginRight: -4,
+  selectCheckboxContainer: {
+    position: 'absolute',
+    left: 8,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 24,
+    zIndex: 2,
+  },
+  rowContentWrapper: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    minWidth: 0,
   },
   coverThumbnail: {
     width: 56,
@@ -905,9 +1097,6 @@ const styles = StyleSheet.create({
     padding: 8,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  chevronWrapper: {
-    paddingLeft: 2,
   },
 
   /* Empty State */
@@ -1000,7 +1189,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 18,
     borderWidth: 0,
+    backgroundColor: '#242528',
     elevation: 0,
+    shadowColor: '#000000',
+    shadowOpacity: 0.35,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 14,
   },
   floatingBarText: {
     fontSize: 13,

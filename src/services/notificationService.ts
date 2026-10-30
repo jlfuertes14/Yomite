@@ -2,13 +2,18 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Asset } from 'expo-asset';
+import { isRunningInExpoGo } from 'expo';
 
 const isExpoGoClient = (): boolean => {
   if (Platform.OS === 'web') return false;
   try {
+    if (typeof isRunningInExpoGo === 'function' && isRunningInExpoGo()) {
+      return true;
+    }
     return (
       Constants.executionEnvironment === ExecutionEnvironment.StoreClient ||
-      (Constants as any).appOwnership === 'expo'
+      (Constants as any).appOwnership === 'expo' ||
+      Boolean((globalThis as any).expo?.modules?.ExpoGo)
     );
   } catch {}
 
@@ -117,54 +122,61 @@ export async function getAppIconLocalUri(): Promise<string | null> {
  * without crashing, we resolve only the local notification submodules.
  * In a standalone APK or EAS development build, require('expo-notifications') is loaded directly.
  */
+function resolveLocalNotificationsSubmodules(): any {
+  try {
+    const scheduleMod = require('expo-notifications/build/scheduleNotificationAsync');
+    const channelMod = require('expo-notifications/build/setNotificationChannelAsync');
+    const handlerMod = require('expo-notifications/build/NotificationsHandler');
+    const emitterMod = require('expo-notifications/build/NotificationsEmitter');
+    const permsMod = require('expo-notifications/build/NotificationPermissions');
+    const typesMod = require('expo-notifications/build/NotificationChannelManager.types');
+
+    let cancelScheduledNotificationAsync: any = null;
+    let cancelAllScheduledNotificationsAsync: any = null;
+    try {
+      cancelScheduledNotificationAsync =
+        require('expo-notifications/build/cancelScheduledNotificationAsync')?.cancelScheduledNotificationAsync;
+      cancelAllScheduledNotificationsAsync =
+        require('expo-notifications/build/cancelAllScheduledNotificationsAsync')?.cancelAllScheduledNotificationsAsync;
+    } catch {}
+
+    return {
+      scheduleNotificationAsync: scheduleMod?.scheduleNotificationAsync,
+      cancelScheduledNotificationAsync,
+      cancelAllScheduledNotificationsAsync,
+      setNotificationChannelAsync: channelMod?.setNotificationChannelAsync,
+      getNotificationChannelsAsync: channelMod?.getNotificationChannelsAsync,
+      setNotificationHandler: handlerMod?.setNotificationHandler,
+      addNotificationResponseReceivedListener: emitterMod?.addNotificationResponseReceivedListener,
+      getLastNotificationResponseAsync: emitterMod?.getLastNotificationResponseAsync,
+      requestPermissionsAsync: permsMod?.requestPermissionsAsync,
+      getPermissionsAsync: permsMod?.getPermissionsAsync,
+      AndroidImportance: typesMod?.AndroidImportance || {
+        UNKNOWN: 0,
+        NONE: 1,
+        MIN: 2,
+        LOW: 3,
+        DEFAULT: 4,
+        HIGH: 5,
+        MAX: 5,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function getNotificationsModule(): any {
   if (Platform.OS === 'web') return null;
   if (cachedNotificationsModule !== undefined) return cachedNotificationsModule;
 
-  if (Platform.OS === 'android' && isExpoGo()) {
-    try {
-      const scheduleMod = require('expo-notifications/build/scheduleNotificationAsync');
-      const channelMod = require('expo-notifications/build/setNotificationChannelAsync');
-      const handlerMod = require('expo-notifications/build/NotificationsHandler');
-      const emitterMod = require('expo-notifications/build/NotificationsEmitter');
-      const permsMod = require('expo-notifications/build/NotificationPermissions');
-      const typesMod = require('expo-notifications/build/NotificationChannelManager.types');
-
-      let cancelScheduledNotificationAsync: any = null;
-      let cancelAllScheduledNotificationsAsync: any = null;
-      try {
-        cancelScheduledNotificationAsync =
-          require('expo-notifications/build/cancelScheduledNotificationAsync')?.cancelScheduledNotificationAsync;
-        cancelAllScheduledNotificationsAsync =
-          require('expo-notifications/build/cancelAllScheduledNotificationsAsync')?.cancelAllScheduledNotificationsAsync;
-      } catch {}
-
-      cachedNotificationsModule = {
-        scheduleNotificationAsync: scheduleMod?.scheduleNotificationAsync,
-        cancelScheduledNotificationAsync,
-        cancelAllScheduledNotificationsAsync,
-        setNotificationChannelAsync: channelMod?.setNotificationChannelAsync,
-        getNotificationChannelsAsync: channelMod?.getNotificationChannelsAsync,
-        setNotificationHandler: handlerMod?.setNotificationHandler,
-        addNotificationResponseReceivedListener: emitterMod?.addNotificationResponseReceivedListener,
-        getLastNotificationResponseAsync: emitterMod?.getLastNotificationResponseAsync,
-        requestPermissionsAsync: permsMod?.requestPermissionsAsync,
-        getPermissionsAsync: permsMod?.getPermissionsAsync,
-        AndroidImportance: typesMod?.AndroidImportance || {
-          UNKNOWN: 0,
-          NONE: 1,
-          MIN: 2,
-          LOW: 3,
-          DEFAULT: 4,
-          HIGH: 5,
-          MAX: 5,
-        },
-      };
+  // In Expo Go, remote push and topic subscriptions are unavailable since SDK 53+.
+  // Use local notification submodules directly to avoid missing native module errors like ExpoTopicSubscriptionModule.
+  if (isExpoGo()) {
+    const submodules = resolveLocalNotificationsSubmodules();
+    if (submodules) {
+      cachedNotificationsModule = submodules;
       return cachedNotificationsModule;
-    } catch (subErr) {
-      console.warn('[Yomite] Expo Go local notification submodules unavailable:', subErr);
-      cachedNotificationsModule = null;
-      return null;
     }
   }
 

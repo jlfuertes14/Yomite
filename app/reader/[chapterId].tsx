@@ -525,6 +525,41 @@ interface WebtoonPageItemProps {
   onCloudflareVerify?: () => void;
 }
 
+// Measured image aspect ratios survive cell recycling. Without this, a page that
+// scrolls out of the render window remounts at the 1.5 placeholder height and
+// shifts every page below it until the image reloads.
+const webtoonAspectCache = new Map<string, number>();
+
+interface WebtoonStripPage {
+  key: string;
+  chapterId: string;
+  localIndex: number;
+  globalIndex: number;
+  url: string;
+}
+
+interface WebtoonPageMeasurement {
+  key: string;
+  index: number;
+  y: number;
+  height: number;
+}
+
+interface WebtoonJump {
+  chapterId: string;
+  localIndex: number;
+  globalIndex: number;
+  offsetWithinPage: number;
+  token: number;
+  attempts: number;
+  startedAt: number;
+  lastReportedOffset?: number;
+  stalledChecks?: number;
+}
+
+const getWebtoonPageKey = (chapterId: string, localIndex: number) =>
+  `${chapterId}::${localIndex}`;
+
 const WebtoonPageItem = React.memo(function WebtoonPageItem({
   url,
   index,
@@ -539,7 +574,7 @@ const WebtoonPageItem = React.memo(function WebtoonPageItem({
   onImageSuccess,
   onCloudflareVerify,
 }: WebtoonPageItemProps) {
-  const [aspectRatio, setAspectRatio] = useState<number>(1.5);
+  const [aspectRatio, setAspectRatio] = useState<number>(() => webtoonAspectCache.get(url) ?? 1.5);
 
   const displayHeight =
     imageFit === 'fit_height' ? windowHeight : webtoonWidth * aspectRatio;
@@ -561,6 +596,7 @@ const WebtoonPageItem = React.memo(function WebtoonPageItem({
         onImageSuccess={onImageSuccess}
         onCloudflareVerify={onCloudflareVerify}
         onAspectMeasured={(ratio) => {
+          webtoonAspectCache.set(url, ratio);
           setAspectRatio((prev) => (prev === ratio ? prev : ratio));
         }}
       />
@@ -578,11 +614,13 @@ export default function ReaderScreen() {
     chapterId: rawChapterParam,
     mangaId: rawMangaParam,
     page,
+    scrollOffset: rawScrollOffsetParam,
     scanlator: rawScanlatorParam,
   } = useLocalSearchParams<{
     chapterId: string;
     mangaId?: string;
     page?: string;
+    scrollOffset?: string;
     scanlator?: string;
   }>();
 
@@ -778,178 +816,656 @@ export default function ReaderScreen() {
 
 
   const flatListRef = useRef<FlatList>(null);
-  const webtoonListRef = useRef<FlatList<string>>(null);
+  const webtoonListRef = useRef<FlatList<WebtoonStripPage>>(null);
   const restoredChapterIdRef = useRef<string | null>(null);
   const resumeTargetPageRef = useRef(0);
-  const resumeRestoreAttemptsRef = useRef(0);
   const isProgrammaticScrollRef = useRef(false);
-  const webtoonJumpAttemptsRef = useRef(0);
-  const pendingWebtoonJumpRef = useRef<number | null>(null);
+  const webtoonJumpTokenRef = useRef(0);
   const webtoonJumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingWebtoonJumpRef = useRef<WebtoonJump | null>(null);
   const nextChapterLoadRequestedRef = useRef(false);
-  const lastWebtoonPositionRef = useRef<number | null>(null);
-  const webtoonLayoutsRef = useRef(new Map<number, { y: number; height: number }>());
+  const nextChapterLoadIdRef = useRef<string | null>(null);
+  const loadNextChapterPagesRef = useRef<() => void>(() => {});
+  const loadedPagesChapterIdRef = useRef<string | null>(null);
+  const loadPagesTokenRef = useRef(0);
+  const webtoonStripPagesRef = useRef<WebtoonStripPage[]>([]);
+  const webtoonMeasurementsRef = useRef(new Map<string, WebtoonPageMeasurement>());
   const pendingWebtoonOffsetRef = useRef(0);
   const currentWebtoonIndexRef = useRef(0);
   const webtoonContentOffsetRef = useRef(0);
   const webtoonScrollOffsetRef = useRef(0);
+  const webtoonSuppressTrackingOffsetRef = useRef<number | null>(null);
+  const webtoonPositionFrameRef = useRef<number | null>(null);
+  const [webtoonJumpActive, setWebtoonJumpActive] = useState(false);
 
-  const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 1,
-    minimumViewTime: 0,
-  }).current;
   const readerTheme = ReaderThemes[theme];
   const webtoonWidth = Math.min(windowWidth, 800);
   const webtoonDefaultPageHeight = webtoonWidth * 1.5;
-  const estimateWebtoonOffset = useCallback(
+
+  const getWebtoonMeasurement = useCallback((index: number) => {
+    const page = webtoonStripPagesRef.current[index];
+    if (!page) return undefined;
+    const measurement = webtoonMeasurementsRef.current.get(page.key);
+    return measurement && measurement.index === index ? measurement : undefined;
+  }, []);
+
+  const getWebtoonAverageMeasuredHeight = useCallback(() => {
+    let total = 0;
+    let count = 0;
+    webtoonMeasurementsRef.current.forEach((measurement) => {
+      if (measurement.height > 0) {
+        total += measurement.height;
+        count += 1;
+      }
+    });
+    return count > 0 ? total / count : webtoonDefaultPageHeight;
+  }, [webtoonDefaultPageHeight]);
+
+  const getWebtoonPredictedHeight = useCallback(
+    (url: string) => {
+      if (imageFit === 'fit_height') return windowHeight;
+      const ratio = webtoonAspectCache.get(url);
+      return ratio && ratio > 0 ? webtoonWidth * ratio : webtoonDefaultPageHeight;
+    },
+    [imageFit, webtoonDefaultPageHeight, webtoonWidth, windowHeight],
+  );
+
+  // A page height is known exactly once it has been measured. Before that, use
+  // the cached aspect ratio (or the default placeholder height). This same
+  // prediction backs getItemLayout, so unrendered pages still occupy realistic
+  // space and the list can jump directly into them instead of ratcheting through
+  // every page above the destination.
+  const getWebtoonLayoutHeight = useCallback(
+    (index: number) => {
+      const page = webtoonStripPagesRef.current[index];
+      if (!page) return webtoonDefaultPageHeight;
+      const measurement = webtoonMeasurementsRef.current.get(page.key);
+      if (measurement && measurement.index === index) return measurement.height;
+      return getWebtoonPredictedHeight(page.url);
+    },
+    [getWebtoonPredictedHeight, webtoonDefaultPageHeight],
+  );
+
+  const getWebtoonLayoutOffset = useCallback(
     (index: number) => {
       let offset = 0;
       for (let itemIndex = 0; itemIndex < index; itemIndex += 1) {
-        offset += webtoonLayoutsRef.current.get(itemIndex)?.height || webtoonDefaultPageHeight;
+        offset += getWebtoonLayoutHeight(itemIndex);
       }
       return offset;
     },
-    [webtoonDefaultPageHeight]
+    [getWebtoonLayoutHeight],
   );
 
-  const settleWebtoonJump = useCallback((contentOffset: number) => {
-    const targetIndex = pendingWebtoonJumpRef.current;
-    if (targetIndex === null) return;
+  const getWebtoonItemLayout = useCallback(
+    (_data: ArrayLike<WebtoonStripPage> | null | undefined, index: number) => ({
+      length: getWebtoonLayoutHeight(index),
+      offset: getWebtoonLayoutOffset(index),
+      index,
+    }),
+    [getWebtoonLayoutHeight, getWebtoonLayoutOffset],
+  );
 
-    const layout = webtoonLayoutsRef.current.get(targetIndex);
-    if (!layout) return;
+  // Measured pages give exact offsets. For pages that have never been rendered we
+  // anchor to the closest measured page above or below and predict the gap using
+  // cached aspect ratios, so a long jump lands close enough to start measuring
+  // the actual destination.
+  const estimateWebtoonOffset = useCallback(
+    (index: number) => {
+      if (index <= 0) return 0;
 
-    const targetOffset = Math.max(0, layout.y + pendingWebtoonOffsetRef.current);
-    // A small tolerance accounts for Android's fractional scroll offsets while
-    // still preventing viewability from accepting a nearby page as the target.
-    if (Math.abs(contentOffset - targetOffset) > 18) return;
+      const direct = getWebtoonMeasurement(index);
+      if (direct) return direct.y;
 
-    pendingWebtoonJumpRef.current = null;
-    isProgrammaticScrollRef.current = false;
-    webtoonJumpAttemptsRef.current = 0;
-    if (webtoonJumpTimerRef.current) {
-      clearTimeout(webtoonJumpTimerRef.current);
-      webtoonJumpTimerRef.current = null;
-    }
-  }, []);
+      let before: WebtoonPageMeasurement | undefined;
+      for (let itemIndex = index - 1; itemIndex >= 0; itemIndex -= 1) {
+        const measurement = getWebtoonMeasurement(itemIndex);
+        if (measurement) {
+          before = measurement;
+          break;
+        }
+      }
 
-  const moveWebtoonTo = useCallback((index: number, scrollOffset = 0, animated = false) => {
-    const targetIndex = Math.max(0, index);
-    const targetOffset = Math.max(0, scrollOffset);
+      let after: WebtoonPageMeasurement | undefined;
+      for (let itemIndex = index + 1; itemIndex < webtoonStripPagesRef.current.length; itemIndex += 1) {
+        const measurement = getWebtoonMeasurement(itemIndex);
+        if (measurement) {
+          after = measurement;
+          break;
+        }
+      }
 
-    isProgrammaticScrollRef.current = true;
-    pendingWebtoonJumpRef.current = targetIndex;
-    pendingWebtoonOffsetRef.current = targetOffset;
-    webtoonJumpAttemptsRef.current = 0;
+      const averageHeight = getWebtoonAverageMeasuredHeight();
+      const heightOf = (itemIndex: number) => {
+        const measurement = getWebtoonMeasurement(itemIndex);
+        if (measurement) return measurement.height;
+        const page = webtoonStripPagesRef.current[itemIndex];
+        return page ? getWebtoonPredictedHeight(page.url) : averageHeight;
+      };
 
-    if (webtoonJumpTimerRef.current) {
-      clearTimeout(webtoonJumpTimerRef.current);
-      webtoonJumpTimerRef.current = null;
-    }
+      if (before) {
+        let forward = before.y + before.height;
+        for (let itemIndex = before.index + 1; itemIndex < index; itemIndex += 1) {
+          forward += heightOf(itemIndex);
+        }
 
-    const attemptScroll = () => {
-      if (pendingWebtoonJumpRef.current !== targetIndex) return;
+        if (!after) return Math.max(0, forward);
 
-      const layout = webtoonLayoutsRef.current.get(targetIndex);
-      const offset = Math.max(
-        0,
-        (layout?.y ?? estimateWebtoonOffset(targetIndex)) + targetOffset,
-      );
+        let backward = after.y;
+        for (let itemIndex = index; itemIndex < after.index; itemIndex += 1) {
+          backward -= heightOf(itemIndex);
+        }
 
-      webtoonListRef.current?.scrollToOffset({
-        offset,
-        // Exact measured jumps may animate. Estimated jumps must be immediate;
-        // animating an estimate makes the list visibly snap when measurements arrive.
-        animated: Boolean(layout && animated),
-      });
+        return Math.max(
+          0,
+          index - before.index <= after.index - index ? forward : backward,
+        );
+      }
 
-      if (layout) return;
+      if (after) {
+        let backward = after.y;
+        for (let itemIndex = index; itemIndex < after.index; itemIndex += 1) {
+          backward -= heightOf(itemIndex);
+        }
+        return Math.max(0, backward);
+      }
 
-      webtoonJumpAttemptsRef.current += 1;
-      if (webtoonJumpAttemptsRef.current >= 40) {
-        // The estimated offset is still useful as a safe fallback, but do not
-        // leave the reader permanently locked if a page fails to measure.
-        pendingWebtoonJumpRef.current = null;
-        isProgrammaticScrollRef.current = false;
+      return Math.max(0, getWebtoonLayoutOffset(index));
+    },
+    [
+      getWebtoonAverageMeasuredHeight,
+      getWebtoonLayoutOffset,
+      getWebtoonMeasurement,
+      getWebtoonPredictedHeight,
+    ],
+  );
+
+  const finishWebtoonJump = useCallback(
+    (contentOffset: number) => {
+      const jump = pendingWebtoonJumpRef.current;
+      if (!jump) return;
+
+      pendingWebtoonJumpRef.current = null;
+      isProgrammaticScrollRef.current = false;
+      if (webtoonJumpTimerRef.current) {
+        clearTimeout(webtoonJumpTimerRef.current);
         webtoonJumpTimerRef.current = null;
+      }
+
+      const page = webtoonStripPagesRef.current[jump.globalIndex];
+      if (
+        !page ||
+        page.chapterId !== jump.chapterId ||
+        page.localIndex !== jump.localIndex
+      ) {
+        webtoonSuppressTrackingOffsetRef.current = null;
+        setWebtoonJumpActive(false);
         return;
       }
 
-      webtoonJumpTimerRef.current = setTimeout(attemptScroll, 80);
+      const measurement = getWebtoonMeasurement(jump.globalIndex);
+      currentWebtoonIndexRef.current = jump.globalIndex;
+      webtoonScrollOffsetRef.current = measurement
+        ? Math.max(0, contentOffset - measurement.y)
+        : Math.max(0, jump.offsetWithinPage);
+
+      if (page) {
+        setActiveWebtoonChapterId(page.chapterId);
+        setCurrentPage(page.localIndex);
+      }
+
+      // Keep the indicator on the selected page until the user actually scrolls.
+      webtoonSuppressTrackingOffsetRef.current = contentOffset;
+      setWebtoonJumpActive(false);
+
+      if (jump.globalIndex >= webtoonStripPagesRef.current.length - 3) {
+        loadNextChapterPagesRef.current();
+      }
+    },
+    [getWebtoonMeasurement],
+  );
+
+  const attemptWebtoonJumpRef = useRef<() => void>(() => {});
+
+  const attemptWebtoonJump = useCallback(() => {
+    const jump = pendingWebtoonJumpRef.current;
+    if (!jump) return;
+
+    if (Date.now() - jump.startedAt > 12000) {
+      finishWebtoonJump(webtoonContentOffsetRef.current);
+      return;
+    }
+
+    const pageAtIndex = webtoonStripPagesRef.current[jump.globalIndex];
+    if (
+      !pageAtIndex ||
+      pageAtIndex.chapterId !== jump.chapterId ||
+      pageAtIndex.localIndex !== jump.localIndex
+    ) {
+      const resolvedIndex = webtoonStripPagesRef.current.findIndex(
+        (page) => page.chapterId === jump.chapterId && page.localIndex === jump.localIndex,
+      );
+      if (resolvedIndex < 0) {
+        finishWebtoonJump(webtoonContentOffsetRef.current);
+        return;
+      }
+      jump.globalIndex = resolvedIndex;
+    }
+
+    if (webtoonJumpTimerRef.current) {
+      clearTimeout(webtoonJumpTimerRef.current);
+      webtoonJumpTimerRef.current = null;
+    }
+
+    // Only timed retries count toward the safety cap. Cell-layout callbacks can
+    // legitimately fire many times during a single ratchet step.
+    const retry = () => {
+      const active = pendingWebtoonJumpRef.current;
+      if (!active || active.token !== jump.token) return;
+      active.attempts += 1;
+      if (active.attempts > 120) {
+        // Never leave the reader locked on a page we cannot measure. Settle on
+        // the real scroll position instead of showing an indicator that lies.
+        finishWebtoonJump(webtoonContentOffsetRef.current);
+        return;
+      }
+      attemptWebtoonJumpRef.current();
     };
 
-    attemptScroll();
-  }, [estimateWebtoonOffset]);
+    const list = webtoonListRef.current;
+    if (!list) {
+      webtoonJumpTimerRef.current = setTimeout(retry, 70);
+      return;
+    }
 
-  const handleWebtoonPageLayout = useCallback((index: number, event: LayoutChangeEvent) => {
-    const { y, height } = event.nativeEvent.layout;
-    webtoonLayoutsRef.current.set(index, { y, height });
+    const measurement = getWebtoonMeasurement(jump.globalIndex);
+    if (measurement) {
+      const targetOffset = Math.max(0, measurement.y + jump.offsetWithinPage);
+      const currentOffset = webtoonContentOffsetRef.current;
+      if (Math.abs(currentOffset - targetOffset) <= 24) {
+        finishWebtoonJump(currentOffset);
+        return;
+      }
 
-    if (pendingWebtoonJumpRef.current !== index) return;
-    webtoonListRef.current?.scrollToOffset({
-      offset: Math.max(0, y + pendingWebtoonOffsetRef.current),
+      list.scrollToOffset({ offset: targetOffset, animated: false });
+      webtoonJumpTimerRef.current = setTimeout(() => {
+        const active = pendingWebtoonJumpRef.current;
+        if (!active || active.token !== jump.token) return;
+        const actualOffset = webtoonContentOffsetRef.current;
+        const latest = getWebtoonMeasurement(active.globalIndex);
+        if (latest) {
+          const expected = Math.max(0, latest.y + active.offsetWithinPage);
+          if (Math.abs(actualOffset - expected) <= 32) {
+            finishWebtoonJump(actualOffset);
+            return;
+          }
+
+          // A destination near the end of the strip can be unreachable because
+          // the list cannot scroll past its content. Accept the closest real
+          // offset instead of retrying for several seconds.
+          if (
+            active.lastReportedOffset !== undefined &&
+            Math.abs(actualOffset - active.lastReportedOffset) < 0.5
+          ) {
+            active.stalledChecks = (active.stalledChecks || 0) + 1;
+            if (active.stalledChecks >= 2) {
+              finishWebtoonJump(actualOffset);
+              return;
+            }
+          } else {
+            active.stalledChecks = 0;
+          }
+          active.lastReportedOffset = actualOffset;
+        }
+        retry();
+      }, 140);
+      return;
+    }
+
+    // A virtualized list cannot scroll beyond its measured content. Repeatedly
+    // scrolling to the best estimate ratchets the render window forward until the
+    // destination page is measured, at which point we snap to its exact offset.
+    const estimatedOffset = estimateWebtoonOffset(jump.globalIndex);
+    list.scrollToOffset({
+      offset: Math.max(0, estimatedOffset + jump.offsetWithinPage),
       animated: false,
     });
-    requestAnimationFrame(() => {
-      settleWebtoonJump(webtoonContentOffsetRef.current);
+
+    webtoonJumpTimerRef.current = setTimeout(retry, 70);
+  }, [estimateWebtoonOffset, finishWebtoonJump, getWebtoonMeasurement]);
+
+  attemptWebtoonJumpRef.current = attemptWebtoonJump;
+
+  const jumpToWebtoonPage = useCallback(
+    (targetChapterId: string, localIndex: number, offsetWithinPage = 0) => {
+      const globalIndex = webtoonStripPagesRef.current.findIndex(
+        (page) => page.chapterId === targetChapterId && page.localIndex === localIndex,
+      );
+      if (globalIndex < 0) return false;
+
+      webtoonJumpTokenRef.current += 1;
+      pendingWebtoonJumpRef.current = {
+        chapterId: targetChapterId,
+        localIndex,
+        globalIndex,
+        offsetWithinPage: Math.max(0, offsetWithinPage),
+        token: webtoonJumpTokenRef.current,
+        attempts: 0,
+        startedAt: Date.now(),
+      };
+      isProgrammaticScrollRef.current = true;
+      webtoonSuppressTrackingOffsetRef.current = null;
+      currentWebtoonIndexRef.current = globalIndex;
+      webtoonScrollOffsetRef.current = Math.max(0, offsetWithinPage);
+
+      setActiveWebtoonChapterId(targetChapterId);
+      setCurrentPage(localIndex);
+      setWebtoonJumpActive(true);
+      attemptWebtoonJumpRef.current();
+      return true;
+    },
+    [],
+  );
+
+  const cancelWebtoonJump = useCallback(() => {
+    if (!pendingWebtoonJumpRef.current && !isProgrammaticScrollRef.current) return;
+    pendingWebtoonJumpRef.current = null;
+    isProgrammaticScrollRef.current = false;
+    webtoonJumpTokenRef.current += 1;
+    if (webtoonJumpTimerRef.current) {
+      clearTimeout(webtoonJumpTimerRef.current);
+      webtoonJumpTimerRef.current = null;
+    }
+    webtoonSuppressTrackingOffsetRef.current = null;
+    setWebtoonJumpActive(false);
+  }, []);
+
+  const updateWebtoonPosition = useCallback(
+    (contentOffset: number) => {
+      if (pendingWebtoonJumpRef.current || isProgrammaticScrollRef.current) return;
+      // Wait for the saved-page restore to run before letting the initial layout
+      // at the top of the strip overwrite the resume target with page 1.
+      if (restoredChapterIdRef.current !== chapterId) return;
+
+      const suppressedOffset = webtoonSuppressTrackingOffsetRef.current;
+      if (suppressedOffset !== null) {
+        if (Math.abs(contentOffset - suppressedOffset) <= 2) return;
+        webtoonSuppressTrackingOffsetRef.current = null;
+      }
+
+      const stripPages = webtoonStripPagesRef.current;
+      if (stripPages.length === 0) return;
+
+      const readingLine = contentOffset + windowHeight * 0.4;
+      let activeIndex: number | null = null;
+      let bestTop = -1;
+
+      webtoonMeasurementsRef.current.forEach((measurement) => {
+        if (measurement.index < 0 || measurement.index >= stripPages.length) return;
+        const page = stripPages[measurement.index];
+        if (!page || page.key !== measurement.key) return;
+        if (
+          readingLine >= measurement.y &&
+          readingLine < measurement.y + measurement.height &&
+          measurement.y > bestTop
+        ) {
+          bestTop = measurement.y;
+          activeIndex = measurement.index;
+        }
+      });
+
+      if (activeIndex === null) {
+        let bestDistance = Infinity;
+        webtoonMeasurementsRef.current.forEach((measurement) => {
+          if (measurement.index < 0 || measurement.index >= stripPages.length) return;
+          const page = stripPages[measurement.index];
+          if (!page || page.key !== measurement.key) return;
+          const distance =
+            readingLine < measurement.y
+              ? measurement.y - readingLine
+              : readingLine - (measurement.y + measurement.height);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            activeIndex = measurement.index;
+          }
+        });
+      }
+
+      if (activeIndex === null) return;
+      const page = stripPages[activeIndex];
+      if (!page) return;
+
+      const measurement = webtoonMeasurementsRef.current.get(page.key);
+      currentWebtoonIndexRef.current = activeIndex;
+      setActiveWebtoonChapterId((previous) =>
+        previous === page.chapterId ? previous : page.chapterId,
+      );
+      setCurrentPage((previous) =>
+        previous === page.localIndex ? previous : page.localIndex,
+      );
+      webtoonScrollOffsetRef.current = measurement
+        ? Math.max(0, contentOffset - measurement.y)
+        : 0;
+
+      if (activeIndex >= stripPages.length - 3) {
+        loadNextChapterPagesRef.current();
+      }
+    },
+    [chapterId, windowHeight],
+  );
+
+  const queueWebtoonPositionUpdate = useCallback(() => {
+    if (webtoonPositionFrameRef.current !== null) return;
+    webtoonPositionFrameRef.current = requestAnimationFrame(() => {
+      webtoonPositionFrameRef.current = null;
+      updateWebtoonPosition(webtoonContentOffsetRef.current);
     });
-  }, [settleWebtoonJump]);
+  }, [updateWebtoonPosition]);
+
+  const handleWebtoonCellLayout = useCallback(
+    (index: number, event: LayoutChangeEvent) => {
+      // This onLayout belongs to the FlatList cell itself, so its y is the exact
+      // content offset of the page. The page item's own y is always 0 because it
+      // is positioned inside the cell wrapper.
+      const page = webtoonStripPagesRef.current[index];
+      if (!page) return;
+
+      const { y, height } = event.nativeEvent.layout;
+      if (!Number.isFinite(y) || !Number.isFinite(height) || height <= 0) return;
+
+      const previous = webtoonMeasurementsRef.current.get(page.key);
+      if (
+        previous &&
+        previous.index === index &&
+        Math.abs(previous.y - y) < 0.5 &&
+        Math.abs(previous.height - height) < 0.5
+      ) {
+        return;
+      }
+
+      webtoonMeasurementsRef.current.set(page.key, {
+        key: page.key,
+        index,
+        y,
+        height,
+      });
+
+      // Keep cached offsets for pages below this one valid before they remount.
+      // Without this a far jump can anchor to a stale measurement after an image
+      // above it changed height.
+      if (previous && Math.abs(previous.height - height) >= 0.5) {
+        const heightDelta = height - previous.height;
+        webtoonMeasurementsRef.current.forEach((measurement) => {
+          if (measurement.index > index) {
+            measurement.y += heightDelta;
+          }
+        });
+      }
+
+      const jump = pendingWebtoonJumpRef.current;
+      if (jump) {
+        if (
+          jump.globalIndex === index ||
+          (previous && Math.abs(previous.height - height) >= 0.5)
+        ) {
+          attemptWebtoonJumpRef.current();
+        }
+        return;
+      }
+
+      // If a page entirely above the viewport grows or shrinks after its image
+      // loads, compensate the scroll offset so the reader does not drift.
+      if (previous && Math.abs(previous.height - height) >= 0.5) {
+        const changedAboveViewport =
+          previous.y + previous.height <= webtoonContentOffsetRef.current + 1;
+        if (changedAboveViewport) {
+          const nextOffset = Math.max(
+            0,
+            webtoonContentOffsetRef.current + (height - previous.height),
+          );
+          webtoonContentOffsetRef.current = nextOffset;
+          webtoonListRef.current?.scrollToOffset({
+            offset: nextOffset,
+            animated: false,
+          });
+          webtoonSuppressTrackingOffsetRef.current = nextOffset;
+        }
+      }
+
+      queueWebtoonPositionUpdate();
+    },
+    [queueWebtoonPositionUpdate],
+  );
+
+  const webtoonCellRenderer = useMemo(() => {
+    const WebtoonCellRenderer = ({
+      index,
+      style,
+      onLayout,
+      onFocusCapture,
+      children,
+    }: any) => (
+      <View
+        style={style}
+        onFocusCapture={onFocusCapture}
+        onLayout={(event: LayoutChangeEvent) => {
+          onLayout?.(event);
+          handleWebtoonCellLayout(index, event);
+        }}
+      >
+        {children}
+      </View>
+    );
+    WebtoonCellRenderer.displayName = 'WebtoonCellRenderer';
+    return WebtoonCellRenderer;
+  }, [handleWebtoonCellLayout]);
+
+  useEffect(() => {
+    return () => {
+      if (webtoonPositionFrameRef.current !== null) {
+        cancelAnimationFrame(webtoonPositionFrameRef.current);
+        webtoonPositionFrameRef.current = null;
+      }
+      if (webtoonJumpTimerRef.current) {
+        clearTimeout(webtoonJumpTimerRef.current);
+        webtoonJumpTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // Load chapter pages & metadata
   useEffect(() => {
     if (!chapterId) return;
     loadPages();
     loadMangaMeta();
-  }, [chapterId, dataSaver, mangaId]);
+  }, [chapterId, dataSaver, mangaId, page, rawScrollOffsetParam]);
 
-  // FlatList only uses initialScrollIndex on its first mount. This effect restores
-  // a saved webtoon position after the chapter has been loaded and laid out.
+  // Remember the page the user came from when the reading mode changes. A fresh
+  // webtoon FlatList mounts at offset 0, so it must be seeked explicitly.
+  const lastReaderModeRef = useRef<ReadingMode | null>(null);
+  useEffect(() => {
+    const previousMode = lastReaderModeRef.current;
+    lastReaderModeRef.current = mode;
+
+    if (mode === 'webtoon' && previousMode !== 'webtoon') {
+      if (restoredChapterIdRef.current === chapterId) {
+        resumeTargetPageRef.current = currentPage;
+        pendingWebtoonOffsetRef.current = 0;
+      } else if (pages.length > 0 && currentPage !== resumeTargetPageRef.current) {
+        resumeTargetPageRef.current = currentPage;
+        pendingWebtoonOffsetRef.current = 0;
+      }
+      restoredChapterIdRef.current = null;
+      cancelWebtoonJump();
+    } else if (mode !== 'webtoon' && previousMode === 'webtoon') {
+      resumeTargetPageRef.current = currentPage;
+      pendingWebtoonOffsetRef.current = 0;
+    }
+  }, [cancelWebtoonJump, chapterId, currentPage, mode, pages.length]);
+
+  // Restore a saved webtoon position after the chapter has loaded and laid out.
+  // The list must not report its initial top-of-strip position until this runs.
   useEffect(() => {
     if (
       mode !== 'webtoon' ||
       isLoading ||
       pages.length === 0 ||
-      resumeTargetPageRef.current === 0 ||
       restoredChapterIdRef.current === chapterId
     ) {
       return;
     }
 
     const frame = requestAnimationFrame(() => {
-      moveWebtoonTo(resumeTargetPageRef.current, pendingWebtoonOffsetRef.current);
+      const targetPage = Math.max(
+        0,
+        Math.min(resumeTargetPageRef.current, pages.length - 1),
+      );
+      jumpToWebtoonPage(
+        chapterId,
+        targetPage,
+        Math.max(0, pendingWebtoonOffsetRef.current),
+      );
       restoredChapterIdRef.current = chapterId;
     });
 
     return () => {
       cancelAnimationFrame(frame);
     };
-  }, [chapterId, isLoading, mode, moveWebtoonTo, pages.length]);
+  }, [chapterId, isLoading, jumpToWebtoonPage, mode, pages.length]);
 
   const loadPages = async () => {
+    const loadToken = ++loadPagesTokenRef.current;
     try {
       setIsLoading(true);
       setError(null);
       setIsCloudflare(false);
       setOfflineUnavailable(false);
+      setPages([]);
+      setCurrentPage(0);
+      loadedPagesChapterIdRef.current = null;
       restoredChapterIdRef.current = null;
       resumeTargetPageRef.current = 0;
-      resumeRestoreAttemptsRef.current = 0;
       setDetectedDefaultMode(null);
       setMangaOriginalLanguage(undefined);
       isProgrammaticScrollRef.current = false;
-      webtoonJumpAttemptsRef.current = 0;
       pendingWebtoonJumpRef.current = null;
-      if (webtoonJumpTimerRef.current) clearTimeout(webtoonJumpTimerRef.current);
+      webtoonJumpTokenRef.current += 1;
+      if (webtoonJumpTimerRef.current) {
+        clearTimeout(webtoonJumpTimerRef.current);
+        webtoonJumpTimerRef.current = null;
+      }
+      setWebtoonJumpActive(false);
       setActiveWebtoonChapterId(chapterId);
       setNextChapterPages([]);
       setNextChapterPageHeaders(undefined);
       nextChapterLoadRequestedRef.current = false;
-      lastWebtoonPositionRef.current = null;
-      webtoonLayoutsRef.current.clear();
+      nextChapterLoadIdRef.current = null;
+      webtoonMeasurementsRef.current.clear();
       pendingWebtoonOffsetRef.current = 0;
       currentWebtoonIndexRef.current = 0;
       webtoonContentOffsetRef.current = 0;
       webtoonScrollOffsetRef.current = 0;
+      webtoonSuppressTrackingOffsetRef.current = null;
 
       // Check if downloaded locally
       const downloadedCh = useDownloadStore.getState().getChapter(chapterId!);
@@ -960,6 +1476,7 @@ export default function ReaderScreen() {
         if (downloadedCh.chapterNum) setChapterTitle(`Ch. ${downloadedCh.chapterNum}`);
       } else {
         const isOnline = await checkNetwork();
+        if (loadPagesTokenRef.current !== loadToken) return;
         if (!isOnline) {
           setPages([]);
           setOfflineUnavailable(true);
@@ -969,6 +1486,7 @@ export default function ReaderScreen() {
         const isExt = isExternalSource(chapterId!);
         if (isExt) {
           const result = await getUniversalChapterPages(chapterId!);
+          if (loadPagesTokenRef.current !== loadToken) return;
           loadedPages = (result.pages || []).map((p) => {
             if (!p) return p;
             if (p.startsWith('http') || p.startsWith('data:') || p.startsWith('file:')) {
@@ -984,6 +1502,7 @@ export default function ReaderScreen() {
           }
 
           await CloudFlareCookieManager.init();
+          if (loadPagesTokenRef.current !== loadToken) return;
           const isMangaDot = chapterId.includes('mangadot');
           const cfCookie = isMangaDot
             ? CloudFlareCookieManager.getCookie('mangadot.net')
@@ -1046,9 +1565,12 @@ export default function ReaderScreen() {
           setPageHeaders(fallbackHeaders);
         } else {
           const result = await getChapterPages(chapterId!, dataSaver);
+          if (loadPagesTokenRef.current !== loadToken) return;
           loadedPages = result.pages;
         }
       }
+
+      if (loadPagesTokenRef.current !== loadToken) return;
 
       const sanitizedPages = (loadedPages || []).map((p) => {
         if (!p) return p;
@@ -1061,24 +1583,31 @@ export default function ReaderScreen() {
         return p;
       });
 
-      setPages(sanitizedPages);
-
       let targetPage = 0;
+      pendingWebtoonOffsetRef.current = 0;
+      const historyEntry = useHistoryStore
+        .getState()
+        .entries.find((e) => e.chapterId === chapterId);
       if (page !== undefined && page !== null && page !== '') {
         targetPage = parseInt(page, 10);
-      } else {
-        const historyEntry = useHistoryStore.getState().entries.find((e) => e.chapterId === chapterId);
-        if (historyEntry) {
-          targetPage = historyEntry.pageIndex;
-          pendingWebtoonOffsetRef.current = historyEntry.scrollOffset || 0;
-        }
+      } else if (historyEntry) {
+        targetPage = historyEntry.pageIndex;
       }
-      const maxPage = Math.max(0, loadedPages.length - 1);
+      const scrollOffsetParam = parseInt(rawScrollOffsetParam || '', 10);
+      pendingWebtoonOffsetRef.current =
+        !isNaN(scrollOffsetParam) && scrollOffsetParam > 0
+          ? scrollOffsetParam
+          : historyEntry?.scrollOffset || 0;
+      const maxPage = Math.max(0, sanitizedPages.length - 1);
       const clampedPage = Math.max(0, Math.min(isNaN(targetPage) ? 0 : targetPage, maxPage));
+
+      loadedPagesChapterIdRef.current = chapterId;
       resumeTargetPageRef.current = clampedPage;
+      webtoonScrollOffsetRef.current = pendingWebtoonOffsetRef.current;
+      setPages(sanitizedPages);
       setCurrentPage(clampedPage);
     } catch (err: any) {
-      console.error('Failed to load pages:', err);
+      if (loadPagesTokenRef.current !== loadToken) return;
       const isCf =
         err?.isCloudFlare ||
         err?.name === 'CloudFlareError' ||
@@ -1087,6 +1616,11 @@ export default function ReaderScreen() {
           (err.message.toLowerCase().includes('cloudflare') ||
             err.message.toLowerCase().includes('just a moment') ||
             err.message.toLowerCase().includes('turnstile')));
+      if (!isCf) {
+        console.error('Failed to load pages:', err);
+      } else {
+        console.log('[Reader] Cloudflare verification required:', chapterId);
+      }
       if (isCf) {
         setIsCloudflare(true);
         if (chapterId?.includes('reimanga')) {
@@ -1124,6 +1658,7 @@ export default function ReaderScreen() {
       }
 
       const isOnline = await checkNetwork();
+      if (loadPagesTokenRef.current !== loadToken) return;
       if (!isOnline) {
         setPages([]);
         setOfflineUnavailable(true);
@@ -1131,7 +1666,9 @@ export default function ReaderScreen() {
         setError('Failed to load chapter pages. Please try again.');
       }
     } finally {
-      setIsLoading(false);
+      if (loadPagesTokenRef.current === loadToken) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -1379,34 +1916,46 @@ export default function ReaderScreen() {
       onRequestClose={() => setIsCfInAppModalOpen(false)}
     >
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-        <View style={[styles.cfHeaderRow, { backgroundColor: colors.surfaceElevated }]}>
+        <View style={[styles.cfHeaderRow, { backgroundColor: colors.surfaceElevated, borderBottomWidth: 0 }]}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Ionicons name="shield-checkmark" size={20} color={colors.accent} />
-            <Text style={[styles.cfHeaderTitle, { color: colors.text }]}>Cloudflare Verification</Text>
+            <Text style={[styles.cfHeaderTitle, { color: colors.text }]}>Verification</Text>
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Pressable
               onPress={() => {
-                if (cfInAppUrl) {
-                  isSolvingCloudflareRef.current = true;
-                  WebBrowser.openBrowserAsync(cfInAppUrl).catch(() => {});
-                }
+                const domain = chapterId.includes('reimanga')
+                  ? 'reimanga.net'
+                  : chapterId.includes('onisaga')
+                  ? 'onisaga.com'
+                  : chapterId.includes('toonkotsu')
+                  ? 'toonkotsu.com'
+                  : chapterId.includes('weebcentral')
+                  ? 'weebcentral.com'
+                  : 'mangadot.net';
+                webViewBridge.setDomainVerified(domain, true);
+                setIsCfInAppModalOpen(false);
+                loadPages();
               }}
               style={({ pressed }) => [
                 {
-                  width: 40,
-                  height: 40,
+                  paddingHorizontal: 16,
+                  height: 34,
                   borderRadius: Radius.full,
+                  backgroundColor: colors.accent,
                   alignItems: 'center',
                   justifyContent: 'center',
-                  backgroundColor: colors.surface,
+                  flexDirection: 'row',
+                  gap: 4,
                 },
-                pressed && { opacity: 0.7 },
+                pressed && { opacity: 0.8 },
+                Platform.OS === 'web' && ({ cursor: 'pointer' } as any),
               ]}
               accessibilityRole="button"
-              aria-label="Open in external browser"
+              aria-label="Done Verification"
             >
-              <Ionicons name="open-outline" size={18} color={colors.text} />
+              <Ionicons name="checkmark" size={15} color={colors.accentForeground} />
+              <Text style={{ fontSize: 13, fontWeight: '700', color: colors.accentForeground }}>Done</Text>
             </Pressable>
             <Pressable
               onPress={() => {
@@ -1425,9 +1974,9 @@ export default function ReaderScreen() {
               }}
               style={({ pressed }) => [
                 {
-                  width: 40,
-                  height: 40,
-                  borderRadius: Radius.full,
+                  width: 34,
+                  height: 34,
+                  borderRadius: 17,
                   alignItems: 'center',
                   justifyContent: 'center',
                   backgroundColor: colors.surface,
@@ -1437,9 +1986,26 @@ export default function ReaderScreen() {
               accessibilityRole="button"
               aria-label="Close Verification"
             >
-              <Ionicons name="close" size={22} color={colors.text} />
+              <Ionicons name="close" size={20} color={colors.text} />
             </Pressable>
           </View>
+        </View>
+
+        {/* Dark Mode High-Contrast Helper Strip */}
+        <View
+          style={{
+            paddingHorizontal: 16,
+            paddingVertical: 9,
+            backgroundColor: colors.surfaceElevated || '#121215',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <Ionicons name="information-circle-outline" size={15} color={colors.accent} />
+          <Text style={{ fontSize: 12, color: colors.textSecondary || '#D4D4D8', flex: 1, fontWeight: '500', lineHeight: 16 }}>
+            Complete the check below. Yomite will automatically return once verified, or tap Done.
+          </Text>
         </View>
 
         {Platform.OS !== 'web' ? (
@@ -1722,6 +2288,7 @@ export default function ReaderScreen() {
 
   // Save progress to history & update library unread badge
   useEffect(() => {
+    if (loadedPagesChapterIdRef.current !== chapterId) return;
     if (pages.length > 0 && chapterId && (mode !== 'webtoon' || activeWebtoonChapterId === chapterId)) {
       const activeMangaId = mangaId || resolvedMangaId || chapterId!;
       addHistoryEntry({
@@ -1805,16 +2372,20 @@ export default function ReaderScreen() {
     setNextChapterPages([]);
     setNextChapterPageHeaders(undefined);
     nextChapterLoadRequestedRef.current = false;
+    nextChapterLoadIdRef.current = null;
     setActiveWebtoonChapterId(chapterId);
   }, [dataSaver, mode, nextChapterId]);
 
   const loadNextChapterPages = useCallback(async () => {
     if (mode !== 'webtoon' || !nextChapterId || nextChapterLoadRequestedRef.current) return;
     nextChapterLoadRequestedRef.current = true;
+    nextChapterLoadIdRef.current = nextChapterId;
+    const requestedNextChapterId = nextChapterId;
     try {
-      const result = isExternalSource(nextChapterId)
-        ? await getUniversalChapterPages(nextChapterId)
-        : await getChapterPages(nextChapterId, dataSaver);
+      const result = isExternalSource(requestedNextChapterId)
+        ? await getUniversalChapterPages(requestedNextChapterId)
+        : await getChapterPages(requestedNextChapterId, dataSaver);
+      if (nextChapterLoadIdRef.current !== requestedNextChapterId) return;
       const rawPages = result.pages || [];
       const sanitizedNextPages = rawPages.map((p) => {
         if (!p) return p;
@@ -1870,13 +2441,61 @@ export default function ReaderScreen() {
         setNextChapterPageHeaders(undefined);
       }
     } catch (err) {
-      nextChapterLoadRequestedRef.current = false;
+      if (nextChapterLoadIdRef.current === requestedNextChapterId) {
+        nextChapterLoadRequestedRef.current = false;
+      }
       console.warn('Unable to load next chapter webtoon pages:', err);
     }
   }, [dataSaver, mode, nextChapterId]);
+  loadNextChapterPagesRef.current = loadNextChapterPages;
 
-  const activeAppendedChapter = activeWebtoonChapterId === nextChapterId ? chapterList.find((c) => c.id === nextChapterId) : undefined;
-  const activePageCount = activeAppendedChapter ? nextChapterPages.length : pages.length;
+  // A page is identified by {chapterId, localIndex}, never by its FlatList index.
+  // The global index is derived from the current concatenated data array, so it
+  // stays correct when the next chapter is appended or measurements reflow.
+  const webtoonStripPages = useMemo<WebtoonStripPage[]>(() => {
+    const strip: WebtoonStripPage[] = [];
+    pages.forEach((url, localIndex) => {
+      strip.push({
+        key: getWebtoonPageKey(chapterId, localIndex),
+        chapterId,
+        localIndex,
+        globalIndex: strip.length,
+        url,
+      });
+    });
+    if (nextChapterPages.length > 0 && nextChapterId) {
+      nextChapterPages.forEach((url, localIndex) => {
+        strip.push({
+          key: getWebtoonPageKey(nextChapterId, localIndex),
+          chapterId: nextChapterId,
+          localIndex,
+          globalIndex: strip.length,
+          url,
+        });
+      });
+    }
+    return strip;
+  }, [chapterId, nextChapterId, nextChapterPages, pages]);
+  webtoonStripPagesRef.current = webtoonStripPages;
+
+  useEffect(() => {
+    const validKeys = new Set(webtoonStripPages.map((stripPage) => stripPage.key));
+    webtoonMeasurementsRef.current.forEach((_measurement, key) => {
+      if (!validKeys.has(key)) {
+        webtoonMeasurementsRef.current.delete(key);
+      }
+    });
+  }, [webtoonStripPages]);
+
+  const readingNextChapter =
+    !!nextChapterId &&
+    activeWebtoonChapterId === nextChapterId &&
+    nextChapterPages.length > 0;
+  const activeAppendedChapter = readingNextChapter
+    ? chapterList.find((c) => c.id === nextChapterId)
+    : undefined;
+  const activePageCount = readingNextChapter ? nextChapterPages.length : pages.length;
+  const activeChapterIdForPages = readingNextChapter ? nextChapterId : chapterId;
   const activeChapterTitle = activeAppendedChapter
     ? `${activeAppendedChapter.attributes.chapter ? `Ch. ${activeAppendedChapter.attributes.chapter}` : 'Chapter'}${activeAppendedChapter.attributes.title ? ` - ${activeAppendedChapter.attributes.title}` : ''}`
     : chapterTitle;
@@ -1902,57 +2521,13 @@ export default function ReaderScreen() {
       });
     }
   }, [activeWebtoonChapterId, addToLibrary, chapterId, chapterList.length, coverUrl, currentPage, mangaId, mangaTitle, readerLibraryEntry, removeFromLibrary]);
-  const webtoonPages = useMemo(
-    () => (nextChapterPages.length > 0 ? [...pages, ...nextChapterPages] : pages),
-    [nextChapterPages, pages]
-  );
-
-  const handleWebtoonViewableItemsChanged = useCallback(({ viewableItems }: any) => {
-    // A page selector/history restore owns the scroll until its measured page
-    // reaches the requested offset. Otherwise a transient viewability event can
-    // immediately replace the selected page with the page that happened to be
-    // visible during the jump.
-    settleWebtoonJump(webtoonContentOffsetRef.current);
-    if (pendingWebtoonJumpRef.current !== null || isProgrammaticScrollRef.current) {
+  useEffect(() => {
+    if (!readingNextChapter || !nextChapterId || currentPage < 0 || nextChapterPages.length === 0) {
       return;
     }
-
-    const visibleIndexes = (viewableItems || [])
-      .map((item: any) => item.index)
-      .filter((index: any): index is number => typeof index === 'number')
-      .sort((a: number, b: number) => a - b);
-    const firstVisible = visibleIndexes[0];
-    if (firstVisible === null || firstVisible === undefined) return;
-
-    if (firstVisible >= pages.length - 2 && nextChapterPages.length === 0 && nextChapterId) {
-      loadNextChapterPages();
-    }
-
-    const viewportCenter = webtoonContentOffsetRef.current + windowHeight * 0.4;
-    const centeredVisible = visibleIndexes.find((index) => {
-      const layout = webtoonLayoutsRef.current.get(index);
-      return layout && viewportCenter >= layout.y && viewportCenter <= layout.y + layout.height;
-    });
-    const activeVisible = centeredVisible ?? firstVisible;
-
-    if (lastWebtoonPositionRef.current === activeVisible) return;
-    lastWebtoonPositionRef.current = activeVisible;
-    currentWebtoonIndexRef.current = activeVisible;
-
-    if (activeVisible < pages.length) {
-      setActiveWebtoonChapterId(chapterId);
-      setCurrentPage(activeVisible);
-    } else if (nextChapterPages.length > 0) {
-      setActiveWebtoonChapterId(nextChapterId);
-      setCurrentPage(activeVisible - pages.length);
-    }
-  }, [chapterId, loadNextChapterPages, nextChapterId, nextChapterPages.length, pages.length, settleWebtoonJump, windowHeight]);
-
-  useEffect(() => {
-    if (!activeAppendedChapter || currentPage < 0 || nextChapterPages.length === 0) return;
     addHistoryEntry({
-      mangaId: mangaId ?? resolvedMangaId ?? activeAppendedChapter.id,
-      chapterId: activeAppendedChapter.id,
+      mangaId: mangaId ?? resolvedMangaId ?? nextChapterId,
+      chapterId: nextChapterId,
       title: mangaTitle,
       chapterTitle: activeChapterTitle,
       coverUrl,
@@ -1960,23 +2535,37 @@ export default function ReaderScreen() {
       totalPages: nextChapterPages.length,
       scrollOffset: webtoonScrollOffsetRef.current,
     });
-  }, [activeAppendedChapter, activeChapterTitle, addHistoryEntry, coverUrl, currentPage, mangaId, mangaTitle, nextChapterPages.length, resolvedMangaId]);
+  }, [activeChapterTitle, addHistoryEntry, coverUrl, currentPage, mangaId, mangaTitle, nextChapterId, nextChapterPages.length, readingNextChapter, resolvedMangaId]);
 
   const saveWebtoonProgress = useCallback(() => {
     if (mode !== 'webtoon' || activePageCount === 0) return;
-    const activeChapterId = activeAppendedChapter?.id || chapterId;
-    if (!activeChapterId) return;
+    updateWebtoonPosition(webtoonContentOffsetRef.current);
+
+    const activePage = webtoonStripPagesRef.current[currentWebtoonIndexRef.current];
+    const saveChapterId = activePage?.chapterId || activeChapterIdForPages;
+    if (!saveChapterId) return;
+    const savePageIndex = activePage ? activePage.localIndex : currentPage;
+    const saveTotalPages = activePage
+      ? activePage.chapterId === nextChapterId
+        ? nextChapterPages.length
+        : pages.length
+      : activePageCount;
+    const saveChapter = chapterList.find((chapter) => chapter.id === saveChapterId);
+    const saveChapterTitle = saveChapter
+      ? `${saveChapter.attributes.chapter ? `Ch. ${saveChapter.attributes.chapter}` : 'Chapter'}${saveChapter.attributes.title ? ` - ${saveChapter.attributes.title}` : ''}`
+      : activeChapterTitle;
+
     addHistoryEntry({
-      mangaId: mangaId ?? resolvedMangaId ?? activeChapterId,
-      chapterId: activeChapterId,
+      mangaId: mangaId ?? resolvedMangaId ?? saveChapterId,
+      chapterId: saveChapterId,
       title: mangaTitle,
-      chapterTitle: activeChapterTitle,
+      chapterTitle: saveChapterTitle,
       coverUrl,
-      pageIndex: currentPage,
-      totalPages: activePageCount,
+      pageIndex: savePageIndex,
+      totalPages: saveTotalPages,
       scrollOffset: webtoonScrollOffsetRef.current,
     });
-  }, [activeAppendedChapter, activeChapterTitle, activePageCount, addHistoryEntry, chapterId, coverUrl, currentPage, mangaId, mangaTitle, mode, resolvedMangaId]);
+  }, [activeChapterIdForPages, activeChapterTitle, activePageCount, addHistoryEntry, chapterList, coverUrl, currentPage, mangaId, mangaTitle, mode, nextChapterId, nextChapterPages.length, pages.length, resolvedMangaId, updateWebtoonPosition]);
 
   const navigateToChapter = useCallback(
     (targetChapterId: string) => {
@@ -2005,16 +2594,16 @@ export default function ReaderScreen() {
 
   const goToPage = useCallback(
     (pageIdx: number) => {
-      const pageCount = activeAppendedChapter ? nextChapterPages.length : pages.length;
+      const pageCount = readingNextChapter ? nextChapterPages.length : pages.length;
       const clamped = Math.max(0, Math.min(pageIdx, pageCount - 1));
       setCurrentPage(clamped);
 
       if (mode === 'webtoon') {
-        const globalIndex = activeAppendedChapter ? pages.length + clamped : clamped;
-        // Webtoon pages have variable measured heights. An instant measured
-        // jump is more reliable than animating an estimate and then correcting
-        // the destination while the list is still laying out images.
-        moveWebtoonTo(globalIndex, 0, false);
+        if (activeChapterIdForPages) {
+          // Resolve the stable page key now; the jump keeps working even if
+          // the next chapter gets appended while measurements are pending.
+          jumpToWebtoonPage(activeChapterIdForPages, clamped, 0);
+        }
       } else if (mode === 'double') {
         const spreadIdx = Math.floor(clamped / 2);
         try {
@@ -2042,7 +2631,7 @@ export default function ReaderScreen() {
         }
       }
     },
-    [activeAppendedChapter, mode, moveWebtoonTo, nextChapterPages.length, pages.length, windowWidth]
+    [activeChapterIdForPages, jumpToWebtoonPage, mode, nextChapterPages.length, pages.length, readingNextChapter, windowWidth]
   );
 
   useEffect(() => {
@@ -2108,34 +2697,38 @@ export default function ReaderScreen() {
   const goToNextPageOrChapter = useCallback(() => {
     if (currentPage < activePageCount - 1) {
       goToPage(currentPage + 1);
-    } else if (activeAppendedChapter) {
+    } else if (readingNextChapter) {
       return;
-    } else if (nextChapterPages.length > 0) {
+    } else if (mode === 'webtoon' && nextChapterPages.length > 0 && nextChapterId) {
       setActiveWebtoonChapterId(nextChapterId);
       setCurrentPage(0);
-      moveWebtoonTo(pages.length, 0, false);
-    } else if (hasNextChapter && nextChapterPages.length === 0) {
+      jumpToWebtoonPage(nextChapterId, 0, 0);
+    } else if (hasNextChapter) {
       if (hapticsEnabled && Platform.OS !== 'web') {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
       handleNextChapter();
     }
-  }, [activeAppendedChapter, activePageCount, currentPage, goToPage, hasNextChapter, handleNextChapter, hapticsEnabled, moveWebtoonTo, nextChapterPages.length, pages.length]);
+  }, [activePageCount, currentPage, goToPage, hasNextChapter, handleNextChapter, hapticsEnabled, jumpToWebtoonPage, mode, nextChapterId, nextChapterPages.length, readingNextChapter]);
 
   const goToPrevPageOrChapter = useCallback(() => {
     if (currentPage > 0) {
       goToPage(currentPage - 1);
-    } else if (activeAppendedChapter) {
+    } else if (readingNextChapter && nextChapterId && pages.length > 0) {
       setActiveWebtoonChapterId(chapterId);
       setCurrentPage(pages.length - 1);
-      moveWebtoonTo(pages.length - 1, 0, false);
+      if (mode === 'webtoon') {
+        jumpToWebtoonPage(chapterId, pages.length - 1, 0);
+      } else {
+        goToPage(pages.length - 1);
+      }
     } else if (hasPrevChapter) {
       if (hapticsEnabled && Platform.OS !== 'web') {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
       handlePrevChapter();
     }
-  }, [activeAppendedChapter, chapterId, currentPage, goToPage, hasPrevChapter, handlePrevChapter, hapticsEnabled, moveWebtoonTo, pages.length]);
+  }, [chapterId, currentPage, goToPage, hasPrevChapter, handlePrevChapter, hapticsEnabled, jumpToWebtoonPage, mode, nextChapterId, pages.length, readingNextChapter]);
 
   const handlePageTap = useCallback(
     (x: number) => {
@@ -2217,7 +2810,7 @@ export default function ReaderScreen() {
       } else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
         if (mode === 'webtoon') {
           webtoonListRef.current?.scrollToOffset({
-            offset: Math.max(0, (currentPage - 1) * windowHeight * 0.8),
+            offset: Math.max(0, webtoonContentOffsetRef.current - windowHeight * 0.8),
             animated: true,
           });
         } else {
@@ -2226,7 +2819,7 @@ export default function ReaderScreen() {
       } else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
         if (mode === 'webtoon') {
           webtoonListRef.current?.scrollToOffset({
-            offset: (currentPage + 1) * windowHeight * 0.8,
+            offset: webtoonContentOffsetRef.current + windowHeight * 0.8,
             animated: true,
           });
         } else {
@@ -2500,59 +3093,53 @@ export default function ReaderScreen() {
       {/* Reader Layout Mode */}
       {mode === 'webtoon' ? (
         <FlatList
-          key={`flatlist-webtoon-${chapterId}`}
+          key={`flatlist-webtoon-${chapterId}-${pages.length > 0 ? 'ready' : 'empty'}`}
           ref={webtoonListRef}
           style={styles.webtoonList}
-          data={webtoonPages}
-          keyExtractor={(item, index) => `webtoon-${item}-${index}`}
-          renderItem={({ item, index }) => (
+          data={webtoonStripPages}
+          keyExtractor={(page) => page.key}
+          getItemLayout={getWebtoonItemLayout}
+          initialScrollIndex={
+            currentPage > 0 && currentPage < pages.length ? currentPage : undefined
+          }
+          renderItem={({ item: page }) => (
             <WebtoonPageItem
-              url={item}
-              index={index}
+              url={page.url}
+              index={page.globalIndex}
               webtoonWidth={webtoonWidth}
               windowHeight={windowHeight}
               imageFit={imageFit}
               onTap={stablePageTap}
-              headers={index < pages.length ? pageHeaders : nextChapterPageHeaders}
+              headers={page.chapterId === chapterId ? pageHeaders : nextChapterPageHeaders}
               reloadTrigger={reloadTrigger}
               onImageError={handleImageError}
               onImageSuccess={handleImageSuccess}
               onCloudflareVerify={handleOpenCloudflareVerification}
-              onLayout={handleWebtoonPageLayout}
             />
           )}
-          onViewableItemsChanged={handleWebtoonViewableItemsChanged}
-          viewabilityConfig={viewabilityConfig}
+          CellRendererComponent={webtoonCellRenderer}
           removeClippedSubviews={false}
           scrollEnabled={true}
           nestedScrollEnabled={true}
-          maxToRenderPerBatch={5}
+          maxToRenderPerBatch={webtoonJumpActive ? 12 : 5}
           updateCellsBatchingPeriod={50}
           initialNumToRender={5}
-          windowSize={7}
+          windowSize={webtoonJumpActive ? 21 : 7}
           onScroll={({ nativeEvent }) => {
             webtoonContentOffsetRef.current = nativeEvent.contentOffset.y;
-            settleWebtoonJump(nativeEvent.contentOffset.y);
-            const layout = webtoonLayoutsRef.current.get(currentWebtoonIndexRef.current);
-            if (layout) {
-              webtoonScrollOffsetRef.current = Math.max(0, nativeEvent.contentOffset.y - layout.y);
-            }
+            queueWebtoonPositionUpdate();
           }}
           onScrollEndDrag={saveWebtoonProgress}
           onMomentumScrollEnd={() => {
-            settleWebtoonJump(webtoonContentOffsetRef.current);
+            queueWebtoonPositionUpdate();
             saveWebtoonProgress();
           }}
           scrollEventThrottle={16}
           onScrollBeginDrag={() => {
             // A page-selector/history restore may still be retrying while image
             // heights settle. Once the reader drags, their scroll must win.
+            cancelWebtoonJump();
             isProgrammaticScrollRef.current = false;
-            pendingWebtoonJumpRef.current = null;
-            if (webtoonJumpTimerRef.current) {
-              clearTimeout(webtoonJumpTimerRef.current);
-              webtoonJumpTimerRef.current = null;
-            }
           }}
           bounces
           alwaysBounceVertical
@@ -2908,9 +3495,9 @@ export default function ReaderScreen() {
         currentPage={currentPage}
         totalPages={activePageCount}
         onSelectPage={goToPage}
-        currentChapterId={activeWebtoonChapterId || chapterId!}
-        pageUrls={activeAppendedChapter ? nextChapterPages : pages}
-        pageHeaders={activeAppendedChapter ? nextChapterPageHeaders : pageHeaders}
+        currentChapterId={activeChapterIdForPages || chapterId!}
+        pageUrls={readingNextChapter ? nextChapterPages : pages}
+        pageHeaders={readingNextChapter ? nextChapterPageHeaders : pageHeaders}
         chapters={effectiveChapterList.map((c) => ({
           id: c.id,
           chapterNum: c.attributes.chapter ?? '?',

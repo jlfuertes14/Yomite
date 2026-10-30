@@ -621,8 +621,19 @@ export default function MangaDetailScreen() {
       setStats(statistics);
       loadSimilarManga(data);
     } catch (err: any) {
-      console.error('Failed to load manga details:', err);
       const isCf =
+        err?.isCloudFlare ||
+        err?.name === 'CloudFlareError' ||
+        (typeof err?.message === 'string' &&
+          (err.message.toLowerCase().includes('cloudflare') ||
+            err.message.toLowerCase().includes('challenge') ||
+            err.message.toLowerCase().includes('turnstile')));
+      if (!isCf) {
+        console.error('Failed to load manga details:', err);
+      } else {
+        console.log('[MangaDetails] Cloudflare verification required:', id);
+      }
+      const isCf_prev =
         err?.isCloudFlare ||
         err?.name === 'CloudFlareError' ||
         (typeof err?.message === 'string' &&
@@ -745,8 +756,20 @@ export default function MangaDetailScreen() {
         }
       }
     } catch (err: any) {
-      console.error('Failed to load chapters:', err);
       const isCf =
+        err?.isCloudFlare ||
+        err?.name === 'CloudFlareError' ||
+        (typeof err?.message === 'string' &&
+          (err.message.toLowerCase().includes('cloudflare') ||
+            err.message.toLowerCase().includes('challenge') ||
+            err.message.toLowerCase().includes('turnstile') ||
+            err.message.toLowerCase().includes('verification required')));
+      if (!isCf) {
+        console.error('Failed to load chapters:', err);
+      } else {
+        console.log('[MangaChapters] Cloudflare verification required:', id);
+      }
+      const isCf_prev =
         err?.isCloudFlare ||
         err?.name === 'CloudFlareError' ||
         (typeof err?.message === 'string' &&
@@ -1181,82 +1204,49 @@ export default function MangaDetailScreen() {
     if (chaptersIsCloudflare) {
       return (
         <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-          <View style={{ flex: 1, padding: 32, alignItems: 'center', justifyContent: 'center' }}>
-            <View
-              style={{
-                width: 54,
-                height: 54,
-                borderRadius: 18,
-                backgroundColor: colors.surfaceElevated || colors.surface,
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: 16,
-                borderWidth: 1,
-                borderColor: colors.border,
-              }}
-            >
-              <Ionicons name="shield-checkmark" size={26} color={colors.accent} />
-            </View>
-            <Text style={{ fontSize: 17, fontWeight: '700', color: colors.text, textAlign: 'center' }}>
+          <View style={{ flex: 1, padding: 36, alignItems: 'center', justifyContent: 'center' }}>
+            <Ionicons name="shield-checkmark-outline" size={38} color={colors.accent} style={{ marginBottom: 12 }} />
+            <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text, textAlign: 'center' }}>
               Verification Required
             </Text>
             <Text
               style={{
                 fontSize: 13,
-                color: colors.textMuted,
+                color: colors.textSecondary || '#D4D4D8',
                 textAlign: 'center',
-                marginTop: 6,
+                marginTop: 4,
                 lineHeight: 18,
                 maxWidth: 280,
               }}
             >
-              {chaptersCfDomain} requires a quick bot check to display this title and chapters.
+              {chaptersCfDomain || 'This source'} requires a quick bot check to display this title.
             </Text>
-            <View style={{ flexDirection: 'row', gap: 10, marginTop: 20, width: '100%', maxWidth: 280 }}>
-              <Pressable
-                onPress={handleSolveCloudflare}
-                style={{
-                  flex: 1,
-                  height: 44,
-                  borderRadius: Radius.md,
+            <Pressable
+              onPress={handleSolveCloudflare}
+              hitSlop={8}
+              style={({ pressed }: any) => [
+                {
+                  marginTop: 18,
+                  height: 38,
+                  paddingHorizontal: 22,
+                  borderRadius: Radius.full,
                   backgroundColor: colors.accent,
                   flexDirection: 'row',
                   alignItems: 'center',
                   justifyContent: 'center',
-                }}
-                accessibilityRole="button"
-                aria-label="Verify with Source"
-              >
-                <Ionicons name="shield-checkmark-outline" size={16} color={colors.accentForeground} style={{ marginRight: 6 }} />
-                <Text style={{ color: colors.accentForeground, fontSize: 13, fontWeight: '700' }}>
-                  Verify
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  loadMangaDetails();
-                  loadChapters();
-                }}
-                style={{
-                  height: 44,
-                  paddingHorizontal: 16,
-                  borderRadius: Radius.md,
-                  borderWidth: 1,
-                  borderColor: colors.border,
-                  backgroundColor: colors.surface,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-                accessibilityRole="button"
-                aria-label="Retry Loading"
-              >
-                <Ionicons name="reload-outline" size={16} color={colors.text} style={{ marginRight: 6 }} />
-                <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>
-                  Retry
-                </Text>
-              </Pressable>
-            </View>
+                  borderWidth: 0,
+                },
+                pressed && { opacity: 0.8 },
+                Platform.OS === 'web' && ({ cursor: 'pointer' } as any),
+              ]}
+              accessibilityRole="button"
+              aria-label="Verify with Source"
+            >
+              <Ionicons name="shield-checkmark-outline" size={15} color={colors.accentForeground} style={{ marginRight: 6 }} />
+              <Text style={{ color: colors.accentForeground, fontSize: 13, fontWeight: '700' }}>
+                Verify
+              </Text>
+            </Pressable>
           </View>
         </SafeAreaView>
       );
@@ -2091,79 +2081,49 @@ export default function MangaDetailScreen() {
                   ))}
                 </View>
               ) : chaptersIsCloudflare ? (
-                <View style={{ padding: 32, alignItems: 'center', justifyContent: 'center' }}>
-                  <View
-                    style={{
-                      width: 54,
-                      height: 54,
-                      borderRadius: 18,
-                      backgroundColor: colors.surfaceElevated || colors.surface,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      marginBottom: 16,
-                      borderWidth: 1,
-                      borderColor: colors.border,
-                    }}
-                  >
-                    <Ionicons name="shield-checkmark" size={26} color={colors.accent} />
-                  </View>
-                  <Text style={{ fontSize: 17, fontWeight: '700', color: colors.text, textAlign: 'center' }}>
+                <View style={{ padding: 36, alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name="shield-checkmark-outline" size={38} color={colors.accent} style={{ marginBottom: 12 }} />
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text, textAlign: 'center' }}>
                     Verification Required
                   </Text>
                   <Text
                     style={{
                       fontSize: 13,
-                      color: colors.textMuted,
+                      color: colors.textSecondary || '#D4D4D8',
                       textAlign: 'center',
-                      marginTop: 6,
+                      marginTop: 4,
                       lineHeight: 18,
                       maxWidth: 280,
                     }}
                   >
                     This source requires a quick bot check to display chapters.
                   </Text>
-                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 20, width: '100%', maxWidth: 280 }}>
-                    <Pressable
-                      onPress={handleSolveCloudflare}
-                      style={{
-                        flex: 1,
-                        height: 44,
-                        borderRadius: Radius.md,
+                  <Pressable
+                    onPress={handleSolveCloudflare}
+                    hitSlop={8}
+                    style={({ pressed }: any) => [
+                      {
+                        marginTop: 18,
+                        height: 38,
+                        paddingHorizontal: 22,
+                        borderRadius: Radius.full,
                         backgroundColor: colors.accent,
                         flexDirection: 'row',
                         alignItems: 'center',
                         justifyContent: 'center',
-                      }}
-                      accessibilityRole="button"
-                      aria-label="Verify with Source"
-                    >
-                      <Ionicons name="shield-checkmark-outline" size={16} color={colors.accentForeground} style={{ marginRight: 6 }} />
-                      <Text style={{ color: colors.accentForeground, fontSize: 13, fontWeight: '700' }}>
-                        Verify
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => loadChapters()}
-                      style={{
-                        height: 44,
-                        paddingHorizontal: 16,
-                        borderRadius: Radius.md,
-                        borderWidth: 1,
-                        borderColor: colors.border,
-                        backgroundColor: colors.surface,
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                      accessibilityRole="button"
-                      aria-label="Retry Loading Chapters"
-                    >
-                      <Ionicons name="reload-outline" size={16} color={colors.text} style={{ marginRight: 6 }} />
-                      <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>
-                        Retry
-                      </Text>
-                    </Pressable>
-                  </View>
+                        borderWidth: 0,
+                      },
+                      pressed && { opacity: 0.8 },
+                      Platform.OS === 'web' && ({ cursor: 'pointer' } as any),
+                    ]}
+                    accessibilityRole="button"
+                    aria-label="Verify with Source"
+                  >
+                    <Ionicons name="shield-checkmark-outline" size={15} color={colors.accentForeground} style={{ marginRight: 6 }} />
+                    <Text style={{ color: colors.accentForeground, fontSize: 13, fontWeight: '700' }}>
+                      Verify
+                    </Text>
+                  </Pressable>
                 </View>
               ) : chapters.length === 0 ? (
                 <View style={{ padding: 36, alignItems: 'center', justifyContent: 'center' }}>
@@ -3129,27 +3089,44 @@ export default function MangaDetailScreen() {
           onRequestClose={() => setIsCfInAppModalOpen(false)}
         >
           <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-            {/* Header */}
+            {/* Clean Flat Header - Zero Borders */}
             <View
               style={{
+                height: 56,
                 flexDirection: 'row',
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 paddingHorizontal: 16,
-                height: 52,
-                borderBottomWidth: 1,
-                borderBottomColor: colors.border,
+                backgroundColor: colors.surface || colors.background,
               }}
             >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Ionicons name="shield-checkmark" size={18} color={colors.accent} />
-                <Text style={{ color: colors.text, fontSize: 15, fontWeight: '700' }}>
-                  Human Verification
-                </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 10,
+                    backgroundColor: colors.surfaceElevated || 'rgba(255, 255, 255, 0.08)',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Ionicons name="shield-checkmark" size={18} color={colors.accent} />
+                </View>
+                <View>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text, letterSpacing: -0.2 }}>
+                    Verification
+                  </Text>
+                  <Text style={{ fontSize: 11, color: colors.textSecondary || '#D4D4D8', fontWeight: '500' }}>
+                    {chaptersCfDomain || initialTitle || 'Source'}
+                  </Text>
+                </View>
               </View>
+
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Pressable
                   onPress={async () => {
+                    triggerHaptic();
                     const domain =
                       chaptersCfDomain ||
                       (id?.includes('reimanga')
@@ -3175,39 +3152,94 @@ export default function MangaDetailScreen() {
                     loadMangaDetails();
                     loadChapters();
                   }}
-                  style={{
-                    paddingHorizontal: 14,
-                    paddingVertical: 6,
-                    borderRadius: Radius.full,
-                    backgroundColor: colors.accent,
-                  }}
+                  hitSlop={8}
+                  style={({ pressed }: any) => [
+                    {
+                      paddingHorizontal: 16,
+                      height: 34,
+                      borderRadius: Radius.full,
+                      backgroundColor: colors.accent,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexDirection: 'row',
+                      gap: 4,
+                    },
+                    pressed && { opacity: 0.8 },
+                    Platform.OS === 'web' && ({ cursor: 'pointer' } as any),
+                  ]}
                   accessibilityRole="button"
-                  aria-label="Close Verification"
+                  aria-label="Done Verification"
                 >
-                  <Text style={{ color: colors.accentForeground, fontSize: 12, fontWeight: '700' }}>Done</Text>
+                  <Ionicons name="checkmark" size={15} color={colors.accentForeground} />
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: colors.accentForeground }}>
+                    Done
+                  </Text>
                 </Pressable>
 
                 <Pressable
-                  onPress={() => {
-                    if (cfInAppUrl) {
-                      isSolvingCloudflareRef.current = true;
-                      Linking.openURL(cfInAppUrl).catch(() => { });
+                  onPress={async () => {
+                    triggerHaptic();
+                    const domain =
+                      chaptersCfDomain ||
+                      (id?.includes('reimanga')
+                        ? 'reimanga.net'
+                        : id?.includes('onisaga')
+                          ? 'onisaga.com'
+                          : id?.includes('toonkotsu')
+                            ? 'toonkotsu.com'
+                            : id?.includes('weebcentral')
+                              ? 'weebcentral.com'
+                              : id?.includes('templescan')
+                                ? 'templetoons.com'
+                                : 'reimanga.net');
+                    if (domain) {
+                      if (domain === 'templetoons.com') {
+                        webViewBridge.notifyCloudflareSolved(domain);
+                      } else {
+                        webViewBridge.setDomainVerified(domain, true);
+                      }
                     }
+                    setIsCfInAppModalOpen(false);
+                    setChaptersIsCloudflare(false);
+                    loadMangaDetails();
+                    loadChapters();
                   }}
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 16,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    backgroundColor: colors.surfaceElevated || colors.surface,
-                  }}
+                  hitSlop={8}
+                  style={({ pressed }: any) => [
+                    {
+                      width: 34,
+                      height: 34,
+                      borderRadius: 17,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      backgroundColor: colors.surfaceElevated || 'rgba(255, 255, 255, 0.08)',
+                    },
+                    pressed && { opacity: 0.7 },
+                    Platform.OS === 'web' && ({ cursor: 'pointer' } as any),
+                  ]}
                   accessibilityRole="button"
-                  aria-label="Open in external browser"
+                  aria-label="Close verification modal"
                 >
-                  <Ionicons name="open-outline" size={16} color={colors.text} />
+                  <Ionicons name="close" size={18} color={colors.text} />
                 </Pressable>
               </View>
+            </View>
+
+            {/* Dark Mode High-Contrast Helper Strip */}
+            <View
+              style={{
+                paddingHorizontal: 16,
+                paddingVertical: 9,
+                backgroundColor: colors.surfaceElevated || '#121215',
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <Ionicons name="information-circle-outline" size={15} color={colors.accent} />
+              <Text style={{ fontSize: 12, color: colors.textSecondary || '#D4D4D8', flex: 1, fontWeight: '500', lineHeight: 16 }}>
+                Complete the check below. Yomite will automatically return once verified, or tap Done.
+              </Text>
             </View>
 
             {WebView && Platform.OS !== 'web' ? (
@@ -3221,6 +3253,43 @@ export default function MangaDetailScreen() {
                 sharedCookiesEnabled={true}
                 thirdPartyCookiesEnabled={true}
                 style={{ flex: 1, backgroundColor: colors.background }}
+                onLoadEnd={(syntheticEvent) => {
+                  const { nativeEvent } = syntheticEvent;
+                  const url = nativeEvent.url || '';
+                  const title = (nativeEvent.title || '').toLowerCase();
+                  const isCfTitle =
+                    title.includes('just a moment') ||
+                    title.includes('attention required') ||
+                    title.includes('security check') ||
+                    title.includes('checking your browser') ||
+                    title.includes('verify you are human') ||
+                    title.includes('cloudflare');
+                  const isCfHost =
+                    url.includes('challenges.cloudflare.com') ||
+                    url.includes('/cdn-cgi/challenge-platform/');
+
+                  const domain =
+                    chaptersCfDomain ||
+                    (id?.includes('reimanga')
+                      ? 'reimanga.net'
+                      : id?.includes('onisaga')
+                        ? 'onisaga.com'
+                        : id?.includes('toonkotsu')
+                          ? 'toonkotsu.com'
+                          : id?.includes('weebcentral')
+                            ? 'weebcentral.com'
+                            : id?.includes('templescan')
+                              ? 'templetoons.com'
+                              : '');
+
+                  if (domain && url.includes(domain) && !isCfTitle && !isCfHost) {
+                    webViewBridge.setDomainVerified(domain, true);
+                    setIsCfInAppModalOpen(false);
+                    setChaptersIsCloudflare(false);
+                    loadMangaDetails();
+                    loadChapters();
+                  }
+                }}
                 injectedJavaScript={`
                   (function() {
                     var interval = setInterval(function() {

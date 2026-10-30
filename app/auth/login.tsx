@@ -30,7 +30,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { GoogleLogoIcon } from '../../src/components/GoogleLogoIcon';
 import { useColorScheme } from '../../src/hooks/useColorScheme';
 import { useThemeColors } from '../../src/hooks/useThemeColor';
-import { useUserStore } from '../../src/store/userStore';
+import { getSignInToastMessage, useUserStore } from '../../src/store/userStore';
 import { triggerHaptic } from '../../src/utils/haptics';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 
@@ -80,14 +80,16 @@ export default function LoginScreen() {
     }
   };
 
-  const handleAuthSuccess = () => {
+  const handleAuthSuccess = (freshUser?: any) => {
     triggerHaptic();
+    const targetUser = freshUser || useUserStore.getState().user;
+    useUserStore.getState().setAuthSuccessMessage(getSignInToastMessage(targetUser));
     if (params.redirect) {
       router.replace(params.redirect as any);
     } else if (router.canGoBack()) {
       router.back();
     } else {
-      router.replace('/profile' as any);
+      router.replace('/(tabs)/more' as any);
     }
   };
 

@@ -110,6 +110,8 @@ export interface MangaSourceMetadata {
   description: string;
   availableSortOrders: SourceSortOrder[];
   enabled: boolean;
+  contentType?: 'manga' | 'manhwa' | 'mixed' | 'comic' | 'hentai';
+  classification?: 'manhwa' | 'manga' | 'mixed';
 }
 
 export interface MangaParser {
@@ -168,9 +170,10 @@ export interface CatalogSourceItem {
   domain: string;
   baseUrl: string;
   locale: string;
-  contentType: 'manga' | 'comic' | 'hentai';
+  contentType: 'manga' | 'manhwa' | 'comic' | 'hentai';
   engine: string;
   isBroken: boolean;
   brokenReason?: string;
   icon?: string;
+  classification?: 'manhwa' | 'manga' | 'mixed';
 }

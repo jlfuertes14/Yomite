@@ -24,7 +24,7 @@ import {
   Share,
   StyleSheet,
   Text,
-  TextInput,
+  TextInput, type TextInputInstance,
   useWindowDimensions,
   View
 } from 'react-native';
@@ -56,6 +56,7 @@ import * as FileSystem from 'expo-file-system';
 import { AnimatedPressable } from '../../src/components/AnimatedPressable';
 import { AuthModal } from '../../src/components/AuthModal';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
+import { AppRefreshControl } from '../../src/components/AppRefreshControl';
 import {
   AnimeNewsArticleSkeleton,
   AnimeNewsCardSkeleton,
@@ -551,7 +552,7 @@ export default function CommunityScreen() {
   // Reply Composer State
   const [replyImages, setReplyImages] = useState<string[]>([]);
   const [replyTo, setReplyTo] = useState<string | null>(null);
-  const replyInputRef = useRef<TextInput>(null);
+  const replyInputRef = useRef<TextInputInstance>(null);
 
   // User Profile Data
   const myAvatarUrl = getUserAvatarUrl(user);
@@ -1324,11 +1325,9 @@ export default function CommunityScreen() {
             contentContainerStyle={styles.feedListContainer}
             showsVerticalScrollIndicator={false}
             refreshControl={
-              <RefreshControl
+              <AppRefreshControl
                 refreshing={refreshing}
                 onRefresh={handleRefresh}
-                tintColor={colors.accent}
-                colors={[colors.accent]}
               />
             }
             renderItem={({ item }) => (
@@ -1411,11 +1410,9 @@ export default function CommunityScreen() {
             contentContainerStyle={styles.feedListContainer}
             showsVerticalScrollIndicator={false}
             refreshControl={
-              <RefreshControl
+              <AppRefreshControl
                 refreshing={refreshing}
                 onRefresh={handleRefresh}
-                tintColor={colors.accent}
-                colors={[colors.accent]}
               />
             }
             renderItem={({ item }) => {
@@ -1638,6 +1635,7 @@ export default function CommunityScreen() {
                     style={styles.topBarBackBtn}
                     scaleTo={0.92}
                     accessibilityLabel="Delete thread"
+                    accessibilityRole="button"
                   >
                     <Ionicons name="trash-outline" size={20} color="#EF4444" />
                   </AnimatedPressable>

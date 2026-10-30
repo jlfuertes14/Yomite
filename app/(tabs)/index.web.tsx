@@ -20,7 +20,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
+  TextInput, type TextInputInstance, type ScrollViewInstance,
   useWindowDimensions,
   View
 } from 'react-native';
@@ -42,6 +42,7 @@ import {
 } from '../../src/api/mangadex';
 import { AuthModal } from '../../src/components/AuthModal';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
+import { AppRefreshControl } from '../../src/components/AppRefreshControl';
 import { CARD_GAP, MangaCard } from '../../src/components/MangaCard';
 import { OfflineState } from '../../src/components/OfflineState';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
@@ -104,7 +105,7 @@ const getMangaCover = (manga: Manga, size: '256' | '512' | 'original' = '512'): 
 interface WebHeaderProps {
   webHeaderContainerRef: React.RefObject<any>;
   handleToggleMenu: () => void;
-  searchInputRef: React.RefObject<TextInput | null>;
+  searchInputRef: React.RefObject<TextInputInstance | null>;
   searchBarWidthAnim: Animated.Value;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
@@ -126,6 +127,7 @@ interface WebHeaderProps {
   isScrolled: boolean;
   onResetToDiscover?: () => void;
   onOpenAuth: () => void;
+  onRequestSignOut?: () => void;
 }
 
 const WebHeader: React.FC<WebHeaderProps> = ({
@@ -153,6 +155,7 @@ const WebHeader: React.FC<WebHeaderProps> = ({
   isScrolled,
   onResetToDiscover,
   onOpenAuth,
+  onRequestSignOut,
 }) => {
   const { width: windowWidth } = useWindowDimensions();
   const isMobile = windowWidth < 640;
@@ -682,17 +685,21 @@ const WebHeader: React.FC<WebHeaderProps> = ({
                     <View style={[styles.dropdownDivider, { backgroundColor: colors.border }]} />
 
                     <Pressable
-                      onPress={async () => {
+                      onPress={() => {
                         setProfileDropdownVisible(false);
-                        await signOut();
+                        if (onRequestSignOut) {
+                          onRequestSignOut();
+                        } else {
+                          signOut();
+                        }
                       }}
                       style={({ pressed }) => [
                         styles.dropdownMenuItem,
                         { backgroundColor: pressed ? colors.surfaceElevated : 'transparent' },
                       ]}
                     >
-                      <Ionicons name="log-out-outline" size={17} color={colors.accent} />
-                      <Text style={[styles.dropdownMenuText, { color: colors.accent, fontWeight: 'bold' }]}>
+                      <Ionicons name="log-out-outline" size={17} color="#EF4444" />
+                      <Text style={[styles.dropdownMenuText, { color: '#EF4444', fontWeight: 'bold' }]}>
                         Sign Out
                       </Text>
                     </Pressable>
@@ -750,6 +757,7 @@ export default function DiscoverScreen() {
   const [mobileDrawerVisible, setMobileDrawerVisible] = useState(false); // Mobile slide modal drawer
   const [authModalVisible, setAuthModalVisible] = useState(false);
 
+  const signOut = useUserStore((s) => s.signOut);
   const refreshUser = useUserStore((s) => s.refreshUser);
 
   useEffect(() => {
@@ -757,6 +765,21 @@ export default function DiscoverScreen() {
   }, [refreshUser]);
 
   // Custom Confirmation Dialog State
+  const handleSignOutPrompt = useCallback(() => {
+    setConfirmModalConfig({
+      visible: true,
+      title: 'Sign Out',
+      message: 'Are you sure you want to sign out of your account?',
+      confirmText: 'Sign Out',
+      confirmVariant: 'destructive',
+      cancelText: 'Cancel',
+      onConfirm: async () => {
+        setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
+        await signOut();
+      },
+    });
+  }, [signOut]);
+
   const [confirmModalConfig, setConfirmModalConfig] = useState<{
     visible: boolean;
     title: string;
@@ -794,7 +817,7 @@ export default function DiscoverScreen() {
   const [isScrolled, setIsScrolled] = useState(false);
 
   const webHeaderContainerRef = useRef<any>(null);
-  const searchInputRef = useRef<TextInput>(null);
+  const searchInputRef = useRef<TextInputInstance>(null);
   const searchBarWidthAnim = useRef(new Animated.Value(260)).current;
 
   const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -884,7 +907,7 @@ export default function DiscoverScreen() {
     }
   };
 
-  const mainScrollViewRef = useRef<ScrollView>(null);
+  const mainScrollViewRef = useRef<ScrollViewInstance>(null);
 
   const handleResetToDiscover = useCallback(async () => {
     setSearchQuery('');
@@ -1462,10 +1485,9 @@ export default function DiscoverScreen() {
               onScroll={handleScroll}
               scrollEventThrottle={16}
               refreshControl={
-                <RefreshControl
+                <AppRefreshControl
                   refreshing={refreshing}
                   onRefresh={handleRefresh}
-                  tintColor={colors.accent}
                 />
               }
             >

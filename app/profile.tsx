@@ -208,14 +208,14 @@ export default function ProfileScreen() {
     setConfirmModalConfig({
       visible: true,
       title: 'Sign Out',
-      message: 'Are you sure you want to sign out of your Yomite account?',
-      iconName: 'log-out-outline',
+      message: 'Are you sure you want to sign out of your account?',
       confirmText: 'Sign Out',
       confirmVariant: 'destructive',
       cancelText: 'Cancel',
-      onConfirm: async () => {
+      onConfirm: () => {
         setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
-        await signOut();
+        router.replace('/(tabs)/more' as any);
+        signOut();
       },
     });
   };

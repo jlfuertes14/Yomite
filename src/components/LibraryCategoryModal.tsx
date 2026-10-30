@@ -154,7 +154,7 @@ export function LibraryCategoryModal({
                   >
                     <Ionicons
                       name={cat.icon}
-                      size={20}
+                      size={19}
                       color={isSelected ? colors.accent : colors.textSecondary}
                     />
                   </View>
@@ -173,7 +173,7 @@ export function LibraryCategoryModal({
                   {isSelected && (
                     <Ionicons
                       name="checkmark-circle"
-                      size={22}
+                      size={19}
                       color={colors.accent}
                     />
                   )}
@@ -219,8 +219,8 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     borderBottomWidth: 0,
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.sm,
-    paddingBottom: Platform.OS === 'ios' ? 40 : Spacing.xl,
+    paddingTop: Spacing.xs,
+    paddingBottom: Platform.OS === 'ios' ? 24 : Spacing.md,
   },
   dragHandle: {
     width: 36,
@@ -234,57 +234,58 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.sm,
   },
   headerTitle: {
-    fontSize: Typography.sizes.headline,
+    fontSize: Typography.sizes.footnote + 1,
     fontWeight: Typography.weights.bold,
   },
   closeBtn: {
     padding: 4,
   },
   categoryList: {
-    gap: 10,
+    gap: 7,
   },
   categoryRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: Spacing.md,
-    borderRadius: Radius.lg,
+    paddingVertical: 9,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.md,
     borderWidth: 0,
-    gap: Spacing.md,
+    gap: Spacing.sm,
   },
   iconBox: {
-    width: 38,
-    height: 38,
+    width: 34,
+    height: 34,
     borderRadius: Radius.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
   categoryTextCol: {
     flex: 1,
-    gap: 2,
+    gap: 1,
   },
   categoryLabel: {
-    fontSize: Typography.sizes.body,
-    fontWeight: Typography.weights.bold,
+    fontSize: Typography.sizes.footnote + 1,
+    fontWeight: Typography.weights.semibold,
   },
   categoryDesc: {
-    fontSize: Typography.sizes.footnote,
+    fontSize: Typography.sizes.caption,
   },
   removeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: Spacing.md,
-    borderRadius: Radius.lg,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.md,
     borderWidth: 0,
-    gap: 8,
+    gap: 6,
     marginTop: Spacing.xs,
   },
   removeText: {
     color: '#EF4444',
-    fontSize: Typography.sizes.footnote,
+    fontSize: Typography.sizes.caption,
     fontWeight: Typography.weights.bold,
   },
 });

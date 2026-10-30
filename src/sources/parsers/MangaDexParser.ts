@@ -79,6 +79,8 @@ export class MangaDexParser extends BaseParser {
     }
 
     this.cachedTags = [
+      { id: '3e2b8dae-350e-4ab8-a8ce-016e844b9f0d', label: 'Long Strip', group: 'Format' },
+      { id: 'e197df38-d0e7-43b5-9b09-2842d0c326dd', label: 'Web Comic', group: 'Format' },
       { id: '423e2eae-a7a2-4a8b-ac03-a8351462d71d', label: 'Romance', group: 'Genre' },
       { id: '4d32cc48-9f00-4cca-9b5a-a839f0764984', label: 'Comedy', group: 'Genre' },
       { id: 'b9af3a63-f058-424f-a1f0-a1f50431538c', label: 'Drama', group: 'Genre' },

@@ -20,7 +20,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
+  TextInput, type TextInputInstance, type ScrollViewInstance,
   useWindowDimensions,
   View,
   BackHandler,
@@ -43,6 +43,7 @@ import {
   MangaStatistics,
 } from '../../src/api/mangadex';
 import { ConfirmationModal } from '../../src/components/ConfirmationModal';
+import { AppRefreshControl } from '../../src/components/AppRefreshControl';
 import { CARD_GAP, MangaCard } from '../../src/components/MangaCard';
 import { OfflineState } from '../../src/components/OfflineState';
 import { SearchResultsModal } from '../../src/components/SearchResultsModal';
@@ -123,7 +124,7 @@ const getCoverSource = (uri: string | null) => {
 interface WebHeaderProps {
   webHeaderContainerRef: React.RefObject<any>;
   handleToggleMenu: () => void;
-  searchInputRef: React.RefObject<TextInput | null>;
+  searchInputRef: React.RefObject<TextInputInstance | null>;
   searchBarWidthAnim: Animated.Value;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
@@ -145,6 +146,7 @@ interface WebHeaderProps {
   isScrolled: boolean;
   onResetToDiscover?: () => void;
   onOpenAuth: () => void;
+  onRequestSignOut?: () => void;
 }
 
 function ExtensionSourceFavicon({
@@ -213,6 +215,7 @@ const WebHeader: React.FC<WebHeaderProps> = ({
   isScrolled,
   onResetToDiscover,
   onOpenAuth,
+  onRequestSignOut,
 }) => {
   const { width: windowWidth } = useWindowDimensions();
   const isMobile = windowWidth < 640;
@@ -742,17 +745,21 @@ const WebHeader: React.FC<WebHeaderProps> = ({
                       <View style={[styles.dropdownDivider, { backgroundColor: colors.border }]} />
 
                       <Pressable
-                        onPress={async () => {
+                        onPress={() => {
                           setProfileDropdownVisible(false);
-                          await signOut();
+                          if (onRequestSignOut) {
+                            onRequestSignOut();
+                          } else {
+                            signOut();
+                          }
                         }}
                         style={({ pressed }) => [
                           styles.dropdownMenuItem,
                           { backgroundColor: pressed ? colors.surfaceElevated : 'transparent' },
                         ]}
                       >
-                        <Ionicons name="log-out-outline" size={17} color={colors.accent} />
-                        <Text style={[styles.dropdownMenuText, { color: colors.accent, fontWeight: 'bold' }]}>
+                        <Ionicons name="log-out-outline" size={17} color="#EF4444" />
+                        <Text style={[styles.dropdownMenuText, { color: '#EF4444', fontWeight: 'bold' }]}>
                           Sign Out
                         </Text>
                       </Pressable>
@@ -779,7 +786,7 @@ export default function DiscoverScreen() {
   const isDesktop = windowWidth >= 768;
   const heroCardWidth = windowWidth - Spacing.md * 2;
   const HERO_CARD_GAP = 24;
-  const mobileHeroScrollRef = useRef<ScrollView>(null);
+  const mobileHeroScrollRef = useRef<ScrollViewInstance>(null);
   const isUserInteractingHeroRef = useRef(false);
 
   // Responsive Layout Constants
@@ -843,6 +850,7 @@ export default function DiscoverScreen() {
   const [sidebarVisible, setSidebarVisible] = useState(false); // Inline desktop sidebar
   const [mobileDrawerVisible, setMobileDrawerVisible] = useState(false); // Mobile slide modal drawer
   const user = useUserStore((s) => s.user);
+  const signOut = useUserStore((s) => s.signOut);
   const avatarUrl = getUserAvatarUrl(user);
   const [searchModalVisible, setSearchModalVisible] = useState(false);
   const [searchInitialQuery, setSearchInitialQuery] = useState('');
@@ -881,6 +889,21 @@ export default function DiscoverScreen() {
   }, [refreshUser]);
 
   // Custom Confirmation Dialog State
+  const handleSignOutPrompt = useCallback(() => {
+    setConfirmModalConfig({
+      visible: true,
+      title: 'Sign Out',
+      message: 'Are you sure you want to sign out of your account?',
+      confirmText: 'Sign Out',
+      confirmVariant: 'destructive',
+      cancelText: 'Cancel',
+      onConfirm: async () => {
+        setConfirmModalConfig((prev) => ({ ...prev, visible: false }));
+        await signOut();
+      },
+    });
+  }, [signOut]);
+
   const [confirmModalConfig, setConfirmModalConfig] = useState<{
     visible: boolean;
     title: string;
@@ -918,7 +941,7 @@ export default function DiscoverScreen() {
   const [isScrolled, setIsScrolled] = useState(false);
 
   const webHeaderContainerRef = useRef<any>(null);
-  const searchInputRef = useRef<TextInput>(null);
+  const searchInputRef = useRef<TextInputInstance>(null);
   const searchBarWidthAnim = useRef(new Animated.Value(260)).current;
 
   const isSeeAllChromeHiddenRef = useRef(false);
@@ -1091,7 +1114,7 @@ export default function DiscoverScreen() {
     }
   };
 
-  const mainScrollViewRef = useRef<ScrollView>(null);
+  const mainScrollViewRef = useRef<ScrollViewInstance>(null);
 
   const handleResetToDiscover = useCallback(async () => {
     setActiveSeeAllSection(null);
@@ -1851,6 +1874,7 @@ export default function DiscoverScreen() {
               isScrolled={isScrolled}
               onResetToDiscover={handleResetToDiscover}
               onOpenAuth={() => router.push('/auth/login' as any)}
+              onRequestSignOut={handleSignOutPrompt}
             />
           )}
 
@@ -1971,10 +1995,9 @@ export default function DiscoverScreen() {
                 { paddingBottom: activeSeeAllSection !== null ? 70 : (Platform.OS === 'web' ? 32 : 76) },
               ]}
               refreshControl={
-                <RefreshControl
+                <AppRefreshControl
                   refreshing={refreshing}
                   onRefresh={handleRefresh}
-                  tintColor="#F59E0B"
                 />
               }
             >

@@ -22,4 +22,5 @@ export * from './parsers/WeebCentralParser';
 export * from './parsers/MangaKParser';
 export * from './parsers/OniSagaParser';
 export * from './parsers/ToonkotsuParser';
+export * from './classification';
 export * from './SourceManager';

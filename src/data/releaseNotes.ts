@@ -22,4 +22,14 @@ export const LOCAL_RELEASE_NOTES: Record<string, string> = {
 - Fixed the release parser's Supabase subscription response handling.
 - Added Render logs for release subscriptions and Anime News feed requests.
 `,
+  '1.3.5': `## Yomite v1.3.5
+
+### What's new
+- Rebuilt Webtoon page tracking for accurate restoration and smoother long-strip reading.
+- History now resumes the exact page and scroll position, including appended next chapters.
+- Added external-source downloads with authenticated image headers and safer file names.
+- Improved Cloudflare detection and in-app verification across source, detail, and reader screens.
+- Refined History selection, the Library category sheet, authentication toasts, and confirmation dialogs.
+- Upgraded to Expo SDK 58 and React Native 0.88 with refreshed platform dependencies.
+`,
 };

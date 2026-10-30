@@ -14,6 +14,7 @@ import {
   SourceTag,
 } from '../types';
 import { sourceHttpClient, DEFAULT_USER_AGENT } from '../network/httpClient';
+import { CloudFlareDetector, CloudFlareError, CloudFlareStatus } from '../network/cloudflare';
 import fallbackCatalog from '../catalog/oniSagaFallback.json';
 import fallbackChapters from '../catalog/oniSagaChaptersFallback.json';
 
@@ -85,13 +86,40 @@ export class OniSagaParser extends BaseParser {
 
   private async fetchRawHtml(url: string): Promise<string> {
     try {
-      return await sourceHttpClient.fetchText(this.toAbsoluteUrl(url), {
+      const text = await sourceHttpClient.fetchText(this.toAbsoluteUrl(url), {
         referer: this.metadata.baseUrl,
         sourceId: this.metadata.name,
       });
+      if (CloudFlareDetector.isChallengePage(text)) {
+        throw new CloudFlareError(
+          `[${this.metadata.name}] Cloudflare verification required for onisaga.com.`,
+          this.metadata.id,
+          url,
+          this.metadata.domain,
+          CloudFlareStatus.CAPTCHA_CHALLENGE
+        );
+      }
+      return text;
     } catch (err: any) {
-      if (err?.isCloudFlare || err?.name === 'CloudFlareError' || err?.status === 403) {
-        throw err;
+      if (
+        err?.isCloudFlare ||
+        err?.name === 'CloudFlareError' ||
+        err?.status === 403 ||
+        err?.response?.status === 403 ||
+        (typeof err?.message === 'string' &&
+          (err.message.toLowerCase().includes('cloudflare') ||
+            err.message.toLowerCase().includes('challenge') ||
+            err.message.toLowerCase().includes('turnstile')))
+      ) {
+        throw err?.isCloudFlare
+          ? err
+          : new CloudFlareError(
+              `[${this.metadata.name}] Cloudflare verification required for onisaga.com.`,
+              this.metadata.id,
+              url,
+              this.metadata.domain,
+              CloudFlareStatus.CAPTCHA_CHALLENGE
+            );
       }
       return '';
     }
@@ -148,37 +176,127 @@ export class OniSagaParser extends BaseParser {
   }
 
   public async getPopular(page = 1, _filter?: SourceFilter): Promise<SourceManga[]> {
+    const url = page === 1 ? 'https://onisaga.com/' : `https://onisaga.com/?page=${page}`;
     try {
-      const url = page === 1 ? 'https://onisaga.com/' : `https://onisaga.com/?page=${page}`;
       const $ = await this.fetchHtml(url);
       const mangas = this.parseMangaElements($);
       if (mangas.length > 0) return mangas;
-    } catch {
-      // Fallback
+
+      const rawHtml = $.html ? $.html() : '';
+      if (CloudFlareDetector.isChallengePage(rawHtml)) {
+        throw new CloudFlareError(
+          `[${this.metadata.name}] Cloudflare verification challenge detected at ${url}.`,
+          this.metadata.id,
+          url,
+          this.metadata.domain,
+          CloudFlareStatus.CAPTCHA_CHALLENGE
+        );
+      }
+    } catch (err: any) {
+      if (
+        err?.isCloudFlare ||
+        err?.name === 'CloudFlareError' ||
+        err?.status === 403 ||
+        err?.response?.status === 403 ||
+        (typeof err?.message === 'string' &&
+          (err.message.toLowerCase().includes('cloudflare') ||
+            err.message.toLowerCase().includes('challenge') ||
+            err.message.toLowerCase().includes('turnstile')))
+      ) {
+        throw err?.isCloudFlare
+          ? err
+          : new CloudFlareError(
+              `[${this.metadata.name}] Cloudflare verification challenge detected at ${url}.`,
+              this.metadata.id,
+              url,
+              this.metadata.domain,
+              CloudFlareStatus.CAPTCHA_CHALLENGE
+            );
+      }
     }
     return this.getFallbackMatches();
   }
 
   public async getLatest(page = 1, _filter?: SourceFilter): Promise<SourceManga[]> {
+    const url = `https://onisaga.com/latest-updates?page=${page}`;
     try {
-      const url = `https://onisaga.com/latest-updates?page=${page}`;
       const $ = await this.fetchHtml(url);
       const mangas = this.parseMangaElements($);
       if (mangas.length > 0) return mangas;
-    } catch {
-      // Fallback
+
+      const rawHtml = $.html ? $.html() : '';
+      if (CloudFlareDetector.isChallengePage(rawHtml)) {
+        throw new CloudFlareError(
+          `[${this.metadata.name}] Cloudflare verification challenge detected at ${url}.`,
+          this.metadata.id,
+          url,
+          this.metadata.domain,
+          CloudFlareStatus.CAPTCHA_CHALLENGE
+        );
+      }
+    } catch (err: any) {
+      if (
+        err?.isCloudFlare ||
+        err?.name === 'CloudFlareError' ||
+        err?.status === 403 ||
+        err?.response?.status === 403 ||
+        (typeof err?.message === 'string' &&
+          (err.message.toLowerCase().includes('cloudflare') ||
+            err.message.toLowerCase().includes('challenge') ||
+            err.message.toLowerCase().includes('turnstile')))
+      ) {
+        throw err?.isCloudFlare
+          ? err
+          : new CloudFlareError(
+              `[${this.metadata.name}] Cloudflare verification challenge detected at ${url}.`,
+              this.metadata.id,
+              url,
+              this.metadata.domain,
+              CloudFlareStatus.CAPTCHA_CHALLENGE
+            );
+      }
     }
     return this.getFallbackMatches();
   }
 
   public async search(query: string, page = 1, _filter?: SourceFilter): Promise<SourceManga[]> {
+    const url = `https://onisaga.com/search?keyword=${encodeURIComponent(query)}&page=${page}`;
     try {
-      const url = `https://onisaga.com/search?keyword=${encodeURIComponent(query)}&page=${page}`;
       const $ = await this.fetchHtml(url);
       const mangas = this.parseMangaElements($);
       if (mangas.length > 0) return mangas;
-    } catch {
-      // Fallback
+
+      const rawHtml = $.html ? $.html() : '';
+      if (CloudFlareDetector.isChallengePage(rawHtml)) {
+        throw new CloudFlareError(
+          `[${this.metadata.name}] Cloudflare verification challenge detected at ${url}.`,
+          this.metadata.id,
+          url,
+          this.metadata.domain,
+          CloudFlareStatus.CAPTCHA_CHALLENGE
+        );
+      }
+    } catch (err: any) {
+      if (
+        err?.isCloudFlare ||
+        err?.name === 'CloudFlareError' ||
+        err?.status === 403 ||
+        err?.response?.status === 403 ||
+        (typeof err?.message === 'string' &&
+          (err.message.toLowerCase().includes('cloudflare') ||
+            err.message.toLowerCase().includes('challenge') ||
+            err.message.toLowerCase().includes('turnstile')))
+      ) {
+        throw err?.isCloudFlare
+          ? err
+          : new CloudFlareError(
+              `[${this.metadata.name}] Cloudflare verification challenge detected at ${url}.`,
+              this.metadata.id,
+              url,
+              this.metadata.domain,
+              CloudFlareStatus.CAPTCHA_CHALLENGE
+            );
+      }
     }
     return this.getFallbackMatches(query);
   }
@@ -228,8 +346,27 @@ export class OniSagaParser extends BaseParser {
         tags: tags.length > 0 ? tags : manga.tags,
         state: desc.toLowerCase().includes('completed') ? 'completed' : 'ongoing',
       };
-    } catch {
-      // Do not rethrow Cloudflare error on getDetails so fallback catalog metadata can be returned
+    } catch (err: any) {
+      if (
+        err?.isCloudFlare ||
+        err?.name === 'CloudFlareError' ||
+        err?.status === 403 ||
+        err?.response?.status === 403 ||
+        (typeof err?.message === 'string' &&
+          (err.message.toLowerCase().includes('cloudflare') ||
+            err.message.toLowerCase().includes('challenge') ||
+            err.message.toLowerCase().includes('turnstile')))
+      ) {
+        throw err?.isCloudFlare
+          ? err
+          : new CloudFlareError(
+              `[${this.metadata.name}] Cloudflare verification required for onisaga.com.`,
+              this.metadata.id,
+              mangaUrl,
+              this.metadata.domain,
+              CloudFlareStatus.CAPTCHA_CHALLENGE
+            );
+      }
     }
 
     const fallback = (fallbackCatalog as unknown as SourceManga[]).find(
@@ -285,7 +422,36 @@ export class OniSagaParser extends BaseParser {
       }
 
       if (list.length > 0) return list;
+      if (CloudFlareDetector.isChallengePage(html)) {
+        throw new CloudFlareError(
+          `[${this.metadata.name}] Cloudflare verification required for onisaga.com.`,
+          this.metadata.id,
+          mangaUrl,
+          this.metadata.domain,
+          CloudFlareStatus.CAPTCHA_CHALLENGE
+        );
+      }
     } catch (err: any) {
+      if (
+        err?.isCloudFlare ||
+        err?.name === 'CloudFlareError' ||
+        err?.status === 403 ||
+        err?.response?.status === 403 ||
+        (typeof err?.message === 'string' &&
+          (err.message.toLowerCase().includes('cloudflare') ||
+            err.message.toLowerCase().includes('challenge') ||
+            err.message.toLowerCase().includes('turnstile')))
+      ) {
+        throw err?.isCloudFlare
+          ? err
+          : new CloudFlareError(
+              `[${this.metadata.name}] Cloudflare verification required for onisaga.com.`,
+              this.metadata.id,
+              mangaUrl,
+              this.metadata.domain,
+              CloudFlareStatus.CAPTCHA_CHALLENGE
+            );
+      }
       if (slug.includes('solo-leveling') || manga.id.includes('solo-leveling')) {
         return (fallbackChapters as any[]).map((c: any) => ({
           id: c.id.startsWith('onisaga:') ? c.id : `onisaga:${c.id.replace(/^\//, '')}`,
@@ -295,9 +461,6 @@ export class OniSagaParser extends BaseParser {
           number: c.number,
           url: c.url,
         }));
-      }
-      if (err?.isCloudFlare || err?.name === 'CloudFlareError' || err?.status === 403) {
-        throw err;
       }
     }
 

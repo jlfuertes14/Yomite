@@ -22,7 +22,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
+  TextInput, type TextInputInstance,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -86,7 +86,7 @@ export function SearchResultsModal({
 }: SearchResultsModalProps) {
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
   const requestIdRef = useRef(0);
   // Query whose results are currently rendered (used to avoid refetching when
   // the sheet is reopened from the source catalog).

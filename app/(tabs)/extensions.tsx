@@ -1745,24 +1745,29 @@ export default function ExtensionsScreen() {
           }
         }
       } catch (err: any) {
-        console.error('Error loading modal mangas:', err);
         const isCf =
           err.isCloudFlare ||
           (typeof err.message === 'string' &&
             (err.message.toLowerCase().includes('cloudflare') ||
               err.message.toLowerCase().includes('challenge') ||
               err.message.toLowerCase().includes('turnstile')));
+        if (!isCf) {
+          console.error('Error loading modal mangas:', err);
+        } else {
+          console.log('[Extensions] Source requires Cloudflare verification:', activeMangaSource?.name);
+        }
         const cfDomain =
           err.domain ||
           (activeMangaSource.id === 'manganato' ? 'manganato.gg' : '') ||
           (activeMangaSource.id === 'mangadot' ? 'mangadot.net' : '') ||
           (activeMangaSource.id === 'comick-fun' || activeMangaSource.id === 'comick' ? 'comick.dev' : '') ||
+          (activeMangaSource.id === 'onisaga' ? 'onisaga.com' : '') ||
           activeMangaSource.domain ||
           (activeMangaSource.id === 'comix-to' ? 'comix.to' : '') ||
           (activeMangaSource.id === 'reimanga' ? 'reimanga.net' : '');
         setModalIsCloudflare(!!isCf);
         setModalCfDomain(cfDomain);
-        setModalCfUrl(err.url || '');
+        setModalCfUrl(err.url || (cfDomain ? `https://${cfDomain}/` : ''));
 
         const errMsg = isCf
           ? `${activeMangaSource.name} requires a quick bot check to browse.`
@@ -3058,84 +3063,48 @@ export default function ExtensionsScreen() {
               <View style={[styles.modalEmptyBox, { paddingTop: catalogHeaderHeight + 20, paddingHorizontal: 24, paddingVertical: 32 }]}>
                 {modalIsCloudflare ? (
                   <View style={{ alignItems: 'center', width: '100%', maxWidth: 320 }}>
-                    {/* Flat Minimal Icon Badge */}
-                    <View
-                      style={{
-                        width: 54,
-                        height: 54,
-                        borderRadius: 18,
-                        backgroundColor: colors.surfaceElevated || colors.surface,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        marginBottom: 16,
-                        borderWidth: 1,
-                        borderColor: colors.border,
-                      }}
-                    >
-                      <Ionicons name="shield-checkmark" size={26} color={colors.accent} />
-                    </View>
-
-                    {/* Friendly Flat Title & Subtitle */}
-                    <Text style={{ fontSize: 17, fontWeight: '700', color: colors.text, textAlign: 'center' }}>
+                    <Ionicons name="shield-checkmark-outline" size={38} color={colors.accent} style={{ marginBottom: 12 }} />
+                    <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text, textAlign: 'center' }}>
                       Verification Required
                     </Text>
                     <Text
                       style={{
                         fontSize: 13,
-                        color: colors.textMuted,
+                        color: colors.textSecondary || '#D4D4D8',
                         textAlign: 'center',
-                        marginTop: 6,
+                        marginTop: 4,
                         lineHeight: 18,
+                        maxWidth: 280,
                       }}
                     >
                       {activeMangaSource.name} needs a quick human check to browse titles.
                     </Text>
-
-                    {/* Flat Modern Action Buttons */}
-                    <View style={{ flexDirection: 'row', gap: 10, marginTop: 22, width: '100%' }}>
-                      <Pressable
-                        onPress={handleSolveCloudflare}
-                        style={{
-                          flex: 1,
-                          height: 44,
-                          borderRadius: Radius.md,
+                    <Pressable
+                      onPress={handleSolveCloudflare}
+                      hitSlop={8}
+                      style={({ pressed }: any) => [
+                        {
+                          marginTop: 18,
+                          height: 38,
+                          paddingHorizontal: 22,
+                          borderRadius: Radius.full,
                           backgroundColor: colors.accent,
                           flexDirection: 'row',
                           alignItems: 'center',
                           justifyContent: 'center',
-                        }}
-                        aria-label="Verify with Source"
-                      >
-                        <Ionicons name="shield-checkmark-outline" size={16} color={colors.accentForeground} style={{ marginRight: 6 }} />
-                        <Text style={{ color: colors.accentForeground, fontSize: 13, fontWeight: '700' }}>
-                          Verify
-                        </Text>
-                      </Pressable>
-
-                      <Pressable
-                        onPress={() => {
-                          triggerHaptic();
-                          loadModalMangas(1, false);
-                        }}
-                        style={{
-                          flex: 1,
-                          height: 44,
-                          borderRadius: Radius.md,
-                          backgroundColor: colors.surfaceElevated || colors.surface,
-                          borderWidth: 1,
-                          borderColor: colors.border,
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                        aria-label="Retry loading mangas"
-                      >
-                        <Ionicons name="refresh" size={15} color={colors.text} style={{ marginRight: 6 }} />
-                        <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>
-                          Retry
-                        </Text>
-                      </Pressable>
-                    </View>
+                          borderWidth: 0,
+                        },
+                        pressed && { opacity: 0.8 },
+                        Platform.OS === 'web' && ({ cursor: 'pointer' } as any),
+                      ]}
+                      accessibilityRole="button"
+                      aria-label="Verify with Source"
+                    >
+                      <Ionicons name="shield-checkmark-outline" size={15} color={colors.accentForeground} style={{ marginRight: 6 }} />
+                      <Text style={{ color: colors.accentForeground, fontSize: 13, fontWeight: '700' }}>
+                        Verify
+                      </Text>
+                    </Pressable>
                   </View>
                 ) : (
                   <View style={{ alignItems: 'center', width: '100%', maxWidth: 320 }}>
@@ -3421,65 +3390,125 @@ export default function ExtensionsScreen() {
                 onRequestClose={() => setIsCfInAppModalOpen(false)}
               >
                 <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-                  {/* Clean Flat Header */}
+                  {/* Clean Flat Header - Zero Borders */}
                   <View
                     style={{
-                      height: 54,
+                      height: 56,
                       flexDirection: 'row',
                       alignItems: 'center',
                       justifyContent: 'space-between',
                       paddingHorizontal: 16,
-                      borderBottomWidth: 1,
-                      borderBottomColor: colors.border,
-                      backgroundColor: colors.surface,
+                      backgroundColor: colors.surface || colors.background,
                     }}
                   >
-                    <Pressable
-                      onPress={() => setIsCfInAppModalOpen(false)}
-                      hitSlop={12}
-                      style={{
-                        width: 36,
-                        height: 36,
-                        borderRadius: 18,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        backgroundColor: colors.surfaceElevated || colors.surface,
-                      }}
-                      aria-label="Close verification modal"
-                    >
-                      <Ionicons name="close" size={20} color={colors.text} />
-                    </Pressable>
-
-                    <View style={{ alignItems: 'center' }}>
-                      <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text }}>
-                        {activeMangaSource.name}
-                      </Text>
-                      <Text style={{ fontSize: 11, color: colors.textMuted }}>
-                        {modalCfDomain || activeMangaSource.domain}
-                      </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <View
+                        style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 10,
+                          backgroundColor: colors.surfaceElevated || 'rgba(255, 255, 255, 0.08)',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <Ionicons name="shield-checkmark" size={18} color={colors.accent} />
+                      </View>
+                      <View>
+                        <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text, letterSpacing: -0.2 }}>
+                          Verification
+                        </Text>
+                        <Text style={{ fontSize: 11, color: colors.textSecondary || '#D4D4D8', fontWeight: '500' }}>
+                          {activeMangaSource.name}
+                        </Text>
+                      </View>
                     </View>
 
-                    <Pressable
-                      onPress={() => {
-                        triggerHaptic();
-                        if (cfInAppUrl) {
-                          Linking.openURL(cfInAppUrl).catch(() => { });
-                        }
-                      }}
-                      hitSlop={8}
-                      style={{
-                        width: 36,
-                        height: 36,
-                        borderRadius: 18,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        backgroundColor: colors.surfaceElevated || colors.surface,
-                        marginLeft: 8,
-                      }}
-                      aria-label="Open in external browser"
-                    >
-                      <Ionicons name="open-outline" size={17} color={colors.text} />
-                    </Pressable>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Pressable
+                        onPress={() => {
+                          triggerHaptic();
+                          const domain = modalCfDomain || activeMangaSource.domain || (activeMangaSource.id === 'onisaga' ? 'onisaga.com' : '');
+                          if (domain) {
+                            webViewBridge.setDomainVerified(domain, true);
+                          }
+                          setIsCfInAppModalOpen(false);
+                          setModalError(null);
+                          setModalIsCloudflare(false);
+                          loadModalMangas(1, false);
+                        }}
+                        hitSlop={8}
+                        style={({ pressed }: any) => [
+                          {
+                            paddingHorizontal: 16,
+                            height: 34,
+                            borderRadius: Radius.full,
+                            backgroundColor: colors.accent,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexDirection: 'row',
+                            gap: 4,
+                          },
+                          pressed && { opacity: 0.8 },
+                          Platform.OS === 'web' && ({ cursor: 'pointer' } as any),
+                        ]}
+                        accessibilityRole="button"
+                        aria-label="Done Verification"
+                      >
+                        <Ionicons name="checkmark" size={15} color={colors.accentForeground} />
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: colors.accentForeground }}>
+                          Done
+                        </Text>
+                      </Pressable>
+
+                      <Pressable
+                        onPress={() => {
+                          triggerHaptic();
+                          const domain = modalCfDomain || activeMangaSource.domain || (activeMangaSource.id === 'onisaga' ? 'onisaga.com' : '');
+                          if (domain) {
+                            webViewBridge.setDomainVerified(domain, true);
+                          }
+                          setIsCfInAppModalOpen(false);
+                          setModalError(null);
+                          setModalIsCloudflare(false);
+                          loadModalMangas(1, false);
+                        }}
+                        hitSlop={8}
+                        style={({ pressed }: any) => [
+                          {
+                            width: 34,
+                            height: 34,
+                            borderRadius: 17,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            backgroundColor: colors.surfaceElevated || 'rgba(255, 255, 255, 0.08)',
+                          },
+                          pressed && { opacity: 0.7 },
+                          Platform.OS === 'web' && ({ cursor: 'pointer' } as any),
+                        ]}
+                        accessibilityRole="button"
+                        aria-label="Close verification modal"
+                      >
+                        <Ionicons name="close" size={18} color={colors.text} />
+                      </Pressable>
+                    </View>
+                  </View>
+
+                  {/* Dark Mode High-Contrast Helper Strip */}
+                  <View
+                    style={{
+                      paddingHorizontal: 16,
+                      paddingVertical: 9,
+                      backgroundColor: colors.surfaceElevated || '#121215',
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <Ionicons name="information-circle-outline" size={15} color={colors.accent} />
+                    <Text style={{ fontSize: 12, color: colors.textSecondary || '#D4D4D8', flex: 1, fontWeight: '500', lineHeight: 16 }}>
+                      Complete the check below. Yomite will automatically return once verified, or tap Done.
+                    </Text>
                   </View>
 
                   {/* WebView Body */}
@@ -3497,6 +3526,30 @@ export default function ExtensionsScreen() {
                       sharedCookiesEnabled={true}
                       thirdPartyCookiesEnabled={true}
                       style={{ flex: 1, backgroundColor: colors.background }}
+                      onLoadEnd={(syntheticEvent) => {
+                        const { nativeEvent } = syntheticEvent;
+                        const url = nativeEvent.url || '';
+                        const title = (nativeEvent.title || '').toLowerCase();
+                        const isCfTitle =
+                          title.includes('just a moment') ||
+                          title.includes('attention required') ||
+                          title.includes('security check') ||
+                          title.includes('checking your browser') ||
+                          title.includes('verify you are human') ||
+                          title.includes('cloudflare');
+                        const isCfHost =
+                          url.includes('challenges.cloudflare.com') ||
+                          url.includes('/cdn-cgi/challenge-platform/');
+
+                        const targetDomain = modalCfDomain || activeMangaSource.domain || (activeMangaSource.id === 'onisaga' ? 'onisaga.com' : '');
+                        const isTargetDomain = targetDomain && url.includes(targetDomain);
+
+                        if (isTargetDomain && !isCfTitle && !isCfHost) {
+                          cfWebViewRef.current?.injectJavaScript(
+                            '(function() { window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({ type: "CF_SOLVED", cookie: document.cookie || "", url: window.location.href })); })(); true;'
+                          );
+                        }
+                      }}
                       injectedJavaScript={`
                         (function() {
                           var interval = setInterval(function() {

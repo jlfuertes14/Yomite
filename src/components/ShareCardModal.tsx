@@ -41,7 +41,7 @@ export function ShareCardModal({
   coverUrl,
 }: ShareCardModalProps) {
   const colors = useThemeColors();
-  const cardRef = useRef<View>(null);
+  const cardRef = useRef<any>(null);
 
   const [quoteText, setQuoteText] = useState('');
   const [activeTheme, setActiveTheme] = useState(CARD_THEMES[0]);
@@ -52,7 +52,7 @@ export function ShareCardModal({
       setIsSharing(true);
       if (!cardRef.current) return;
 
-      const uri = await captureRef(cardRef, {
+      const uri = await captureRef(cardRef as any, {
         format: 'png',
         quality: 1.0,
       });

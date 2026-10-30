@@ -32,6 +32,7 @@ import { areTitlesSameManga } from '../../src/utils/mangaTitleNormalizer';
 import { SidebarDrawer } from '../../src/components/SidebarDrawer';
 import { LibraryCategoryModal } from '../../src/components/LibraryCategoryModal';
 import { ListOptionsModal, SortOption } from '../../src/components/ListOptionsModal';
+import { AppRefreshControl } from '../../src/components/AppRefreshControl';
 import { Skeleton } from '../../src/components/Skeleton';
 import { useDocumentTitle } from '../../src/utils/useDocumentTitle';
 import { triggerHaptic } from '../../src/utils/haptics';
@@ -1098,11 +1099,9 @@ export default function LibraryScreen() {
           <ScrollView
             contentContainerStyle={styles.emptyContainer}
             refreshControl={
-              <RefreshControl
+              <AppRefreshControl
                 refreshing={refreshing}
                 onRefresh={handleRefresh}
-                tintColor={colors.accent}
-                colors={[colors.accent]}
               />
             }
           >
@@ -1136,11 +1135,9 @@ export default function LibraryScreen() {
               { paddingHorizontal: horizontalPadding },
             ]}
             refreshControl={
-              <RefreshControl
+              <AppRefreshControl
                 refreshing={refreshing}
                 onRefresh={handleRefresh}
-                tintColor={colors.accent}
-                colors={[colors.accent]}
               />
             }
           >

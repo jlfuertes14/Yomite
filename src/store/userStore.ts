@@ -64,6 +64,7 @@ interface UserState {
   session: Session | null;
   isLoading: boolean;
   authSuccessMessage: string | null;
+  setAuthSuccessMessage: (msg: string | null) => void;
   clearAuthSuccessMessage: () => void;
   initializeAuth: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -121,6 +122,22 @@ export function getUserBannerUrl(user: User | null | undefined): string | null {
   return url.trim();
 }
 
+/**
+ * Helper to produce clean, platform-standard sign-in toast text
+ */
+export function getSignInToastMessage(user: User | null | undefined): string {
+  if (!user) return 'Signed in successfully.';
+  const handle = getUserHandle(user);
+  if (handle && handle !== 'reader' && handle !== 'guest') {
+    return `Signed in as @${handle}`;
+  }
+  const displayName = getUserDisplayName(user);
+  if (displayName && displayName !== 'Guest' && displayName !== 'Yomite Reader') {
+    return `Welcome back, ${displayName}!`;
+  }
+  return 'Signed in successfully.';
+}
+
 let isAuthInitialized = false;
 let authListenerSubscription: any = null;
 let deepLinkSubscription: any = null;
@@ -130,6 +147,7 @@ export const useUserStore = create<UserState>((set, get) => ({
   session: null,
   isLoading: true,
   authSuccessMessage: null,
+  setAuthSuccessMessage: (msg) => set({ authSuccessMessage: msg }),
   clearAuthSuccessMessage: () => set({ authSuccessMessage: null }),
 
   initializeAuth: async () => {
@@ -223,7 +241,7 @@ export const useUserStore = create<UserState>((set, get) => ({
                   session: data.session,
                   user: data.user,
                   isLoading: false,
-                  authSuccessMessage: 'Signed in with Google',
+                  authSuccessMessage: getSignInToastMessage(data.user),
                 });
                 if (data.user?.id) syncUserDataWithCloud(data.user.id);
               }
@@ -309,7 +327,11 @@ export const useUserStore = create<UserState>((set, get) => ({
       });
 
       if (!error && data.session) {
-        set({ session: data.session, user: data.user });
+        set({
+          session: data.session,
+          user: data.user,
+          authSuccessMessage: getSignInToastMessage(data.user),
+        });
         if (data.user?.id) syncUserDataWithCloud(data.user.id);
       }
       return { error, user: data?.user, session: data?.session };
@@ -323,7 +345,11 @@ export const useUserStore = create<UserState>((set, get) => ({
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (!error && data.session) {
-        set({ session: data.session, user: data.user });
+        set({
+          session: data.session,
+          user: data.user,
+          authSuccessMessage: getSignInToastMessage(data.user),
+        });
         if (data.user?.id) syncUserDataWithCloud(data.user.id);
       }
       return { error };
@@ -357,7 +383,7 @@ export const useUserStore = create<UserState>((set, get) => ({
           set({
             session: data.session,
             user: data.user,
-            authSuccessMessage: 'Signed in with Google',
+            authSuccessMessage: getSignInToastMessage(data.user),
           });
           if (data.user?.id) syncUserDataWithCloud(data.user.id);
         }
@@ -408,7 +434,7 @@ export const useUserStore = create<UserState>((set, get) => ({
               set({
                 session: sessionData.session,
                 user: sessionData.user,
-                authSuccessMessage: 'Signed in with Google',
+                authSuccessMessage: getSignInToastMessage(sessionData.user),
               });
               if (sessionData.user?.id) syncUserDataWithCloud(sessionData.user.id);
             }
@@ -449,6 +475,10 @@ export const useUserStore = create<UserState>((set, get) => ({
       }
     } catch (_) {}
     await supabase.auth.signOut();
-    set({ user: null, session: null });
+    set({
+      user: null,
+      session: null,
+      authSuccessMessage: 'Signed out',
+    });
   },
 }));

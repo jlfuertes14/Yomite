@@ -1,6 +1,11 @@
 /**
  * ConfirmationModal — Modern Minimalist Flat Dialog Modal
- * Flat design, crisp borders, zero drop shadows, centered across all viewports (Mobile & Web), theme-aware UI.
+ * Styled after Messenger's clean confirmation/delete dialog:
+ * - Distinct elevated dark gray card background (#242528) in dark mode, pure white in light mode
+ * - Clean typography-first design with NO top icons or button icon clutter
+ * - Flat design, zero borders, zero drop shadows
+ * - Text-only action buttons (no filled pill backgrounds, the text is enough)
+ * - 44x44pt touch targets with smooth press feedback
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
@@ -15,8 +20,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { getContrastTextColor } from '../../constants/Colors';
 import { useThemeColors } from '../hooks/useThemeColor';
+import { useColorScheme } from '../hooks/useColorScheme';
 import { triggerHaptic } from '../utils/haptics';
 
 interface ConfirmationModalProps {
@@ -37,8 +42,6 @@ export function ConfirmationModal({
   visible,
   title,
   message,
-  iconName = 'alert-circle-outline',
-  iconColor,
   confirmText = 'Confirm',
   cancelText = 'Cancel',
   confirmVariant = 'primary',
@@ -47,6 +50,8 @@ export function ConfirmationModal({
   onCancel,
 }: ConfirmationModalProps) {
   const colors = useThemeColors();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
 
   const backdropAnim = useRef(new Animated.Value(0)).current;
   const cardScaleAnim = useRef(new Animated.Value(0.95)).current;
@@ -151,19 +156,18 @@ export function ConfirmationModal({
 
   if (!rendered && !visible) return null;
 
-  const getConfirmBgColor = () => {
-    switch (confirmVariant) {
-      case 'success':
-        return colors.emerald || '#10B981';
-      case 'destructive':
-        return '#EF4444';
-      default:
-        return colors.accent;
-    }
-  };
+  // Messenger-style color tokens: elevated dark gray dialog in dark mode, crisp white in light mode
+  const cardBgColor = isDark ? '#242528' : '#FFFFFF';
+  const titleColor = isDark ? '#F4F4F5' : '#111827';
+  const messageColor = isDark ? '#B0B3B8' : '#64748B';
+  const cancelTextColor = isDark ? '#A1A1AA' : '#64748B';
 
-  const defaultIconColor =
-    iconColor || (confirmVariant === 'destructive' ? '#EF4444' : colors.accent);
+  const confirmTextColor =
+    confirmVariant === 'destructive'
+      ? '#EF4444'
+      : confirmVariant === 'success'
+        ? (colors.emerald || '#10B981')
+        : colors.accent;
 
   return (
     <Modal
@@ -191,33 +195,21 @@ export function ConfirmationModal({
           />
         </Animated.View>
 
-        {/* Flat Modern Dialog Card */}
+        {/* Messenger-style Flat Modern Dialog Card (Zero Icon Clutter, Clean Typography) */}
         <Animated.View
           style={[
             styles.card,
             {
-              backgroundColor: colors.surface,
+              backgroundColor: cardBgColor,
               opacity: cardOpacityAnim,
               transform: [{ scale: cardScaleAnim }],
             },
           ]}
           accessibilityRole="alert"
         >
-          {/* Flat Minimal Icon Pill */}
-          {iconName && (
-            <View
-              style={[
-                styles.iconBadge,
-                { backgroundColor: `${defaultIconColor}14` },
-              ]}
-            >
-              <Ionicons name={iconName} size={20} color={defaultIconColor} />
-            </View>
-          )}
-
           {/* Title & Message */}
           <Text
-            style={[styles.title, { color: colors.text }]}
+            style={[styles.title, { color: titleColor }]}
             numberOfLines={2}
             ellipsizeMode="tail"
           >
@@ -225,8 +217,8 @@ export function ConfirmationModal({
           </Text>
           {Boolean(message) && (
             <Text
-              style={[styles.message, { color: colors.textSecondary }]}
-              numberOfLines={3}
+              style={[styles.message, { color: messageColor }]}
+              numberOfLines={4}
               ellipsizeMode="tail"
             >
               {message}
@@ -235,25 +227,22 @@ export function ConfirmationModal({
 
           {children && <View style={styles.childrenWrapper}>{children}</View>}
 
-          {/* Action Buttons Row */}
+          {/* Messenger-style Action Buttons Row (Text-Only, Right-Aligned) */}
           <View style={styles.buttonRow}>
             {cancelText ? (
               <Pressable
                 onPress={handleCancel}
                 accessibilityRole="button"
                 accessibilityLabel={cancelText}
-                style={({ pressed, hovered }: any) => [
-                  styles.btn,
-                  styles.cancelBtn,
+                style={({ pressed }: any) => [
+                  styles.textBtn,
                   {
-                    backgroundColor: colors.surfaceElevated,
-                    transform: [{ scale: pressed ? 0.97 : 1 }],
-                    opacity: hovered ? 0.9 : 1,
+                    opacity: pressed ? 0.6 : 1,
                   },
                   Platform.OS === 'web' && { cursor: 'pointer' as any },
                 ]}
               >
-                <Text style={[styles.cancelBtnText, { color: colors.textSecondary }]}>
+                <Text style={[styles.cancelBtnText, { color: cancelTextColor }]}>
                   {cancelText}
                 </Text>
               </Pressable>
@@ -263,18 +252,17 @@ export function ConfirmationModal({
               onPress={handleConfirm}
               accessibilityRole="button"
               accessibilityLabel={confirmText}
-              style={({ pressed, hovered }: any) => [
-                styles.btn,
-                styles.confirmBtn,
+              style={({ pressed }: any) => [
+                styles.textBtn,
                 {
-                  backgroundColor: getConfirmBgColor(),
-                  transform: [{ scale: pressed ? 0.97 : 1 }],
-                  opacity: hovered ? 0.92 : 1,
+                  opacity: pressed ? 0.6 : 1,
                 },
                 Platform.OS === 'web' && { cursor: 'pointer' as any },
               ]}
             >
-              <Text style={[styles.confirmBtnText, { color: getContrastTextColor(getConfirmBgColor()) }]}>{confirmText}</Text>
+              <Text style={[styles.confirmBtnText, { color: confirmTextColor }]}>
+                {confirmText}
+              </Text>
             </Pressable>
           </View>
         </Animated.View>
@@ -292,43 +280,36 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
   },
   card: {
     width: '100%',
-    maxWidth: 320,
-    borderRadius: 18,
+    maxWidth: 340,
+    borderRadius: 20,
     borderWidth: 0,
-    paddingTop: 22,
-    paddingBottom: 18,
-    paddingHorizontal: 20,
-    alignItems: 'center',
+    paddingTop: 24,
+    paddingBottom: 16,
+    paddingHorizontal: 22,
+    alignItems: 'flex-start',
     // Strictly flat design: zero skeuomorphic elevation & drop-shadows
     elevation: 0,
     shadowOpacity: 0,
     shadowRadius: 0,
   },
-  iconBadge: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 14,
-  },
   title: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '700',
-    textAlign: 'center',
-    marginBottom: 6,
+    textAlign: 'left',
+    marginBottom: 8,
     letterSpacing: -0.3,
+    width: '100%',
   },
   message: {
-    fontSize: 13.5,
-    textAlign: 'center',
-    lineHeight: 19,
+    fontSize: 14,
+    textAlign: 'left',
+    lineHeight: 20,
     marginBottom: 20,
-    paddingHorizontal: 4,
+    width: '100%',
   },
   childrenWrapper: {
     width: '100%',
@@ -337,30 +318,26 @@ const styles = StyleSheet.create({
   buttonRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    justifyContent: 'flex-end',
+    gap: 8,
     width: '100%',
   },
-  btn: {
-    flex: 1,
-    height: 42,
-    borderRadius: 12,
+  textBtn: {
+    minHeight: 44,
+    minWidth: 64,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
-  },
-  cancelBtn: {
-    borderWidth: 0,
-  },
-  confirmBtn: {
+    backgroundColor: 'transparent',
     borderWidth: 0,
   },
   cancelBtnText: {
-    fontSize: 13.5,
+    fontSize: 14.5,
     fontWeight: '600',
   },
   confirmBtnText: {
-    color: '#FFFFFF',
-    fontSize: 13.5,
-    fontWeight: '600',
+    fontSize: 14.5,
+    fontWeight: '700',
   },
 });
