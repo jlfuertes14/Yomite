@@ -371,29 +371,35 @@ jobs:
           fi
           cp "$NOTES_TEMPLATE" release-notes.md
 
+          RELEASE_STATE="missing"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            IS_DRAFT="$(gh release view "$TAG" --json isDraft -q '.isDraft')"
-            if [[ "$IS_DRAFT" != "true" ]]; then
-              echo "::error::Release $TAG is already published"
-              exit 1
-            fi
-          echo "Resuming draft release $TAG"
-          else
-            gh release create "$TAG" \
-              --target "$GITHUB_SHA" \
-              --title "Yomite v$VERSION" \
-              --notes-file release-notes.md \
-              --draft
+            RELEASE_STATE="$(gh release view "$TAG" --json isDraft -q '.isDraft')"
           fi
 
-          gh release upload "$TAG" dist/Yomite-*.apk dist/SHA256SUMS --clobber
-          (cd dist && sha256sum -c SHA256SUMS)
-          gh release edit "$TAG" --notes-file release-notes.md --draft=false
+          if [[ "$RELEASE_STATE" == "false" ]]; then
+            echo "::notice::Release $TAG is already published; skipping publish and continuing with post-release steps."
+          else
+            if [[ "$RELEASE_STATE" == "missing" ]]; then
+              gh release create "$TAG" \
+                --target "$GITHUB_SHA" \
+                --title "Yomite v$VERSION" \
+                --notes-file release-notes.md \
+                --draft
+            else
+              echo "Resuming draft release $TAG"
+            fi
+
+            gh release upload "$TAG" dist/Yomite-*.apk dist/SHA256SUMS --clobber
+            (cd dist && sha256sum -c SHA256SUMS)
+            gh release edit "$TAG" --notes-file release-notes.md --draft=false
+          fi
+
           gh release view "$TAG" --json url -q '.url'
 
       - name: Sync release service and notify subscribers
         shell: bash
         env:
+          TAG: ${{ needs.meta.outputs.tag }}
           PARSER_RELEASE_SYNC_URL: ${{ vars.PARSER_RELEASE_SYNC_URL || 'https://yomite-parsers.onrender.com/api/releases/sync' }}
           PARSER_RELEASE_SYNC_SECRET: ${{ secrets.PARSER_RELEASE_SYNC_SECRET }}
         run: |
@@ -402,6 +408,9 @@ jobs:
             echo "::error::Missing GitHub secret PARSER_RELEASE_SYNC_SECRET"
             exit 1
           fi
-          curl --fail-with-body --silent --show-error \
+          if ! curl --fail-with-body --silent --show-error \
             -X POST "$PARSER_RELEASE_SYNC_URL" \
-            -H "x-release-sync-secret: $PARSER_RELEASE_SYNC_SECRET"
+            -H "x-release-sync-secret: $PARSER_RELEASE_SYNC_SECRET"; then
+            echo "::warning::Release $TAG is published, but the release sync service at $PARSER_RELEASE_SYNC_URL is unreachable. Subscribers were not notified; re-run the failed jobs once the service is available."
+            exit 0
+          fi
